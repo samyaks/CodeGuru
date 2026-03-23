@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "UpdateAI",
+  "version": "1.0.0",
+  "description": "Capture context from anywhere, sync across devices, collaborate in workspaces",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://docs.google.com/*",
+    "https://*.atlassian.net/*",
+    "https://*.slack.com/*",
+    "https://www.figma.com/*",
+    "https://github.com/*",
+    "https://www.notion.so/*",
+    "https://api.updateai.app/*",
+    "https://workspace.updateai.app/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker-simple.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://docs.google.com/document/*",
+        "https://docs.google.com/spreadsheets/*",
+        "https://docs.google.com/presentation/*"
+      ],
+      "js": ["src/content/google-detector.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.atlassian.net/*"],
+      "js": ["src/content/jira-detector.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.slack.com/*"],
+      "js": ["src/content/slack-detector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "UpdateAI",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

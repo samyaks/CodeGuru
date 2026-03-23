@@ -1,0 +1,32 @@
+{
+  "name": "codebase-analyzer",
+  "version": "1.0.0",
+  "description": "AI-powered codebase analysis for CTOs and tech leaders",
+  "main": "server/app.js",
+  "scripts": {
+    "dev": "nodemon server/app.js",
+    "start": "node server/app.js",
+    "client": "cd client && npm start"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@anthropic-ai/sdk": "^0.9.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "codebase-analysis",
+    "ai",
+    "cto",
+    "technical-due-diligence",
+    "architecture-analysis"
+  ],
+  "author": "CodeGuru",
+  "license": "MIT"
+}
+
+

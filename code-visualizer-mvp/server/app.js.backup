@@ -1,0 +1,549 @@
+// Code Visualizer Backend Server
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs').promises;
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Storage
+const PROJECTS_DIR = path.join(__dirname, 'projects');
+
+// Ensure projects directory exists
+async function initializeStorage() {
+  try {
+    await fs.mkdir(PROJECTS_DIR, { recursive: true });
+    console.log('📁 Projects directory ready');
+  } catch (error) {
+    console.error('❌ Failed to create projects directory:', error);
+  }
+}
+
+// Storage for SSE connections
+const projectConnections = {};
+
+// API Routes
+
+// Create new project
+app.post('/api/projects', async (req, res) => {
+  try {
+    const { userPrompt } = req.body;
+
+    if (!userPrompt) {
+      return res.status(400).json({ error: 'User prompt is required' });
+    }
+
+    const projectId = uuidv4();
+    const project = {
+      id: projectId,
+      userPrompt,
+      createdAt: new Date().toISOString(),
+      files: {},
+      commits: [],
+      userFeedback: {},
+      visualization: {
+        fileTree: [],
+        connections: [],
+        highlights: []
+      }
+    };
+
+    await saveProject(projectId, project);
+
+    console.log(`🚀 Created project ${projectId}: "${userPrompt}"`);
+
+    res.json({
+      projectId,
+      message: 'Project created successfully',
+      project: project
+    });
+
+  } catch (error) {
+    console.error('❌ Error creating project:', error);
+    res.status(500).json({ error: 'Failed to create project' });
+  }
+});
+
+// Get project details
+app.get('/api/projects/:projectId', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = await loadProject(projectId);
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    res.json(project);
+  } catch (error) {
+    console.error('❌ Error loading project:', error);
+    res.status(500).json({ error: 'Failed to load project' });
+  }
+});
+
+// Start AI building process
+app.post('/api/projects/:projectId/build', async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { request } = req.body;
+
+    const project = await loadProject(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    console.log(`🤖 Starting AI build for project ${projectId}: "${request}"`);
+
+    // Start the AI building process (async)
+    processAIBuildRequest(projectId, request, project);
+
+    res.json({
+      message: 'AI building process started',
+      status: 'building'
+    });
+
+  } catch (error) {
+    console.error('❌ Error starting AI build:', error);
+    res.status(500).json({ error: 'Failed to start AI build' });
+  }
+});
+
+// Record user feedback
+app.post('/api/projects/:projectId/commits/:commitId/feedback', async (req, res) => {
+  try {
+    const { projectId, commitId } = req.params;
+    const { feedback } = req.body;
+
+    const project = await loadProject(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    project.userFeedback[commitId] = {
+      ...feedback,
+      timestamp: new Date().toISOString()
+    };
+
+    await saveProject(projectId, project);
+
+    console.log(`👤 Feedback recorded for commit ${commitId}: ${feedback.type}`);
+
+    res.json({ message: 'Feedback recorded successfully' });
+
+  } catch (error) {
+    console.error('❌ Error recording feedback:', error);
+    res.status(500).json({ error: 'Failed to record feedback' });
+  }
+});
+
+// Get real-time updates (SSE)
+app.get('/api/projects/:projectId/stream', (req, res) => {
+  const { projectId } = req.params;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', projectId })}\n\n`);
+
+  if (!projectConnections[projectId]) {
+    projectConnections[projectId] = [];
+  }
+  projectConnections[projectId].push(res);
+
+  req.on('close', () => {
+    const connections = projectConnections[projectId] || [];
+    const index = connections.indexOf(res);
+    if (index !== -1) {
+      connections.splice(index, 1);
+    }
+  });
+});
+
+// Helper Functions
+async function saveProject(projectId, project) {
+  const filePath = path.join(PROJECTS_DIR, `${projectId}.json`);
+  await fs.writeFile(filePath, JSON.stringify(project, null, 2));
+}
+
+async function loadProject(projectId) {
+  try {
+    const filePath = path.join(PROJECTS_DIR, `${projectId}.json`);
+    const data = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function broadcastToProject(projectId, data) {
+  const connections = projectConnections[projectId] || [];
+  const message = `data: ${JSON.stringify(data)}\n\n`;
+
+  connections.forEach((res, index) => {
+    try {
+      res.write(message);
+    } catch (error) {
+      connections.splice(index, 1);
+    }
+  });
+}
+
+// AI Building Process
+async function processAIBuildRequest(projectId, request, project) {
+  try {
+    console.log(`🤖 Processing: "${request}" for project ${projectId}`);
+
+    const plan = await planImplementation(request, project);
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+
+      console.log(`📝 Executing step ${i + 1}/${plan.steps.length}: ${step.description}`);
+
+      const result = await executeStep(step, project);
+
+      const commit = {
+        id: uuidv4(),
+        message: step.description,
+        explanation: result.explanation,
+        files: result.files.map(f => f.path),
+        timestamp: new Date().toISOString(),
+        stepIndex: i + 1,
+        totalSteps: plan.steps.length
+      };
+
+      result.files.forEach(file => {
+        project.files[file.path] = {
+          content: file.content,
+          explanation: file.explanation,
+          addedInCommit: commit.id,
+          lastModified: commit.timestamp
+        };
+      });
+
+      project.commits.push(commit);
+      project.visualization = generateVisualization(project);
+
+      await saveProject(projectId, project);
+
+      broadcastToProject(projectId, {
+        type: 'commit',
+        commit: commit,
+        project: project
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+
+    broadcastToProject(projectId, {
+      type: 'completed',
+      message: 'AI building process completed!',
+      project: project
+    });
+
+    console.log(`✅ Completed AI build for project ${projectId}`);
+
+  } catch (error) {
+    console.error(`❌ Error in AI build process for project ${projectId}:`, error);
+    broadcastToProject(projectId, {
+      type: 'error',
+      error: 'Failed to complete AI build process'
+    });
+  }
+}
+
+async function planImplementation(request, project) {
+  console.log(`🧠 Planning implementation for: "${request}"`);
+
+  const requestLower = request.toLowerCase();
+  let steps = [];
+
+  if (requestLower.includes('todo') || requestLower.includes('task')) {
+    steps = [
+      {
+        description: 'Create HTML structure for todo app',
+        goal: 'Set up the basic webpage layout',
+        concepts: ['HTML', 'DOM structure', 'semantic markup']
+      },
+      {
+        description: 'Add CSS styling for todo interface',
+        goal: 'Make the app look clean and user-friendly',
+        concepts: ['CSS', 'styling', 'responsive design']
+      },
+      {
+        description: 'Implement JavaScript functionality',
+        goal: 'Add interactive features for managing todos',
+        concepts: ['JavaScript', 'event handling', 'DOM manipulation']
+      }
+    ];
+  } else {
+    steps = [
+      {
+        description: 'Initialize project structure',
+        goal: 'Create the foundation files for the web application',
+        concepts: ['project structure', 'HTML', 'CSS', 'JavaScript']
+      },
+      {
+        description: 'Build main application interface',
+        goal: 'Create the primary user interface',
+        concepts: ['UI design', 'user experience', 'responsive layout']
+      },
+      {
+        description: 'Add core functionality',
+        goal: 'Implement the main features requested',
+        concepts: ['interactive features', 'user interaction', 'application logic']
+      }
+    ];
+  }
+
+  return { steps, reasoning: 'Breaking into teachable steps', estimatedCommits: steps.length };
+}
+
+async function executeStep(step, project) {
+  const files = [];
+  const explanation = {
+    simple: step.description,
+    expandable: {
+      'Why this approach?': step.goal,
+      'What other ways could work?': 'There are other approaches, but this one is beginner-friendly',
+      'How does this work technically?': `This introduces: ${step.concepts.join(', ')}`,
+      'What happens next?': 'This sets up the foundation for the next features'
+    }
+  };
+
+  if (step.description.includes('HTML') || step.description.includes('structure')) {
+    files.push(generateHTMLFile(step, project));
+  }
+  if (step.description.includes('CSS') || step.description.includes('styling')) {
+    files.push(generateCSSFile(step, project));
+  }
+  if (step.description.includes('JavaScript') || step.description.includes('functionality')) {
+    files.push(generateJSFile(step, project));
+  }
+
+  if (files.length === 0) {
+    files.push(generateHTMLFile(step, project));
+    files.push(generateCSSFile(step, project));
+    files.push(generateJSFile(step, project));
+  }
+
+  return { files, explanation };
+}
+
+function generateHTMLFile(step, project) {
+  let content = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome to My App</h1>
+        <p>This is your new web application!</p>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>`;
+
+  if (step.description.includes('todo')) {
+    content = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>My Todo App</h1>
+        <div class="todo-input">
+            <input type="text" id="todoInput" placeholder="Add a new task...">
+            <button id="addBtn">Add Task</button>
+        </div>
+        <ul id="todoList"></ul>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>`;
+  }
+
+  return {
+    path: 'index.html',
+    content,
+    explanation: 'Main webpage that users will see and interact with',
+    isNew: !project.files['index.html']
+  };
+}
+
+function generateCSSFile(step, project) {
+  const content = `/* App Styles */
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f4f4;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+h1 {
+    color: #333;
+    text-align: center;
+}
+
+.todo-input {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+#todoInput {
+    flex: 1;
+    padding: 10px;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    font-size: 16px;
+}
+
+#addBtn {
+    padding: 10px 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+#todoList {
+    list-style: none;
+    padding: 0;
+}
+
+.todo-item {
+    background: #f8f9fa;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 5px;
+}`;
+
+  return {
+    path: 'style.css',
+    content,
+    explanation: 'Styles that make the webpage look good and user-friendly',
+    isNew: !project.files['style.css']
+  };
+}
+
+function generateJSFile(step, project) {
+  const content = `// App JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('App loaded successfully!');
+
+    const todoInput = document.getElementById('todoInput');
+    const addBtn = document.getElementById('addBtn');
+    const todoList = document.getElementById('todoList');
+
+    let todos = [];
+
+    function addTodo() {
+        const text = todoInput.value.trim();
+        if (text === '') return;
+
+        const todo = {
+            id: Date.now(),
+            text: text,
+            completed: false
+        };
+
+        todos.push(todo);
+        todoInput.value = '';
+        renderTodos();
+    }
+
+    function renderTodos() {
+        todoList.innerHTML = '';
+        todos.forEach(todo => {
+            const li = document.createElement('li');
+            li.className = 'todo-item';
+            li.textContent = todo.text;
+            todoList.appendChild(li);
+        });
+    }
+
+    if (addBtn) {
+        addBtn.addEventListener('click', addTodo);
+    }
+
+    if (todoInput) {
+        todoInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') addTodo();
+        });
+    }
+});`;
+
+  return {
+    path: 'script.js',
+    content,
+    explanation: 'JavaScript code that makes the webpage interactive',
+    isNew: !project.files['script.js']
+  };
+}
+
+function generateVisualization(project) {
+  const files = Object.keys(project.files);
+
+  return {
+    fileTree: files.map(path => ({
+      path,
+      type: path.endsWith('.html') ? 'html' :
+            path.endsWith('.css') ? 'css' :
+            path.endsWith('.js') ? 'javascript' : 'other'
+    })),
+    connections: [
+      { from: 'index.html', to: 'style.css', reason: 'styling' },
+      { from: 'index.html', to: 'script.js', reason: 'functionality' }
+    ].filter(conn => files.includes(conn.from) && files.includes(conn.to)),
+    highlights: files.slice(-2)
+  };
+}
+
+// Start server
+async function startServer() {
+  await initializeStorage();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Code Visualizer server running on port ${PORT}`);
+    console.log(`📊 API endpoints available at http://localhost:${PORT}/api`);
+  });
+}
+
+startServer().catch(error => {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
+});

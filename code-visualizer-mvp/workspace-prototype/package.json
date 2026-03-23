@@ -1,0 +1,12 @@
+{
+  "name": "updateai-workspace-prototype",
+  "version": "1.0.0",
+  "description": "Collaborative prompt workspace prototype",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "open": "open http://localhost:8000"
+  },
+  "keywords": ["collaboration", "prompts", "ai"],
+  "author": "UpdateAI",
+  "license": "MIT"
+}

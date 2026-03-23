@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UpdateAI - Collaborative Prompt Workspace</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">U</div>
+        <span class="logo-text">UpdateAI</span>
+      </div>
+      <div class="workspace-title">
+        <input type="text" id="workspaceName" value="Payment Gateway Integration" class="workspace-name-input" />
+        <span class="workspace-status">● Draft</span>
+      </div>
+    </div>
+    
+    <div class="header-right">
+      <!-- Collaborators -->
+      <div class="collaborators">
+        <div class="avatar" style="background: #ef4444;" title="You">Y</div>
+        <div class="avatar" style="background: #3b82f6;" title="Alex">A</div>
+        <div class="avatar-add">+</div>
+      </div>
+      
+      <!-- Actions -->
+      <button class="btn btn-secondary" id="importContext">
+        📥 Import Context
+      </button>
+      <button class="btn btn-primary" id="generateBtn">
+        ✨ Generate
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="main-layout">
+    <!-- Sidebar: Context Files -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>📁 Context Files</h3>
+        <div class="sidebar-actions">
+          <button class="btn-icon" id="addContextFile" title="Add context file">+</button>
+          <button class="btn-icon" id="collapseSidebar" title="Collapse sidebar">◀</button>
+        </div>
+      </div>
+      
+      <div class="context-files" id="contextFilesList">
+        <!-- Context files will be added here -->
+      </div>
+      
+      <div class="sidebar-footer">
+        <button class="btn btn-secondary btn-small" id="exportAll">
+          Export All
+        </button>
+      </div>
+    </aside>
+    
+    <!-- Collapsed Sidebar Toggle -->
+    <button class="sidebar-toggle hidden" id="sidebarToggle" title="Show context files">
+      ▶<span class="toggle-label">Context</span>
+    </button>
+
+    <!-- Main Content: Prompt Editor -->
+    <main class="main-content">
+      <div class="prompt-container">
+        <div class="prompt-header">
+          <div class="tabs">
+            <button class="tab active" data-tab="prompt">✍️ Prompt</button>
+            <button class="tab" data-tab="context">📎 Context</button>
+          </div>
+          
+          <div class="prompt-actions">
+            <span class="char-count" id="charCount">0 characters</span>
+            <button class="btn-icon" title="Clear">🗑️</button>
+          </div>
+        </div>
+        
+        <div class="prompt-editor" id="promptEditor">
+          <div class="dual-editors">
+            <!-- Your Prompt -->
+            <div class="editor-column">
+              <div class="editor-header">
+                <div class="avatar-small" style="background: #ef4444;">Y</div>
+                <span class="editor-label">Your Prompt</span>
+                <span class="char-count-small" id="charCountYours">0</span>
+              </div>
+              <textarea 
+                id="promptInputYours" 
+                class="prompt-textarea"
+                placeholder="Describe what you want to build...
+
+Example:
+- Core functionality needed
+- Main requirements
+- What success looks like"
+              ></textarea>
+            </div>
+
+            <!-- Friend's Prompt -->
+            <div class="editor-column">
+              <div class="editor-header">
+                <div class="avatar-small" style="background: #3b82f6;">A</div>
+                <span class="editor-label">Alex's Prompt</span>
+                <span class="char-count-small" id="charCountFriend">0</span>
+              </div>
+              <textarea 
+                id="promptInputFriend" 
+                class="prompt-textarea"
+                placeholder="Alex will add details here...
+
+Example:
+- Edge cases to consider
+- Error handling needs
+- Performance requirements"
+              ></textarea>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Context Panel (hidden by default) -->
+        <div class="context-panel hidden" id="contextPanel">
+          <div class="context-grid">
+            <div class="context-item" data-type="jira">
+              <div class="context-icon">📋</div>
+              <div class="context-info">
+                <div class="context-title">Jira • PROJ-124</div>
+                <div class="context-preview">The Stripe integration needs to support 3D Secure...</div>
+              </div>
+              <button class="btn-icon-small">×</button>
+            </div>
+            
+            <div class="context-item" data-type="slack">
+              <div class="context-icon">💬</div>
+              <div class="context-info">
+                <div class="context-title">Slack • #eng-payments</div>
+                <div class="context-preview">"We should use PaymentIntents API instead..."</div>
+              </div>
+              <button class="btn-icon-small">×</button>
+            </div>
+          </div>
+          
+          <button class="btn btn-secondary" id="addMoreContext">
+            + Add More Context
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Panel: Output -->
+    <aside class="output-panel" id="outputPanel">
+      <div class="output-header">
+        <h3>🎯 Generated Versions</h3>
+        <button class="btn-icon" id="closeOutput">×</button>
+      </div>
+      
+      <div class="output-tabs">
+        <button class="output-tab active" data-version="yours">Your Version</button>
+        <button class="output-tab" data-version="friend">Alex's Version</button>
+        <button class="output-tab" data-version="combined">Combined</button>
+      </div>
+      
+      <div class="output-content">
+        <div class="output-version active" data-version="yours">
+          <div class="output-meta">
+            <span class="output-label">Generated by You</span>
+            <span class="output-time">Just now</span>
+          </div>
+          <div class="output-text" id="outputYours">
+            <div class="loading">Generating...</div>
+          </div>
+          <div class="output-actions">
+            <button class="btn btn-secondary btn-small" onclick="copyOutput('yours')">📋 Copy</button>
+            <button class="btn btn-secondary btn-small" onclick="exportOutput('yours')">💾 Save</button>
+          </div>
+        </div>
+        
+        <div class="output-version" data-version="friend">
+          <div class="output-meta">
+            <span class="output-label">Generated by Alex</span>
+            <span class="output-time">Just now</span>
+          </div>
+          <div class="output-text" id="outputFriend">
+            <div class="loading">Generating...</div>
+          </div>
+          <div class="output-actions">
+            <button class="btn btn-secondary btn-small" onclick="copyOutput('friend')">📋 Copy</button>
+            <button class="btn btn-secondary btn-small" onclick="exportOutput('friend')">💾 Save</button>
+          </div>
+        </div>
+        
+        <div class="output-version" data-version="combined">
+          <div class="output-meta">
+            <span class="output-label">Combined Version</span>
+            <span class="output-time">Just now</span>
+          </div>
+          <div class="output-text" id="outputCombined">
+            <div class="loading">Generating...</div>
+          </div>
+          <div class="output-actions">
+            <button class="btn btn-secondary btn-small" onclick="copyOutput('combined')">📋 Copy</button>
+            <button class="btn btn-secondary btn-small" onclick="exportOutput('combined')">💾 Save</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Modal: Add Context File -->
+  <div class="modal" id="contextFileModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add Context File</h3>
+        <button class="btn-icon" onclick="closeModal('contextFileModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>File Name</label>
+          <input type="text" id="contextFileName" placeholder="e.g., API Requirements" class="input" />
+        </div>
+        <div class="form-group">
+          <label>Content</label>
+          <textarea id="contextFileContent" rows="8" placeholder="Paste your context here..." class="textarea"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('contextFileModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="addContextFile()">Add File</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

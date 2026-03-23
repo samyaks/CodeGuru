@@ -1,0 +1,15 @@
+{
+  "name": "@codeguru/auth",
+  "version": "1.0.0",
+  "description": "Shared Supabase Auth wrapper for CodeGuru apps — GitHub, Google, and email auth with Express middleware",
+  "main": "index.js",
+  "keywords": ["auth", "supabase", "oauth", "express", "middleware"],
+  "author": "CodeGuru",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0"
+  },
+  "peerDependencies": {
+    "express": "^4.18.0"
+  }
+}
