@@ -1,0 +1,91 @@
+# Quick start — How to use these files
+
+## Setup
+
+1. Open your CodeGuru repo in Cursor
+2. Copy these 3 files into the ROOT of your CodeGuru repo:
+   - `CONTEXT.md` → the full build plan (Cursor reads this for context)
+   - `.cursorrules` → tells Cursor how to behave in this project
+   - `SPEC.md` → the .context.md specification (reference for generation)
+
+3. Commit them so they persist:
+   ```
+   git add CONTEXT.md .cursorrules SPEC.md
+   git commit -m "Add build context for UpdateAI pivot"
+   ```
+
+## Building with Cursor
+
+Open Cursor chat (Cmd+L) and work through the build steps one at a time.
+Reference CONTEXT.md in each prompt so Cursor uses the full plan.
+
+### Prompt sequence:
+
+**Step 1 — Project setup:**
+```
+Read CONTEXT.md. Set up the app/ directory structure described in the
+"Architecture" section. Create the root package.json with workspaces.
+Copy packages/auth as-is. Copy code-reviewer/server/services/github.js
+to app/server/services/github.js. Copy code-reviewer/server/lib/sse.js
+to app/server/lib/sse.js. Create the Express server with a health check
+endpoint. Create the React client with Tailwind.
+```
+
+**Step 2 — Analyzer service:**
+```
+Read CONTEXT.md, specifically the "Server: services/analyzer.js" section.
+Build the analyzer service that uses the GitHub API (already in
+app/server/services/github.js) to read a real repo. It should:
+1. Parse the repo URL
+2. Fetch repo metadata and file tree
+3. Smart-select which files to read (max 30)
+4. Read file contents via GitHub API
+5. Build the codebase model object described in CONTEXT.md
+Create the POST /api/analyze endpoint. Test with a real public repo.
+```
+
+**Step 3 — Context generator:**
+```
+Read CONTEXT.md, specifically the "Server: services/context-generator.js"
+section and the Claude prompt guidance. Build the context generator that
+takes the codebase model from the analyzer and generates .context.md files
+using Claude API with streaming. Generate three types:
+1. App-level context (root .context.md)
+2. Feature-level context (per directory)
+3. Gap-specific context (prescriptive specs for missing capabilities)
+Use SSE to stream progress to the client. Follow the .context.md spec
+in SPEC.md for the output format.
+```
+
+**Step 4 — Client pages:**
+```
+Read CONTEXT.md, specifically the "Client: Key pages" section. Build:
+1. Landing page with repo URL input and "Analyze" button
+2. Analysis page that shows real-time progress via SSE
+3. Results page that displays generated .context.md files in cards,
+   with completion percentage, gap identification, copy-to-clipboard,
+   and download-all-as-zip. Use Tailwind for styling.
+```
+
+**Step 5 — Auth + persistence:**
+```
+Read CONTEXT.md, specifically the "Auth flow" and "Database" sections.
+Wire up the @codeguru/auth package (already in packages/auth/).
+Set up Supabase with the projects table from CONTEXT.md.
+Add Dashboard page showing past analyses. Add save/load.
+Reference code-reviewer/server/app.js for how auth is wired up.
+```
+
+## Tips
+
+- If Cursor generates code that doesn't match the plan, say:
+  "Check CONTEXT.md — the architecture should be [X]"
+
+- If a step isn't working, ask Cursor to debug with:
+  "This endpoint returns [error]. The expected behavior per CONTEXT.md is [X]"
+
+- Keep the existing sub-projects (code-reviewer, codebase-analyzer, etc.)
+  as reference but build everything new in app/
+
+- Test each step before moving on. The build order in CONTEXT.md is
+  designed so each step works independently.
