@@ -42,6 +42,36 @@ function getDb() {
       severity TEXT CHECK(severity IN ('critical', 'warning', 'info', 'ok')),
       FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS fix_prompts (
+      id TEXT PRIMARY KEY,
+      short_id TEXT NOT NULL UNIQUE,
+      review_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      line_start INTEGER,
+      line_end INTEGER,
+      issue_category TEXT,
+      issue_title TEXT NOT NULL,
+      issue_description TEXT NOT NULL,
+      severity TEXT,
+      code_snippet TEXT,
+      reference_file_path TEXT,
+      reference_snippet TEXT,
+      related_files TEXT,
+      full_prompt TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS fix_prompt_events (
+      id TEXT PRIMARY KEY,
+      fix_prompt_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN ('page_view', 'copy_prompt', 'deeplink_click', 'feedback_up', 'feedback_down')),
+      deeplink_target TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (fix_prompt_id) REFERENCES fix_prompts(id) ON DELETE CASCADE
+    );
   `);
 
   return db;
@@ -135,4 +165,49 @@ const reviewFiles = {
   },
 };
 
-module.exports = { getDb, reviews, reviewFiles };
+const fixPrompts = {
+  create(prompt) {
+    const db = getDb();
+    const stmt = db.prepare(`
+      INSERT INTO fix_prompts (id, short_id, review_id, file_path, line_start, line_end,
+        issue_category, issue_title, issue_description, severity, code_snippet,
+        reference_file_path, reference_snippet, related_files, full_prompt, created_at, expires_at)
+      VALUES (@id, @short_id, @review_id, @file_path, @line_start, @line_end,
+        @issue_category, @issue_title, @issue_description, @severity, @code_snippet,
+        @reference_file_path, @reference_snippet, @related_files, @full_prompt, @created_at, @expires_at)
+    `);
+    stmt.run({
+      ...prompt,
+      related_files: typeof prompt.related_files === 'string' ? prompt.related_files : JSON.stringify(prompt.related_files || []),
+    });
+    return prompt;
+  },
+
+  findByShortId(shortId) {
+    const db = getDb();
+    return db.prepare('SELECT * FROM fix_prompts WHERE short_id = ? AND expires_at > ?').get(shortId, new Date().toISOString());
+  },
+
+  findByReviewId(reviewId) {
+    const db = getDb();
+    return db.prepare('SELECT * FROM fix_prompts WHERE review_id = ? ORDER BY file_path, line_start').all(reviewId);
+  },
+
+  shortIdExists(shortId) {
+    const db = getDb();
+    return !!db.prepare('SELECT 1 FROM fix_prompts WHERE short_id = ?').get(shortId);
+  },
+};
+
+const fixPromptEvents = {
+  create(event) {
+    const db = getDb();
+    db.prepare(`
+      INSERT INTO fix_prompt_events (id, fix_prompt_id, event_type, deeplink_target, created_at)
+      VALUES (@id, @fix_prompt_id, @event_type, @deeplink_target, @created_at)
+    `).run(event);
+    return event;
+  },
+};
+
+module.exports = { getDb, reviews, reviewFiles, fixPrompts, fixPromptEvents };

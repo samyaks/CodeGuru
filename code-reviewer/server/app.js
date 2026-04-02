@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const healthRoutes = require('./routes/health');
 const reviewRoutes = require('./routes/reviews');
 const githubRoutes = require('./routes/github');
+const fixPromptRoutes = require('./routes/fix-prompts');
 const { getDb } = require('./lib/db');
 
 const { createClient, createAuthRouter, requireAuth, optionalAuth } = require('@codeguru/auth');
@@ -34,6 +35,9 @@ app.use(createAuthRouter({
   afterLogin: `${FRONTEND_URL}/`,
   afterLogout: `${FRONTEND_URL}/`,
 }));
+
+// Public routes (no auth required)
+app.use('/api/fix', fixPromptRoutes);
 
 app.use('/api', requireAuth(supabase));
 

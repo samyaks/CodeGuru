@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -21,7 +21,7 @@ import {
   Lightbulb,
 } from 'lucide-react';
 import { useReview } from '../hooks/useReview';
-import { parseReport, updateHumanNotes, Finding, DeploymentInfo } from '../services/api';
+import { parseReport, updateHumanNotes, fetchFixPromptsByReview, Finding, DeploymentInfo, FixPromptSummary } from '../services/api';
 import FileReviewCard from '../components/FileReviewCard';
 import HumanNotes from '../components/HumanNotes';
 
@@ -35,6 +35,13 @@ export default function ReviewReport() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { review, loading, error } = useReview(id || null);
+  const [fixPrompts, setFixPrompts] = useState<FixPromptSummary[]>([]);
+
+  useEffect(() => {
+    if (review?.status === 'completed' && id) {
+      fetchFixPromptsByReview(id).then(setFixPrompts).catch(() => {});
+    }
+  }, [review?.status, id]);
 
   if (loading) {
     return (
@@ -171,6 +178,7 @@ export default function ReviewReport() {
                   file={f}
                   findings={findingsPerFile.get(f.file_path) || []}
                   reviewId={review.id}
+                  fixPrompts={fixPrompts.filter((fp) => fp.file_path === f.file_path)}
                 />
               ))}
             </div>

@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, FileCode } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ChevronRight, FileCode, Wand2 } from 'lucide-react';
 import SeverityBadge from './SeverityBadge';
 import DiffViewer from './DiffViewer';
 import HumanNotes from './HumanNotes';
-import { ReviewFile, Finding, updateFileComments } from '../services/api';
+import { ReviewFile, Finding, FixPromptSummary, updateFileComments } from '../services/api';
 
 interface Props {
   file: ReviewFile;
   findings: Finding[];
   reviewId: string;
+  fixPrompts?: FixPromptSummary[];
 }
 
-export default function FileReviewCard({ file, findings, reviewId }: Props) {
+export default function FileReviewCard({ file, findings, reviewId, fixPrompts = [] }: Props) {
   const [expanded, setExpanded] = useState(file.severity === 'critical' || file.severity === 'warning');
+
+  const findFixPrompt = (finding: Finding): FixPromptSummary | undefined => {
+    return fixPrompts.find(
+      (fp) =>
+        fp.file_path === finding.file &&
+        fp.issue_title === finding.title &&
+        fp.severity === finding.severity
+    );
+  };
 
   return (
     <div className={`file-card file-card-${file.severity || 'ok'}`}>
@@ -37,17 +48,31 @@ export default function FileReviewCard({ file, findings, reviewId }: Props) {
           {findings.length > 0 && (
             <div className="file-findings">
               <h4>AI Findings</h4>
-              {findings.map((f, i) => (
-                <div key={i} className={`finding finding-${f.severity}`}>
-                  <div className="finding-header">
-                    <SeverityBadge severity={f.severity} size="sm" />
-                    <span className="finding-category">{f.category}</span>
-                    {f.line && <span className="finding-line">Line {f.line}</span>}
+              {findings.map((f, i) => {
+                const fix = findFixPrompt(f);
+                return (
+                  <div key={i} className={`finding finding-${f.severity}`}>
+                    <div className="finding-header">
+                      <SeverityBadge severity={f.severity} size="sm" />
+                      <span className="finding-category">{f.category}</span>
+                      {f.line && <span className="finding-line">Line {f.line}</span>}
+                      {fix && (
+                        <Link
+                          to={`/fix/${fix.short_id}`}
+                          className="fix-btn"
+                          onClick={(e) => e.stopPropagation()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Wand2 size={12} /> Fix with AI
+                        </Link>
+                      )}
+                    </div>
+                    <div className="finding-title">{f.title}</div>
+                    <div className="finding-desc">{f.description}</div>
                   </div>
-                  <div className="finding-title">{f.title}</div>
-                  <div className="finding-desc">{f.description}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

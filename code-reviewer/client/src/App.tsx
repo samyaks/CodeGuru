@@ -7,6 +7,7 @@ import ReviewProgress from './pages/ReviewProgress';
 import ReviewReport from './pages/ReviewReport';
 import LoginPage from './pages/LoginPage';
 import AuthCallback from './pages/AuthCallback';
+import FixPromptPage from './pages/FixPromptPage';
 import './App.css';
 
 function AppContent() {
@@ -23,6 +24,7 @@ function AppContent() {
           <div className="app">
             <Routes>
               <Route path="/auth/callback" element={<AuthCallback />} />
+              <Route path="/fix/:shortId" element={<FixPromptPage />} />
               <Route path="*" element={<LoginPage />} />
             </Routes>
           </div>
@@ -40,6 +42,7 @@ function AppContent() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/review/:id/progress" element={<ReviewProgress />} />
             <Route path="/review/:id" element={<ReviewReport />} />
+            <Route path="/fix/:shortId" element={<FixPromptPage />} />
           </Routes>
         </div>
       </BrowserRouter>

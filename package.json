@@ -1,0 +1,8 @@
+{
+  "name": "codeguru",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "app"
+  ]
+}

@@ -182,3 +182,51 @@ export async function fetchRepoPulls(
   if (!res.ok) throw new Error('Failed to fetch pull requests');
   return res.json();
 }
+
+/* ========== Fix Prompts ========== */
+
+export interface FixPromptSummary {
+  id: string;
+  short_id: string;
+  file_path: string;
+  line_start: number | null;
+  line_end: number | null;
+  issue_category: string;
+  issue_title: string;
+  issue_description: string;
+  severity: string;
+}
+
+export interface FixPromptFull extends FixPromptSummary {
+  code_snippet: string | null;
+  reference_file_path: string | null;
+  reference_snippet: string | null;
+  related_files: { path: string; reason: string }[];
+  full_prompt: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export async function fetchFixPromptsByReview(reviewId: string): Promise<FixPromptSummary[]> {
+  const res = await authFetch(`${API_BASE}/reviews/${reviewId}/fix-prompts`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchFixPrompt(shortId: string): Promise<FixPromptFull> {
+  const res = await fetch(`${API_BASE}/fix/${shortId}`);
+  if (!res.ok) throw new Error('Fix prompt not found or expired');
+  return res.json();
+}
+
+export async function postFixEvent(
+  shortId: string,
+  eventType: string,
+  deeplinkTarget?: string
+): Promise<void> {
+  await fetch(`${API_BASE}/fix/${shortId}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event_type: eventType, deeplink_target: deeplinkTarget }),
+  });
+}
