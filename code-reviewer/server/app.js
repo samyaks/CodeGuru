@@ -10,7 +10,7 @@ const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
 const { getDb } = require('./lib/db');
 
-const { createClient, createAuthRouter, requireAuth, optionalAuth } = require('@codeguru/auth');
+const { createClient, createAuthRouter, requireAuth } = require('@codeguru/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3003;

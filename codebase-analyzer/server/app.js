@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3002;
 
 // Initialize Claude API
 const anthropic = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 // Middleware
