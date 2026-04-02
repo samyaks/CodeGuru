@@ -1,7 +1,11 @@
 const express = require('express');
 const github = require('../services/github');
+const { createRateLimit } = require('../lib/rate-limit');
 
 const router = express.Router();
+
+const githubRateLimit = createRateLimit({ windowMs: 60000, max: 30, message: 'Too many GitHub API requests. Please try again in a minute.' });
+router.use(githubRateLimit);
 
 router.get('/repos', async (req, res) => {
   try {

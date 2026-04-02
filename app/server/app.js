@@ -68,9 +68,28 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+function validateEnv() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn('⚠️  WARNING: ANTHROPIC_API_KEY is not set. Analysis and review features will fail.');
+  }
+  if (!process.env.GITHUB_TOKEN) {
+    console.info('ℹ️  GITHUB_TOKEN not set. Using unauthenticated GitHub API (60 req/hr limit).');
+  }
+  const hasUrl = !!process.env.SUPABASE_URL;
+  const hasKey = !!process.env.SUPABASE_ANON_KEY;
+  if (hasUrl !== hasKey) {
+    console.warn('⚠️  WARNING: Only one of SUPABASE_URL/SUPABASE_ANON_KEY is set. Auth will be disabled.');
+  }
+  if (hasUrl && hasKey && !process.env.SUPABASE_REDIRECT_URL) {
+    console.warn('⚠️  WARNING: SUPABASE_REDIRECT_URL is not set. OAuth callbacks may fail.');
+  }
+}
+
 async function start() {
   getDb();
   console.log('Database initialized');
+
+  validateEnv();
 
   app.listen(PORT, () => {
     console.log(`CodeGuru server running on port ${PORT}`);

@@ -5,32 +5,25 @@ const { addConnection, broadcast } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
 const { generateContextFiles } = require('../services/context-generator');
+const { createRateLimit } = require('../lib/rate-limit');
+const { validateRepoUrl, validatePagination } = require('../lib/validate');
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+const analyzeRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many analysis requests. Please try again in a minute.' });
+
+router.post('/', analyzeRateLimit, async (req, res) => {
   try {
     const { repoUrl } = req.body;
     if (!repoUrl) {
       return res.status(400).json({ error: 'repoUrl is required' });
     }
 
-    let hostname;
-    try {
-      hostname = new URL(repoUrl).hostname;
-    } catch {
-      return res.status(400).json({ error: 'Please provide a valid URL' });
+    const validation = validateRepoUrl(repoUrl);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
     }
-    if (hostname !== 'github.com' && hostname !== 'www.github.com') {
-      return res.status(400).json({ error: 'Please provide a valid GitHub repository URL' });
-    }
-
-    let owner, repo;
-    try {
-      ({ owner, repo } = github.parseRepoUrl(repoUrl));
-    } catch {
-      return res.status(400).json({ error: 'Could not parse owner/repo from URL. Expected format: https://github.com/owner/repo' });
-    }
+    const { owner, repo } = validation;
 
     const id = uuidv4();
     analyses.create({
@@ -40,6 +33,7 @@ router.post('/', async (req, res) => {
       repo,
       status: 'pending',
       created_at: new Date().toISOString(),
+      user_id: req.user?.id || null,
     });
 
     setImmediate(() => runAnalysis(id, repoUrl));
@@ -112,8 +106,8 @@ router.get('/:id', (req, res) => {
 });
 
 router.get('/', (req, res) => {
-  const { limit = 20, offset = 0 } = req.query;
-  const list = analyses.list({ limit: parseInt(limit, 10), offset: parseInt(offset, 10) });
+  const { limit, offset } = validatePagination(req.query);
+  const list = analyses.list({ limit, offset, userId: req.user?.id || null });
   res.json(list.map((a) => ({
     id: a.id,
     repo_url: a.repo_url,

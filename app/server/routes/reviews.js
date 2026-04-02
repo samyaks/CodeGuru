@@ -6,10 +6,14 @@ const github = require('../services/github');
 const reviewer = require('../services/reviewer');
 const { detectDeploymentFiles, detectDeploymentInPR } = require('../services/deployment');
 const { generateFixPrompts } = require('../services/fix-prompt');
+const { createRateLimit } = require('../lib/rate-limit');
+const { validatePagination } = require('../lib/validate');
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+const reviewRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many review requests. Please try again in a minute.' });
+
+router.post('/', reviewRateLimit, async (req, res) => {
   try {
     const { repoUrl, prNumber, type = 'pr', branch } = req.body;
     if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
@@ -21,23 +25,25 @@ router.post('/', async (req, res) => {
         repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
         prNumber: parsed.prNumber, type,
         owner: parsed.owner, repo: parsed.repo, branch,
+        userId: req.user?.id || null,
       });
     }
 
     const { owner, repo } = github.parseRepoUrl(repoUrl);
-    return createReview(res, { repoUrl, prNumber: prNumber || null, type, owner, repo, branch: branch || null });
+    return createReview(res, { repoUrl, prNumber: prNumber || null, type, owner, repo, branch: branch || null, userId: req.user?.id || null });
   } catch (err) {
     console.error('Error creating review:', err);
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch }) {
+async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch, userId }) {
   const id = uuidv4();
   reviews.create({
     id, type, repo_url: repoUrl, owner, repo,
     pr_number: prNumber, branch: branch || null,
     status: 'pending', created_at: new Date().toISOString(),
+    user_id: userId || null,
   });
 
   setImmediate(() => startReview(id));
@@ -163,8 +169,8 @@ async function runRepoReview(reviewId, review) {
 }
 
 router.get('/', (req, res) => {
-  const { limit = 20, offset = 0 } = req.query;
-  res.json(reviews.list({ limit: parseInt(limit, 10), offset: parseInt(offset, 10) }));
+  const { limit, offset } = validatePagination(req.query);
+  res.json(reviews.list({ limit, offset, userId: req.user?.id || null }));
 });
 
 router.get('/:id', (req, res) => {

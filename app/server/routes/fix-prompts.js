@@ -1,34 +1,11 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { fixPrompts, fixPromptEvents } = require('../lib/db');
+const { createRateLimit } = require('../lib/rate-limit');
 
 const router = express.Router();
 
-const rateLimitMap = new Map();
-const RATE_LIMIT = 60;
-const RATE_WINDOW = 60 * 1000;
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now - entry.windowStart > RATE_WINDOW) rateLimitMap.delete(ip);
-  }
-}, RATE_WINDOW);
-
-function rateLimit(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress;
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-  if (!entry || now - entry.windowStart > RATE_WINDOW) {
-    rateLimitMap.set(ip, { windowStart: now, count: 1 });
-    return next();
-  }
-  entry.count++;
-  if (entry.count > RATE_LIMIT) {
-    return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
-  }
-  next();
-}
+const rateLimit = createRateLimit({ windowMs: 60000, max: 60, message: 'Too many requests. Try again in a minute.' });
 
 router.get('/:shortId', rateLimit, (req, res) => {
   const prompt = fixPrompts.findByShortId(req.params.shortId);

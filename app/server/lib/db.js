@@ -29,7 +29,8 @@ function getDb() {
       human_notes TEXT,
       error TEXT,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      user_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS review_files (
@@ -83,9 +84,14 @@ function getDb() {
       context_files TEXT,
       completion_pct INTEGER,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      user_id TEXT
     );
   `);
+
+  // Migrate existing databases: add user_id columns if missing
+  try { db.exec('ALTER TABLE reviews ADD COLUMN user_id TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE analyses ADD COLUMN user_id TEXT'); } catch (_) {}
 
   return db;
 }
@@ -93,14 +99,20 @@ function getDb() {
 const reviews = {
   create(review) {
     const d = getDb();
-    d.prepare(`INSERT INTO reviews (id, type, repo_url, owner, repo, pr_number, branch, status, created_at)
-      VALUES (@id, @type, @repo_url, @owner, @repo, @pr_number, @branch, @status, @created_at)`).run(review);
+    d.prepare(`INSERT INTO reviews (id, type, repo_url, owner, repo, pr_number, branch, status, created_at, user_id)
+      VALUES (@id, @type, @repo_url, @owner, @repo, @pr_number, @branch, @status, @created_at, @user_id)`).run({
+      ...review,
+      user_id: review.user_id || null,
+    });
     return review;
   },
   findById(id) {
     return getDb().prepare('SELECT * FROM reviews WHERE id = ?').get(id);
   },
-  list({ limit = 20, offset = 0 } = {}) {
+  list({ limit = 20, offset = 0, userId = null } = {}) {
+    if (userId) {
+      return getDb().prepare('SELECT * FROM reviews WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(userId, limit, offset);
+    }
     return getDb().prepare('SELECT * FROM reviews ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset);
   },
   updateStatus(id, status, extra = {}) {
@@ -185,19 +197,25 @@ const fixPromptEvents = {
 };
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
-  'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at',
+  'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at', 'user_id',
 ]);
 
 const analyses = {
   create(analysis) {
-    getDb().prepare(`INSERT INTO analyses (id, repo_url, owner, repo, status, created_at)
-      VALUES (@id, @repo_url, @owner, @repo, @status, @created_at)`).run(analysis);
+    getDb().prepare(`INSERT INTO analyses (id, repo_url, owner, repo, status, created_at, user_id)
+      VALUES (@id, @repo_url, @owner, @repo, @status, @created_at, @user_id)`).run({
+      ...analysis,
+      user_id: analysis.user_id || null,
+    });
     return analysis;
   },
   findById(id) {
     return getDb().prepare('SELECT * FROM analyses WHERE id = ?').get(id);
   },
-  list({ limit = 20, offset = 0 } = {}) {
+  list({ limit = 20, offset = 0, userId = null } = {}) {
+    if (userId) {
+      return getDb().prepare('SELECT * FROM analyses WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(userId, limit, offset);
+    }
     return getDb().prepare('SELECT * FROM analyses ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset);
   },
   update(id, fields) {
