@@ -157,14 +157,13 @@ app.get('/api/analyses/:id/stream', (req, res) => {
 function broadcastToAnalysis(analysisId, data) {
   const connections = analysisConnections.get(analysisId) || [];
   const message = `data: ${JSON.stringify(data)}\n\n`;
-  
-  connections.forEach((res, index) => {
+  for (let i = connections.length - 1; i >= 0; i--) {
     try {
-      res.write(message);
-    } catch (error) {
-      connections.splice(index, 1);
+      connections[i].write(message);
+    } catch {
+      connections.splice(i, 1);
     }
-  });
+  }
 }
 
 // Perform the actual analysis

@@ -266,14 +266,13 @@ async function loadProject(projectId) {
 function broadcastToProject(projectId, data) {
   const connections = projectConnections[projectId] || [];
   const message = `data: ${JSON.stringify(data)}\n\n`;
-
-  connections.forEach((res, index) => {
+  for (let i = connections.length - 1; i >= 0; i--) {
     try {
-      res.write(message);
-    } catch (error) {
-      connections.splice(index, 1);
+      connections[i].write(message);
+    } catch {
+      connections.splice(i, 1);
     }
-  });
+  }
 }
 
 // AI Building Process
