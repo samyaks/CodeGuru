@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Github, Sparkles } from 'lucide-react';
 import RepoInput from '../components/RepoInput';
+import UserMenu from '../components/UserMenu';
 import { analyzeRepo } from '../services/api';
 
 const EXAMPLES = [
@@ -43,6 +44,7 @@ export default function Landing() {
           >
             Dashboard
           </button>
+          <UserMenu />
           <a
             href="https://github.com/samyaks/CodeGuru"
             target="_blank"

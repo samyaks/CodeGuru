@@ -67,6 +67,43 @@ export async function fetchFixPrompts(reviewId: string) {
   return res.json();
 }
 
+// Fix prompts
+export interface FixPromptFull {
+  short_id: string;
+  file_path: string;
+  line_start: number | null;
+  line_end: number | null;
+  issue_category: string;
+  issue_title: string;
+  issue_description: string;
+  severity: string;
+  code_snippet: string;
+  reference_file_path: string | null;
+  reference_snippet: string | null;
+  related_files: { path: string; reason: string }[];
+  full_prompt: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export async function fetchFixPrompt(shortId: string): Promise<FixPromptFull> {
+  const res = await authFetch(`${API_BASE}/fix/${shortId}`);
+  if (!res.ok) throw new Error('Fix prompt not found');
+  return res.json();
+}
+
+export async function postFixEvent(
+  shortId: string,
+  eventType: string,
+  deeplinkTarget?: string,
+) {
+  await authFetch(`${API_BASE}/fix/${shortId}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event_type: eventType, deeplink_target: deeplinkTarget }),
+  });
+}
+
 // GitHub
 export async function searchGitHubRepos(query: string) {
   const res = await authFetch(`${API_BASE}/github/repos?search=${encodeURIComponent(query)}`);
