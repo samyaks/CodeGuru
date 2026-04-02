@@ -8,6 +8,7 @@ import Results from './pages/Results';
 import ReviewProgress from './pages/ReviewProgress';
 import ReviewReport from './pages/ReviewReport';
 import FixPrompt from './pages/FixPrompt';
+import NotFound from './pages/NotFound';
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuthProvider();
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/review/:id/progress" element={<ReviewProgress />} />
             <Route path="/review/:id" element={<ReviewReport />} />
             <Route path="/fix/:shortId" element={<FixPrompt />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

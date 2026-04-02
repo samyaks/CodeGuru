@@ -4,6 +4,7 @@ import {
   Copy, Check, ThumbsUp, ThumbsDown, Terminal, Code2,
   AlertCircle, AlertTriangle, Info, Loader,
 } from 'lucide-react';
+import Header from '../components/Header';
 import { fetchFixPrompt, postFixEvent, FixPromptFull } from '../services/api';
 
 const severityStyles: Record<string, string> = {
@@ -94,8 +95,8 @@ export default function FixPrompt() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <Header backTo="/dashboard" title="Fix Prompt" />
       <div className="max-w-3xl w-full mx-auto px-6 py-10 space-y-6">
-        {/* Header */}
         <div className="space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sev}`}>
@@ -117,19 +118,16 @@ export default function FixPrompt() {
           </p>
         </div>
 
-        {/* Description */}
         {prompt.issue_description && (
           <p className="text-sm text-neutral-300 leading-relaxed">{prompt.issue_description}</p>
         )}
 
-        {/* Stale warning */}
         {isStale && (
           <div className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
             This fix prompt was generated over 24 hours ago. Line numbers may have shifted if the PR was updated.
           </div>
         )}
 
-        {/* Copy button */}
         <button
           onClick={handleCopy}
           className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-colors ${
@@ -141,7 +139,6 @@ export default function FixPrompt() {
           {copied ? <><Check size={18} /> Copied to clipboard!</> : <><Copy size={18} /> Copy fix prompt to clipboard</>}
         </button>
 
-        {/* Deeplinks */}
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs text-neutral-500">Then paste into:</span>
           {[
@@ -159,7 +156,6 @@ export default function FixPrompt() {
           ))}
         </div>
 
-        {/* Full prompt */}
         <div className="rounded-xl border border-neutral-800 overflow-hidden">
           <div className="px-4 py-2.5 bg-neutral-800/60 border-b border-neutral-800 text-xs font-medium text-neutral-400">
             Fix Prompt
@@ -169,7 +165,6 @@ export default function FixPrompt() {
           </pre>
         </div>
 
-        {/* Related files */}
         {prompt.related_files.length > 0 && (
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-neutral-300">Related Files</h3>
@@ -184,7 +179,6 @@ export default function FixPrompt() {
           </div>
         )}
 
-        {/* Feedback */}
         <div className="flex items-center gap-4">
           <span className="text-sm text-neutral-400">Was this helpful?</span>
           <div className="flex items-center gap-2">
@@ -214,7 +208,6 @@ export default function FixPrompt() {
           {feedback && <span className="text-xs text-neutral-500">Thanks for the feedback!</span>}
         </div>
 
-        {/* Footer */}
         <div className="pt-4 border-t border-neutral-800/50 text-center text-xs text-neutral-600">
           Powered by <strong className="text-neutral-500">CodeGuru</strong> &middot;
           Expires {new Date(prompt.expires_at).toLocaleDateString()}

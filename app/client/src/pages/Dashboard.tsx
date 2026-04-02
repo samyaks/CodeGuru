@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, FolderGit2, FileText, Loader, ExternalLink } from 'lucide-react';
+import { FolderGit2, FileText, Loader, ExternalLink } from 'lucide-react';
+import Header from '../components/Header';
 import { fetchAnalyses, fetchReviews } from '../services/api';
 
 interface Analysis {
@@ -43,12 +44,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen">
-      <header className="flex items-center gap-4 px-6 py-4 border-b border-neutral-800/50">
-        <Link to="/" className="text-neutral-400 hover:text-white transition-colors">
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-lg font-semibold">Dashboard</h1>
-      </header>
+      <Header backTo="/" title="Dashboard" />
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         <div className="flex gap-1 mb-6 bg-neutral-900/50 rounded-lg p-1 w-fit">

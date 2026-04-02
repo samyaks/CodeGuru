@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Github, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
+import Header from '../components/Header';
 import RepoInput from '../components/RepoInput';
-import UserMenu from '../components/UserMenu';
 import { analyzeRepo } from '../services/api';
 
 const EXAMPLES = [
@@ -30,31 +30,7 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/50">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center font-bold text-sm">
-            C
-          </div>
-          <span className="font-semibold text-lg">CodeGuru</span>
-        </div>
-        <nav className="flex items-center gap-4">
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="text-sm text-neutral-400 hover:text-white transition-colors"
-          >
-            Dashboard
-          </button>
-          <UserMenu />
-          <a
-            href="https://github.com/samyaks/CodeGuru"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-neutral-400 hover:text-white transition-colors"
-          >
-            <Github size={20} />
-          </a>
-        </nav>
-      </header>
+      <Header />
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24">
         <div className="max-w-2xl w-full text-center space-y-8">

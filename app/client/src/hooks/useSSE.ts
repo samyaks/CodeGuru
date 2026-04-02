@@ -1,9 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-
-interface SSEMessage {
-  type: string;
-  [key: string]: unknown;
-}
+import type { SSEMessage } from '../types/sse';
 
 export function useSSE(url: string | null) {
   const [messages, setMessages] = useState<SSEMessage[]>([]);

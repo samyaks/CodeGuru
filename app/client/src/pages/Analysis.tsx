@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader, Check, Circle, AlertCircle } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Loader, Check, Circle, AlertCircle } from 'lucide-react';
+import Header from '../components/Header';
 import { useSSE } from '../hooks/useSSE';
 import { fetchAnalysis } from '../services/api';
 
@@ -44,13 +45,12 @@ export default function Analysis() {
       }
       if (msg.type === 'analysis-error') {
         setFailed(true);
-        setCurrentMessage((msg as any).error || 'Analysis failed');
+        setCurrentMessage(msg.error || 'Analysis failed');
         lastProcessed.current = messages.length;
         return;
       }
       if (msg.type === 'progress') {
-        const phase = (msg as any).phase as string;
-        const message = (msg as any).message as string;
+        const { phase, message } = msg;
         if (message) setCurrentMessage(message);
 
         setSteps((prev) => {
@@ -80,12 +80,7 @@ export default function Analysis() {
 
   return (
     <div className="min-h-screen">
-      <header className="flex items-center gap-4 px-6 py-4 border-b border-neutral-800/50">
-        <Link to="/" className="text-neutral-400 hover:text-white transition-colors">
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-lg font-semibold">Analyzing...</h1>
-      </header>
+      <Header backTo="/" title="Analyzing..." />
 
       <main className="max-w-2xl mx-auto px-6 py-16">
         <div className="flex flex-col items-center space-y-8 text-center">

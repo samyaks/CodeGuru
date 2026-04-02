@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Loader, AlertTriangle, CheckCircle, Info, FileText, ExternalLink } from 'lucide-react';
+import { Loader, AlertTriangle, CheckCircle, Info, FileText, ExternalLink } from 'lucide-react';
+import Header from '../components/Header';
 import { fetchReview, fetchFixPrompts } from '../services/api';
 
 interface Finding {
@@ -72,12 +73,7 @@ export default function ReviewReport() {
   if (error || !review) {
     return (
       <div className="min-h-screen">
-        <header className="flex items-center gap-4 px-6 py-4 border-b border-neutral-800/50">
-          <Link to="/dashboard" className="text-neutral-400 hover:text-white transition-colors">
-            <ArrowLeft size={20} />
-          </Link>
-          <h1 className="text-lg font-semibold">Error</h1>
-        </header>
+        <Header backTo="/dashboard" title="Error" />
         <main className="max-w-4xl mx-auto px-6 py-12 text-center">
           <p className="text-red-400">{error || 'Review not found'}</p>
           <Link to="/dashboard" className="text-violet-400 underline mt-4 inline-block">Go back</Link>
@@ -93,20 +89,15 @@ export default function ReviewReport() {
 
   return (
     <div className="min-h-screen">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/50">
-        <div className="flex items-center gap-4">
-          <Link to="/dashboard" className="text-neutral-400 hover:text-white transition-colors">
-            <ArrowLeft size={20} />
-          </Link>
-          <div>
-            <h1 className="text-lg font-semibold">
-              {review.owner}/{review.repo}
-              {review.pr_number && <span className="text-neutral-500"> #{review.pr_number}</span>}
-            </h1>
-            <p className="text-xs text-neutral-500">{review.type} review</p>
-          </div>
+      <Header backTo="/dashboard">
+        <div>
+          <h1 className="text-lg font-semibold">
+            {review.owner}/{review.repo}
+            {review.pr_number && <span className="text-neutral-500"> #{review.pr_number}</span>}
+          </h1>
+          <p className="text-xs text-neutral-500">{review.type} review</p>
         </div>
-      </header>
+      </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {report?.summary && (

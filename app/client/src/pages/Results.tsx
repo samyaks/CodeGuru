@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, FileText, Download, Loader, Copy, Check, AlertTriangle, CheckCircle } from 'lucide-react';
+import { FileText, Download, Loader, Copy, Check, AlertTriangle, CheckCircle } from 'lucide-react';
+import Header from '../components/Header';
 import { fetchAnalysis } from '../services/api';
 
 interface ContextFile {
@@ -68,12 +69,7 @@ export default function Results() {
   if (error || !data) {
     return (
       <div className="min-h-screen">
-        <header className="flex items-center gap-4 px-6 py-4 border-b border-neutral-800/50">
-          <Link to="/" className="text-neutral-400 hover:text-white transition-colors">
-            <ArrowLeft size={20} />
-          </Link>
-          <h1 className="text-lg font-semibold">Error</h1>
-        </header>
+        <Header backTo="/dashboard" title="Error" />
         <main className="max-w-4xl mx-auto px-6 py-12 text-center">
           <p className="text-red-400">{error || 'Analysis not found'}</p>
           <Link to="/" className="text-violet-400 underline mt-4 inline-block">Go back</Link>
@@ -89,29 +85,23 @@ export default function Results() {
 
   return (
     <div className="min-h-screen">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/50">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-neutral-400 hover:text-white transition-colors">
-            <ArrowLeft size={20} />
-          </Link>
-          <div>
-            <h1 className="text-lg font-semibold">{data.owner}/{data.repo}</h1>
-            <p className="text-xs text-neutral-500">Analysis Results</p>
-          </div>
-        </div>
-        {contextFiles.length > 0 && (
-          <button
-            onClick={downloadAll}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
-          >
-            <Download size={14} />
-            Download all
-          </button>
-        )}
-      </header>
+      <Header backTo="/dashboard" title="Results">
+        <span className="text-sm text-neutral-400">{data.owner}/{data.repo}</span>
+      </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
-        {/* Completion bar */}
+        {contextFiles.length > 0 && (
+          <div className="flex justify-end">
+            <button
+              onClick={downloadAll}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+            >
+              <Download size={14} />
+              Download all
+            </button>
+          </div>
+        )}
+
         <div className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Completion</h2>
@@ -142,7 +132,6 @@ export default function Results() {
           )}
         </div>
 
-        {/* Existing context files */}
         {existingFiles.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -161,7 +150,6 @@ export default function Results() {
           </div>
         )}
 
-        {/* Gap files */}
         {gapFiles.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
