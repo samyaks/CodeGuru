@@ -1,11 +1,11 @@
 const connections = new Map();
 
-function addConnection(id, res) {
+function addConnection(id, res, { origin } = {}) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Headers': 'Cache-Control',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   });

@@ -236,4 +236,11 @@ const analyses = {
   },
 };
 
-module.exports = { getDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses };
+function closeDb() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses };

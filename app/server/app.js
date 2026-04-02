@@ -9,12 +9,16 @@ const analyzeRoutes = require('./routes/analyze');
 const reviewRoutes = require('./routes/reviews');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
-const { getDb } = require('./lib/db');
+const { getDb, closeDb } = require('./lib/db');
+const { requestLogger } = require('./lib/logger');
+const { AppError } = require('./lib/app-error');
 
 const { createClient, createAuthRouter, requireAuth } = require('@codeguru/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+app.use(requestLogger());
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
@@ -64,8 +68,11 @@ if (supabase) {
 }
 
 app.use((err, req, res, _next) => {
+  if (err instanceof AppError) {
+    return res.status(err.statusCode).json({ error: err.message, code: err.code });
+  }
   console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
 });
 
 function validateEnv() {
@@ -85,13 +92,15 @@ function validateEnv() {
   }
 }
 
+let server;
+
 async function start() {
   getDb();
   console.log('Database initialized');
 
   validateEnv();
 
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     console.log(`CodeGuru server running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`API: http://localhost:${PORT}/api/analyze`);
@@ -102,6 +111,23 @@ async function start() {
     }
   });
 }
+
+function shutdown() {
+  console.log('Shutting down gracefully...');
+  if (server) {
+    server.close(() => {
+      closeDb();
+      console.log('Server closed');
+      process.exit(0);
+    });
+  } else {
+    closeDb();
+    process.exit(0);
+  }
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 start().catch((err) => {
   console.error('Failed to start server:', err);

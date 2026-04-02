@@ -195,7 +195,7 @@ router.get('/:id/fix-prompts', (req, res) => {
 router.get('/:id/stream', (req, res) => {
   const review = reviews.findById(req.params.id);
   if (!review) return res.status(404).json({ error: 'Review not found' });
-  addConnection(req.params.id, res);
+  addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 });
 
 router.patch('/:id', (req, res) => {

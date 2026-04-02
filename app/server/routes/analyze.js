@@ -123,7 +123,7 @@ router.get('/', (req, res) => {
 router.get('/:id/stream', (req, res) => {
   const analysis = analyses.findById(req.params.id);
   if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
-  addConnection(req.params.id, res);
+  addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 });
 
 module.exports = router;
