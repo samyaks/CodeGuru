@@ -12,3 +12,6 @@ build/
 .next/
 .DS_Store
 *.log
+
+# Deployment artifacts (built by CI or Docker, not committed)
+app/client/dist/

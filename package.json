@@ -4,5 +4,11 @@
   "workspaces": [
     "packages/*",
     "app"
-  ]
+  ],
+  "scripts": {
+    "dev": "npm run dev --prefix app",
+    "build": "npm run build --prefix app/client",
+    "start": "NODE_ENV=production node app/server/app.js",
+    "typecheck": "npx tsc --noEmit --project app/client/tsconfig.json"
+  }
 }

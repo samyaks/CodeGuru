@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const path = require('path');
 
 const healthRoutes = require('./routes/health');
 const analyzeRoutes = require('./routes/analyze');
@@ -65,6 +66,15 @@ if (supabase) {
 } else {
   app.use('/api/reviews', reviewRoutes);
   app.use('/api/github', githubRoutes);
+}
+
+// Production: serve built React app as static files
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = path.join(__dirname, '..', 'client', 'dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
 }
 
 app.use((err, req, res, _next) => {

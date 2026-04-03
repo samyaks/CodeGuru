@@ -1,0 +1,16 @@
+services:
+  codeguru:
+    build: .
+    ports:
+      - "${PORT:-3001}:3001"
+    env_file:
+      - app/.env
+    environment:
+      - NODE_ENV=production
+    volumes:
+      # Persist SQLite data across container restarts
+      - codeguru-data:/app/app/server/data
+    restart: unless-stopped
+
+volumes:
+  codeguru-data:

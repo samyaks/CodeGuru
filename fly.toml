@@ -1,0 +1,23 @@
+app = "codeguru"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 3001
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+
+[mounts]
+  source = "codeguru_data"
+  destination = "/app/app/server/data"
