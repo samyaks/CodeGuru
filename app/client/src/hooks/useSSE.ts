@@ -20,9 +20,9 @@ export function useSSE(url: string | null) {
 
     source.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as SSEMessage;
-        if (data.type !== 'heartbeat') {
-          setMessages((prev) => [...prev, data]);
+        const raw = JSON.parse(event.data) as { type: string; [key: string]: unknown };
+        if (raw.type !== 'heartbeat') {
+          setMessages((prev) => [...prev, raw as SSEMessage]);
         }
       } catch {
         // ignore non-JSON messages
