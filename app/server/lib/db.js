@@ -89,9 +89,10 @@ function getDb() {
     );
   `);
 
-  // Migrate existing databases: add user_id columns if missing
+  // Migrate existing databases
   try { db.exec('ALTER TABLE reviews ADD COLUMN user_id TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE analyses ADD COLUMN user_id TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE analyses ADD COLUMN features_summary TEXT'); } catch (_) {}
 
   return db;
 }
@@ -197,7 +198,7 @@ const fixPromptEvents = {
 };
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
-  'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at', 'user_id',
+  'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at', 'user_id', 'features_summary',
 ]);
 
 const analyses = {

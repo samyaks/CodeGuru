@@ -5,6 +5,7 @@ const { addConnection, broadcast } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
 const { generateContextFiles } = require('../services/context-generator');
+const { describeFeatures } = require('../services/features-describer');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl, validatePagination } = require('../lib/validate');
 
@@ -65,10 +66,18 @@ async function runAnalysis(id, repoUrl) {
 
     const { contextFiles, completionPct } = await generateContextFiles(id, codebaseModel);
 
+    let featuresSummary = null;
+    try {
+      featuresSummary = await describeFeatures(id, codebaseModel);
+    } catch (err) {
+      console.error(`Features description for ${id} failed (non-fatal):`, err.message);
+    }
+
     analyses.update(id, {
       status: 'completed',
       context_files: contextFiles,
       completion_pct: completionPct,
+      features_summary: featuresSummary,
       completed_at: new Date().toISOString(),
     });
 
@@ -77,9 +86,10 @@ async function runAnalysis(id, repoUrl) {
       id,
       completionPct,
       contextFileCount: contextFiles.length,
+      hasFeaturesSummary: !!featuresSummary,
     });
 
-    console.log(`Analysis ${id} completed: ${completionPct}% complete, ${contextFiles.length} context files`);
+    console.log(`Analysis ${id} completed: ${completionPct}% complete, ${contextFiles.length} context files, features: ${!!featuresSummary}`);
   } catch (err) {
     console.error(`Analysis ${id} failed:`, err);
     analyses.update(id, { status: 'failed' });
@@ -102,6 +112,7 @@ router.get('/:id', (req, res) => {
       console.warn(`Failed to parse context_files JSON for ${req.params.id}:`, e.message);
     }
   }
+  // features_summary is plain text, no parsing needed
   res.json(result);
 });
 

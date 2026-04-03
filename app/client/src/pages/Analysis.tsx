@@ -17,6 +17,7 @@ const INITIAL_STEPS: Step[] = [
   { label: 'Analyzing key files', phase: 'reading', status: 'pending' },
   { label: 'Detecting tech stack & gaps', phase: 'analyzing', status: 'pending' },
   { label: 'Generating .context.md files', phase: 'generating', status: 'pending' },
+  { label: 'Describing what this project does', phase: 'describing', status: 'pending' },
 ];
 
 export default function Analysis() {
@@ -61,6 +62,7 @@ export default function Analysis() {
             analyzing: 2, complete: 2,
             generating: 3, 'context-start': 3, 'context-app': 3,
             'context-feature': 3, 'context-gap': 3, 'context-done': 3,
+            describing: 4, 'describing-done': 4,
           };
 
           const idx = phaseMap[phase];

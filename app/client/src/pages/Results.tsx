@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FileText, Download, Loader, Copy, Check, AlertTriangle, CheckCircle } from 'lucide-react';
+import { FileText, Download, Loader, Copy, Check, AlertTriangle, CheckCircle, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import Header from '../components/Header';
 import { fetchAnalysis } from '../services/api';
 
@@ -18,6 +18,7 @@ interface AnalysisData {
   status: string;
   completion_pct: number;
   context_files: ContextFile[];
+  features_summary: string | null;
   analysis: any;
 }
 
@@ -27,6 +28,7 @@ export default function Results() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [summaryCopied, setSummaryCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -39,6 +41,13 @@ export default function Results() {
     await navigator.clipboard.writeText(content);
     setCopiedIdx(idx);
     setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
+  const copySummary = async () => {
+    if (!data?.features_summary) return;
+    await navigator.clipboard.writeText(data.features_summary);
+    setSummaryCopied(true);
+    setTimeout(() => setSummaryCopied(false), 2000);
   };
 
   const downloadFile = (file: ContextFile) => {
@@ -90,18 +99,16 @@ export default function Results() {
       </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
-        {contextFiles.length > 0 && (
-          <div className="flex justify-end">
-            <button
-              onClick={downloadAll}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
-            >
-              <Download size={14} />
-              Download all
-            </button>
-          </div>
+        {/* Plain-English explanation — the main thing */}
+        {data.features_summary && (
+          <FeaturesSummary
+            summary={data.features_summary}
+            copied={summaryCopied}
+            onCopy={copySummary}
+          />
         )}
 
+        {/* Completion overview */}
         <div className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Completion</h2>
@@ -131,6 +138,18 @@ export default function Results() {
             </div>
           )}
         </div>
+
+        {contextFiles.length > 0 && (
+          <div className="flex justify-end">
+            <button
+              onClick={downloadAll}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+            >
+              <Download size={14} />
+              Download all context files
+            </button>
+          </div>
+        )}
 
         {existingFiles.length > 0 && (
           <div className="space-y-4">
@@ -168,10 +187,10 @@ export default function Results() {
           </div>
         )}
 
-        {contextFiles.length === 0 && (
+        {contextFiles.length === 0 && !data.features_summary && (
           <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
             <FileText size={48} className="text-neutral-600" />
-            <h2 className="text-xl font-semibold text-neutral-300">No context files generated</h2>
+            <h2 className="text-xl font-semibold text-neutral-300">No results generated</h2>
             <p className="text-neutral-500">The analysis may still be in progress.</p>
           </div>
         )}
@@ -179,6 +198,95 @@ export default function Results() {
     </div>
   );
 }
+
+
+function FeaturesSummary({ summary, copied, onCopy }: { summary: string; copied: boolean; onCopy: () => void }) {
+  const sections = parseSummaryIntoSections(summary);
+
+  return (
+    <div className="bg-gradient-to-br from-violet-950/40 to-neutral-900/60 border border-violet-500/20 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-violet-500/10">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-violet-500/10">
+            <BookOpen size={20} className="text-violet-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-white">What this project does</h2>
+            <p className="text-xs text-neutral-400">Plain-English explanation — no technical jargon</p>
+          </div>
+        </div>
+        <button
+          onClick={onCopy}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-colors"
+        >
+          {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <div className="px-6 py-5 space-y-5">
+        {sections.map((section, i) => (
+          <SummarySection key={i} title={section.title} content={section.content} defaultOpen={i === 0} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SummarySection({ title, content, defaultOpen }: { title: string; content: string; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 w-full text-left group"
+      >
+        {open
+          ? <ChevronDown size={16} className="text-violet-400 flex-shrink-0" />
+          : <ChevronRight size={16} className="text-neutral-500 group-hover:text-violet-400 flex-shrink-0" />
+        }
+        <h3 className="text-sm font-semibold text-violet-300 group-hover:text-violet-200 transition-colors">
+          {title}
+        </h3>
+      </button>
+      {open && (
+        <div className="mt-2 ml-6 text-sm text-neutral-300 leading-relaxed whitespace-pre-wrap">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseSummaryIntoSections(text: string): { title: string; content: string }[] {
+  const lines = text.split('\n');
+  const sections: { title: string; content: string }[] = [];
+  let currentTitle = '';
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^##\s+(.+)/);
+    if (headingMatch) {
+      if (currentTitle) {
+        sections.push({ title: currentTitle, content: currentLines.join('\n').trim() });
+      }
+      currentTitle = headingMatch[1];
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  if (currentTitle) {
+    sections.push({ title: currentTitle, content: currentLines.join('\n').trim() });
+  }
+
+  if (sections.length === 0) {
+    sections.push({ title: 'Summary', content: text.trim() });
+  }
+
+  return sections;
+}
+
 
 function ContextCard({ file, copied, onCopy }: { file: ContextFile; copied: boolean; onCopy: () => void }) {
   const [expanded, setExpanded] = useState(false);
