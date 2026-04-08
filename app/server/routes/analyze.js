@@ -8,43 +8,36 @@ const { generateContextFiles } = require('../services/context-generator');
 const { describeFeatures } = require('../services/features-describer');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl, validatePagination } = require('../lib/validate');
+const { AppError } = require('../lib/app-error');
+const { asyncHandler } = require('../lib/async-handler');
 
 const router = express.Router();
 
 const analyzeRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many analysis requests. Please try again in a minute.' });
 
-router.post('/', analyzeRateLimit, async (req, res) => {
-  try {
-    const { repoUrl } = req.body;
-    if (!repoUrl) {
-      return res.status(400).json({ error: 'repoUrl is required' });
-    }
+router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
+  const { repoUrl } = req.body;
+  if (!repoUrl) throw AppError.badRequest('repoUrl is required');
 
-    const validation = validateRepoUrl(repoUrl);
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
-    }
-    const { owner, repo } = validation;
+  const validation = validateRepoUrl(repoUrl);
+  if (!validation.valid) throw AppError.badRequest(validation.error);
+  const { owner, repo } = validation;
 
-    const id = uuidv4();
-    analyses.create({
-      id,
-      repo_url: repoUrl,
-      owner,
-      repo,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      user_id: req.user?.id || null,
-    });
+  const id = uuidv4();
+  analyses.create({
+    id,
+    repo_url: repoUrl,
+    owner,
+    repo,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    user_id: req.user?.id || null,
+  });
 
-    setImmediate(() => runAnalysis(id, repoUrl));
+  setImmediate(() => runAnalysis(id, repoUrl));
 
-    res.status(201).json({ projectId: id, status: 'pending' });
-  } catch (err) {
-    console.error('Error creating analysis:', err);
-    res.status(err.status || 500).json({ error: err.message });
-  }
-});
+  res.status(201).json({ projectId: id, status: 'pending' });
+}));
 
 async function runAnalysis(id, repoUrl) {
   try {
@@ -97,9 +90,9 @@ async function runAnalysis(id, repoUrl) {
   }
 }
 
-router.get('/:id', (req, res) => {
+router.get('/:id', asyncHandler(async (req, res) => {
   const analysis = analyses.findById(req.params.id);
-  if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
+  if (!analysis) throw AppError.notFound('Analysis not found');
 
   const result = { ...analysis };
   if (result.analysis) {
@@ -112,11 +105,10 @@ router.get('/:id', (req, res) => {
       console.warn(`Failed to parse context_files JSON for ${req.params.id}:`, e.message);
     }
   }
-  // features_summary is plain text, no parsing needed
   res.json(result);
-});
+}));
 
-router.get('/', (req, res) => {
+router.get('/', asyncHandler(async (req, res) => {
   const { limit, offset } = validatePagination(req.query);
   const list = analyses.list({ limit, offset, userId: req.user?.id || null });
   res.json(list.map((a) => ({
@@ -129,12 +121,12 @@ router.get('/', (req, res) => {
     created_at: a.created_at,
     completed_at: a.completed_at,
   })));
-});
+}));
 
-router.get('/:id/stream', (req, res) => {
+router.get('/:id/stream', asyncHandler(async (req, res) => {
   const analysis = analyses.findById(req.params.id);
-  if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
+  if (!analysis) throw AppError.notFound('Analysis not found');
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
-});
+}));
 
 module.exports = router;

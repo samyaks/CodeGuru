@@ -1,0 +1,6 @@
+{
+  "name": "@codeguru/railway",
+  "version": "1.0.0",
+  "main": "index.js",
+  "description": "Railway GraphQL API client for programmatic deploys"
+}

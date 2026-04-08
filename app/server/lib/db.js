@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'reviews.db');
+const DB_PATH = path.join(__dirname, '..', 'data', 'takeoff.db');
 
 let db;
 
@@ -87,12 +87,63 @@ function getDb() {
       completed_at TEXT,
       user_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS deployments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      repo_url TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      branch TEXT DEFAULT 'main',
+      framework TEXT,
+      deploy_type TEXT,
+      stack_info TEXT,
+      build_plan TEXT,
+      readiness_score INTEGER,
+      readiness_categories TEXT,
+      plan_steps TEXT,
+      recommendation TEXT,
+      railway_project_id TEXT,
+      railway_service_id TEXT,
+      railway_environment_id TEXT,
+      railway_deployment_id TEXT,
+      railway_domain TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','analyzing','scored','planning','ready',
+                         'deploying','building','live','failed','stopped')),
+      live_url TEXT,
+      error TEXT,
+      build_logs TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      deployed_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS build_entries (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      entry_type TEXT NOT NULL
+        CHECK(entry_type IN ('prompt','note','decision','milestone','deploy_event','file')),
+      title TEXT,
+      content TEXT NOT NULL,
+      metadata TEXT,
+      is_public INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT,
+      sort_order INTEGER DEFAULT 0,
+      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
+    );
   `);
 
   // Migrate existing databases
   try { db.exec('ALTER TABLE reviews ADD COLUMN user_id TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE analyses ADD COLUMN user_id TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE analyses ADD COLUMN features_summary TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN readiness_score INTEGER'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN readiness_categories TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN plan_steps TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN recommendation TEXT'); } catch (_) {}
 
   return db;
 }
@@ -197,6 +248,102 @@ const fixPromptEvents = {
   },
 };
 
+// ── Deployments ──
+
+const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
+  'status', 'owner', 'repo', 'branch', 'framework', 'deploy_type', 'stack_info',
+  'build_plan', 'readiness_score', 'readiness_categories', 'plan_steps',
+  'recommendation', 'railway_project_id', 'railway_service_id', 'railway_environment_id',
+  'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
+  'updated_at', 'deployed_at', 'user_id',
+]);
+
+const deployments = {
+  create(deployment) {
+    getDb().prepare(`INSERT INTO deployments (id, user_id, repo_url, owner, repo, branch, status, created_at)
+      VALUES (@id, @user_id, @repo_url, @owner, @repo, @branch, @status, @created_at)`).run({
+      branch: 'main',
+      user_id: null,
+      ...deployment,
+    });
+    return deployment;
+  },
+  findById(id) {
+    return getDb().prepare('SELECT * FROM deployments WHERE id = ?').get(id);
+  },
+  findByUserId(userId, { limit = 20, offset = 0 } = {}) {
+    return getDb().prepare(
+      'SELECT * FROM deployments WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).all(userId, limit, offset);
+  },
+  update(id, fields) {
+    const d = getDb();
+    const sets = [];
+    const params = { id };
+    for (const [key, value] of Object.entries(fields)) {
+      if (!DEPLOYMENTS_ALLOWED_COLUMNS.has(key)) continue;
+      sets.push(`${key} = @${key}`);
+      params[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
+    }
+    if (sets.length > 0) {
+      d.prepare(`UPDATE deployments SET ${sets.join(', ')} WHERE id = @id`).run(params);
+    }
+  },
+  delete(id) {
+    getDb().prepare('DELETE FROM deployments WHERE id = ?').run(id);
+  },
+};
+
+// ── Build Entries (BuildStory) ──
+
+const buildEntries = {
+  create(entry) {
+    const prepared = {
+      is_public: 0,
+      sort_order: 0,
+      ...entry,
+      metadata: entry.metadata && typeof entry.metadata === 'object'
+        ? JSON.stringify(entry.metadata) : (entry.metadata || null),
+    };
+    getDb().prepare(`INSERT INTO build_entries
+      (id, project_id, user_id, entry_type, title, content, metadata, is_public, created_at, sort_order)
+      VALUES (@id, @project_id, @user_id, @entry_type, @title, @content, @metadata, @is_public, @created_at, @sort_order)`).run(prepared);
+    return entry;
+  },
+  findByProjectId(projectId, { limit = 100, offset = 0 } = {}) {
+    return getDb().prepare(
+      'SELECT * FROM build_entries WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC LIMIT ? OFFSET ?'
+    ).all(projectId, limit, offset);
+  },
+  findPublicByProjectId(projectId) {
+    return getDb().prepare(
+      'SELECT * FROM build_entries WHERE project_id = ? AND is_public = 1 ORDER BY sort_order ASC, created_at ASC'
+    ).all(projectId);
+  },
+  findById(id) {
+    return getDb().prepare('SELECT * FROM build_entries WHERE id = ?').get(id);
+  },
+  update(id, fields) {
+    const d = getDb();
+    const allowed = new Set(['title', 'content', 'metadata', 'is_public', 'updated_at', 'sort_order', 'entry_type']);
+    const sets = [];
+    const params = { id };
+    for (const [key, value] of Object.entries(fields)) {
+      if (!allowed.has(key)) continue;
+      sets.push(`${key} = @${key}`);
+      params[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
+    }
+    if (sets.length > 0) {
+      d.prepare(`UPDATE build_entries SET ${sets.join(', ')} WHERE id = @id`).run(params);
+    }
+  },
+  delete(id) {
+    getDb().prepare('DELETE FROM build_entries WHERE id = ?').run(id);
+  },
+};
+
+// ── Analyses ──
+
 const ANALYSES_ALLOWED_COLUMNS = new Set([
   'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at', 'user_id', 'features_summary',
 ]);
@@ -244,4 +391,4 @@ function closeDb() {
   }
 }
 
-module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses };
+module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries };

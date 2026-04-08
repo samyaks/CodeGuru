@@ -8,6 +8,13 @@ import Results from './pages/Results';
 import ReviewProgress from './pages/ReviewProgress';
 import ReviewReport from './pages/ReviewReport';
 import FixPrompt from './pages/FixPrompt';
+import AnalysisProgress from './pages/AnalysisProgress';
+import ReadinessReport from './pages/ReadinessReport';
+import ProductionPlan from './pages/ProductionPlan';
+import DeployProgress from './pages/DeployProgress';
+import ProjectView from './pages/ProjectView';
+import BuildStory from './pages/BuildStory';
+import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -21,13 +28,27 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
+
+            {/* Projects */}
+            <Route path="/projects/:id" element={<ProjectView />} />
+            <Route path="/projects/:id/story" element={<BuildStory />} />
+
+            {/* Takeoff flow */}
+            <Route path="/takeoff/:id" element={<AnalysisProgress />} />
+            <Route path="/takeoff/:id/report" element={<ReadinessReport />} />
+            <Route path="/takeoff/:id/plan" element={<ProductionPlan />} />
+            <Route path="/deploy/:id" element={<DeployProgress />} />
+
+            {/* Legacy CodeGuru routes */}
             <Route path="/analyze/:id" element={<Analysis />} />
             <Route path="/results/:id" element={<Results />} />
             <Route path="/review/:id/progress" element={<ReviewProgress />} />
             <Route path="/review/:id" element={<ReviewReport />} />
             <Route path="/fix/:shortId" element={<FixPrompt />} />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

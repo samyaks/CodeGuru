@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { SSEMessage } from '../types/sse';
 
+const TERMINAL_EVENTS = new Set(['complete', 'error', 'deployed', 'failed', 'analysis-completed', 'analysis-error']);
+
 export function useSSE(url: string | null) {
   const [messages, setMessages] = useState<SSEMessage[]>([]);
   const [connected, setConnected] = useState(false);
@@ -23,6 +25,11 @@ export function useSSE(url: string | null) {
         const raw = JSON.parse(event.data) as { type: string; [key: string]: unknown };
         if (raw.type !== 'heartbeat') {
           setMessages((prev) => [...prev, raw as SSEMessage]);
+          if (TERMINAL_EVENTS.has(raw.type)) {
+            source.close();
+            sourceRef.current = null;
+            setConnected(false);
+          }
         }
       } catch {
         // ignore non-JSON messages

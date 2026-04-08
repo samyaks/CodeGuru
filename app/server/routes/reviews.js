@@ -8,34 +8,31 @@ const { detectDeploymentFiles, detectDeploymentInPR } = require('../services/dep
 const { generateFixPrompts } = require('../services/fix-prompt');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validatePagination } = require('../lib/validate');
+const { AppError } = require('../lib/app-error');
+const { asyncHandler } = require('../lib/async-handler');
 
 const router = express.Router();
 
 const reviewRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many review requests. Please try again in a minute.' });
 
-router.post('/', reviewRateLimit, async (req, res) => {
-  try {
-    const { repoUrl, prNumber, type = 'pr', branch } = req.body;
-    if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
+router.post('/', reviewRateLimit, asyncHandler(async (req, res) => {
+  const { repoUrl, prNumber, type = 'pr', branch } = req.body;
+  if (!repoUrl) throw AppError.badRequest('repoUrl is required');
 
-    if (type === 'pr' && !prNumber) {
-      const parsed = github.parsePRUrl(repoUrl);
-      if (!parsed) return res.status(400).json({ error: 'prNumber is required for PR reviews, or provide a full PR URL' });
-      return createReview(res, {
-        repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
-        prNumber: parsed.prNumber, type,
-        owner: parsed.owner, repo: parsed.repo, branch,
-        userId: req.user?.id || null,
-      });
-    }
-
-    const { owner, repo } = github.parseRepoUrl(repoUrl);
-    return createReview(res, { repoUrl, prNumber: prNumber || null, type, owner, repo, branch: branch || null, userId: req.user?.id || null });
-  } catch (err) {
-    console.error('Error creating review:', err);
-    res.status(err.status || 500).json({ error: err.message });
+  if (type === 'pr' && !prNumber) {
+    const parsed = github.parsePRUrl(repoUrl);
+    if (!parsed) throw AppError.badRequest('prNumber is required for PR reviews, or provide a full PR URL');
+    return createReview(res, {
+      repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
+      prNumber: parsed.prNumber, type,
+      owner: parsed.owner, repo: parsed.repo, branch,
+      userId: req.user?.id || null,
+    });
   }
-});
+
+  const { owner, repo } = github.parseRepoUrl(repoUrl);
+  return createReview(res, { repoUrl, prNumber: prNumber || null, type, owner, repo, branch: branch || null, userId: req.user?.id || null });
+}));
 
 async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch, userId }) {
   const id = uuidv4();
@@ -168,21 +165,21 @@ async function runRepoReview(reviewId, review) {
   return { report, fileContents };
 }
 
-router.get('/', (req, res) => {
+router.get('/', asyncHandler(async (req, res) => {
   const { limit, offset } = validatePagination(req.query);
   res.json(reviews.list({ limit, offset, userId: req.user?.id || null }));
-});
+}));
 
-router.get('/:id', (req, res) => {
+router.get('/:id', asyncHandler(async (req, res) => {
   const review = reviews.findById(req.params.id);
-  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (!review) throw AppError.notFound('Review not found');
   const files = reviewFiles.findByReviewId(req.params.id);
   res.json({ ...review, files });
-});
+}));
 
-router.get('/:id/fix-prompts', (req, res) => {
+router.get('/:id/fix-prompts', asyncHandler(async (req, res) => {
   const review = reviews.findById(req.params.id);
-  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (!review) throw AppError.notFound('Review not found');
   const prompts = fixPrompts.findByReviewId(req.params.id);
   res.json(prompts.map((p) => ({
     id: p.id, short_id: p.short_id, file_path: p.file_path,
@@ -190,30 +187,30 @@ router.get('/:id/fix-prompts', (req, res) => {
     issue_category: p.issue_category, issue_title: p.issue_title,
     issue_description: p.issue_description, severity: p.severity,
   })));
-});
+}));
 
-router.get('/:id/stream', (req, res) => {
+router.get('/:id/stream', asyncHandler(async (req, res) => {
   const review = reviews.findById(req.params.id);
-  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (!review) throw AppError.notFound('Review not found');
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
-});
+}));
 
-router.patch('/:id', (req, res) => {
+router.patch('/:id', asyncHandler(async (req, res) => {
   const review = reviews.findById(req.params.id);
-  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (!review) throw AppError.notFound('Review not found');
   const { human_notes } = req.body;
-  if (human_notes === undefined) return res.status(400).json({ error: 'human_notes is required' });
+  if (human_notes === undefined) throw AppError.badRequest('human_notes is required');
   reviews.updateHumanNotes(req.params.id, human_notes);
   res.json({ message: 'Human notes updated' });
-});
+}));
 
-router.patch('/:id/files/:fileId', (req, res) => {
+router.patch('/:id/files/:fileId', asyncHandler(async (req, res) => {
   const review = reviews.findById(req.params.id);
-  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (!review) throw AppError.notFound('Review not found');
   const { human_comments } = req.body;
-  if (human_comments === undefined) return res.status(400).json({ error: 'human_comments is required' });
+  if (human_comments === undefined) throw AppError.badRequest('human_comments is required');
   reviewFiles.updateHumanComments(req.params.fileId, human_comments);
   res.json({ message: 'Human comments updated' });
-});
+}));
 
 module.exports = router;

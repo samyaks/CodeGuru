@@ -1,4 +1,17 @@
 const connections = new Map();
+const eventBuffers = new Map();
+const bufferTimers = new Map();
+
+const MAX_BUFFER_SIZE = 50;
+const BUFFER_TTL_MS = 5 * 60 * 1000;
+
+function touchBuffer(id) {
+  if (bufferTimers.has(id)) clearTimeout(bufferTimers.get(id));
+  bufferTimers.set(id, setTimeout(() => {
+    eventBuffers.delete(id);
+    bufferTimers.delete(id);
+  }, BUFFER_TTL_MS));
+}
 
 function addConnection(id, res, { origin } = {}) {
   res.writeHead(200, {
@@ -40,6 +53,12 @@ function removeConnection(id, res) {
 }
 
 function broadcast(id, data) {
+  if (!eventBuffers.has(id)) eventBuffers.set(id, []);
+  const buffer = eventBuffers.get(id);
+  buffer.push(data);
+  if (buffer.length > MAX_BUFFER_SIZE) buffer.shift();
+  touchBuffer(id);
+
   const conns = connections.get(id) || [];
   const message = `data: ${JSON.stringify(data)}\n\n`;
 
@@ -52,4 +71,8 @@ function broadcast(id, data) {
   }
 }
 
-module.exports = { addConnection, removeConnection, broadcast };
+function getRecentEvents(id) {
+  return eventBuffers.get(id) || [];
+}
+
+module.exports = { addConnection, removeConnection, broadcast, getRecentEvents };

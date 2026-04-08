@@ -1,3 +1,5 @@
+import { handleApiResponse } from '../lib/api-error';
+
 const API_BASE = '/api';
 
 function authFetch(url: string, opts: RequestInit = {}) {
@@ -11,11 +13,7 @@ export async function analyzeRepo(repoUrl: string): Promise<{ projectId: string 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: 'Failed to start analysis' }));
-    throw new Error(body.error || 'Failed to start analysis');
-  }
-  return res.json();
+  return handleApiResponse<{ projectId: string }>(res);
 }
 
 export async function fetchAnalysis(id: string) {
@@ -105,6 +103,28 @@ export async function postFixEvent(
 }
 
 // GitHub
+export interface GitHubRepo {
+  full_name: string;
+  owner: string;
+  name: string;
+  description: string | null;
+  language: string | null;
+  stargazers_count: number;
+  forks_count: number;
+  open_issues_count: number;
+  updated_at: string;
+  html_url: string;
+  private: boolean;
+  default_branch: string;
+}
+
+export async function fetchMyRepos(page = 1): Promise<{ repos: GitHubRepo[]; total: number; needsRelogin?: boolean }> {
+  const res = await authFetch(`${API_BASE}/github/my-repos?page=${page}&per_page=100`);
+  if (res.status === 401) return { repos: [], total: 0, needsRelogin: true };
+  if (!res.ok) return { repos: [], total: 0 };
+  return res.json();
+}
+
 export async function searchGitHubRepos(query: string) {
   const res = await authFetch(`${API_BASE}/github/repos?search=${encodeURIComponent(query)}`);
   if (!res.ok) return { repos: [], total: 0 };
@@ -115,4 +135,191 @@ export async function fetchRepoPulls(owner: string, repo: string) {
   const res = await authFetch(`${API_BASE}/github/repos/${owner}/${repo}/pulls`);
   if (!res.ok) return { pulls: [] };
   return res.json();
+}
+
+// Takeoff types
+
+export interface ReadinessCategory {
+  score: number;
+  weight: number;
+  earned: number;
+  status: 'ready' | 'partial' | 'missing';
+  label: string;
+  detail: string;
+}
+
+export interface BuildPlan {
+  type: string;
+  framework: string;
+  confidence: string;
+  reason?: string;
+  buildCommand?: string | null;
+  startCommand?: string | null;
+}
+
+export interface StackInfo {
+  framework: string | null;
+  runtime: string | null;
+  styling: string | null;
+  database: string | null;
+  auth: string | null;
+  languages: string[];
+}
+
+export interface PlanStep {
+  id: string;
+  stepNumber: number;
+  title: string;
+  category: string;
+  effort: 'small' | 'medium' | 'large';
+  why: string;
+  contextFile: string | null;
+  cursorPrompt: string | null;
+  status: 'todo' | 'done';
+  isDeploy?: boolean;
+}
+
+export interface Project {
+  id: string;
+  user_id: string | null;
+  repo_url: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  framework: string | null;
+  deploy_type: string | null;
+  stack_info: StackInfo | null;
+  build_plan: BuildPlan | null;
+  readiness_score: number | null;
+  readiness_categories: Record<string, ReadinessCategory> | null;
+  plan_steps: PlanStep[] | null;
+  recommendation: 'deploy' | 'plan' | null;
+  status: string;
+  live_url: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+// Takeoff
+export async function startTakeoff(repoUrl: string): Promise<{ projectId: string }> {
+  const res = await authFetch(`${API_BASE}/takeoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoUrl }),
+  });
+  return handleApiResponse<{ projectId: string }>(res);
+}
+
+export async function fetchProject(id: string): Promise<Project> {
+  const res = await authFetch(`${API_BASE}/takeoff/${id}`);
+  return handleApiResponse<Project>(res);
+}
+
+export async function updatePlanStep(projectId: string, stepId: string, status: 'todo' | 'done') {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/plan/${stepId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  return handleApiResponse<{ step: PlanStep }>(res);
+}
+
+// Deploy
+export async function triggerDeploy(projectId: string) {
+  const res = await authFetch(`${API_BASE}/deploy/${projectId}`, { method: 'POST' });
+  return handleApiResponse<{ status: string; projectId: string }>(res);
+}
+
+export async function triggerRedeploy(projectId: string) {
+  const res = await authFetch(`${API_BASE}/deploy/${projectId}/redeploy`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Failed to redeploy' }));
+    throw new Error(body.error || 'Failed to redeploy');
+  }
+  return res.json();
+}
+
+// Build Story types
+
+export interface BuildEntry {
+  id: string;
+  project_id: string;
+  user_id: string;
+  entry_type: 'prompt' | 'note' | 'decision' | 'milestone' | 'deploy_event' | 'file';
+  title: string | null;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  is_public: number;
+  created_at: string;
+  updated_at: string | null;
+  sort_order: number;
+}
+
+export interface ProjectWithEntries extends Project {
+  entries?: BuildEntry[];
+}
+
+// Projects
+
+export async function fetchProjects(): Promise<Project[]> {
+  const res = await authFetch(`${API_BASE}/projects`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchProjectDetail(id: string): Promise<ProjectWithEntries> {
+  const res = await authFetch(`${API_BASE}/projects/${id}`);
+  return handleApiResponse<ProjectWithEntries>(res);
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
+  await handleApiResponse<{ deleted: boolean }>(res);
+}
+
+// Build Story
+
+export async function fetchBuildStory(projectId: string): Promise<BuildEntry[]> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/story`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createBuildEntry(projectId: string, entry: {
+  entry_type: BuildEntry['entry_type'];
+  title?: string;
+  content: string;
+  metadata?: Record<string, unknown>;
+}): Promise<BuildEntry> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/story`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+  });
+  return handleApiResponse<BuildEntry>(res);
+}
+
+export async function updateBuildEntry(projectId: string, entryId: string, fields: {
+  title?: string;
+  content?: string;
+  entry_type?: BuildEntry['entry_type'];
+  is_public?: number;
+}): Promise<BuildEntry> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/story/${entryId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  return handleApiResponse<BuildEntry>(res);
+}
+
+export async function deleteBuildEntry(projectId: string, entryId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/story/${entryId}`, { method: 'DELETE' });
+  await handleApiResponse<{ deleted: boolean }>(res);
+}
+
+export async function generateContextFromStory(projectId: string): Promise<{ contextFile: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/story/generate-context`, { method: 'POST' });
+  return handleApiResponse<{ contextFile: string }>(res);
 }

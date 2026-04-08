@@ -14,6 +14,9 @@ export default defineConfig({
       '/auth': {
         target: 'http://localhost:3001',
         changeOrigin: true,
+        bypass(req) {
+          if (req.url?.startsWith('/auth/callback')) return req.url;
+        },
       },
       '/health': {
         target: 'http://localhost:3001',

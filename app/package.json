@@ -11,6 +11,7 @@
     "@anthropic-ai/sdk": "^0.52.0",
     "@codeguru/auth": "1.0.0",
     "@codeguru/github": "^1.0.0",
+    "@codeguru/railway": "^1.0.0",
     "@codeguru/sse": "^1.0.0",
     "@supabase/supabase-js": "^2.49.0",
     "better-sqlite3": "^12.8.0",
