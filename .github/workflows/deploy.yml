@@ -37,12 +37,7 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Debug - list Railway services
-        run: railway status || true
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
       - name: Deploy to Railway
-        run: railway up --service Takeoff -d
+        run: railway up --service web -d
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
