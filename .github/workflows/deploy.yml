@@ -37,7 +37,15 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to Railway
-        run: railway up --service web -d
+      - name: Debug - list services
+        run: |
+          echo "=== Railway Status ==="
+          railway status || true
+          echo ""
+          echo "=== Railway Service List ==="
+          railway service list || true
+          echo ""
+          echo "=== Railway Up (no service flag) ==="
+          railway up -d 2>&1 || true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
