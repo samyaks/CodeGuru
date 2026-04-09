@@ -22,9 +22,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install client dependencies
+        working-directory: app/client
+        run: npm install
+
       - name: TypeScript check (client)
         working-directory: app/client
-        run: npx tsc --noEmit
+        run: ./node_modules/.bin/tsc --noEmit
 
       - name: Build client
         working-directory: app/client
