@@ -20,8 +20,8 @@ RUN npm ci --include=dev
 COPY packages/ packages/
 COPY app/ app/
 
-# Build the React client (run from workspace root so hoisted bins are in PATH)
-RUN npm run build --workspace=app/client
+# Install client dependencies (not a workspace member) and build
+RUN cd app/client && npm install && npm run build
 
 # Stage 2: Production image — server + built client
 FROM node:20-slim AS production
