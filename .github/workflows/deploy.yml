@@ -37,14 +37,7 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Debug - find service names
-        run: |
-          echo "=== status --json ==="
-          railway status --json 2>&1 || true
-          echo "=== trying common names ==="
-          for name in web app server codeguru takeoff main backend frontend; do
-            echo -n "Trying '$name': "
-            railway up --service "$name" -d 2>&1 | head -1 || true
-          done
+      - name: Deploy to Railway
+        run: railway up --service codeguru -d
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
