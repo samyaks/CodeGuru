@@ -37,9 +37,7 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Link and deploy to Railway
-        run: |
-          railway link --service codeguru || true
-          railway up --service codeguru --verbose
+      - name: Deploy to Railway
+        run: railway up --service codeguru
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
