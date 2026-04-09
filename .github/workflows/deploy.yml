@@ -35,7 +35,7 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Install Railway CLI
-        run: npm install -g @railway/cli@3.22.0
+        run: npm install -g @railway/cli
 
       - name: Deploy to Railway
         run: railway up --service Takeoff --environment production -d
