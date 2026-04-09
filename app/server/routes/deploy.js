@@ -1,11 +1,11 @@
 const express = require('express');
-const { deployments, buildEntries } = require('../lib/db');
+const { deployments } = require('../lib/db');
 const { addConnection, broadcast } = require('../lib/sse');
 const { createRateLimit } = require('../lib/rate-limit');
-const { v4: uuidv4 } = require('uuid');
 const railway = require('@codeguru/railway');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { logDeployEvent } = require('../lib/auto-entries');
 
 const router = express.Router();
 
@@ -16,22 +16,25 @@ const deployRateLimit = createRateLimit({
 });
 
 router.post('/:projectId', deployRateLimit, asyncHandler(async (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Login required to deploy', code: 'UNAUTHORIZED' });
-  }
+  if (!req.user) throw AppError.unauthorized('Login required to deploy');
 
   const project = deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
 
-  if (!process.env.RAILWAY_API_TOKEN) {
-    return res.status(503).json({ error: 'Deploy service not configured. RAILWAY_API_TOKEN is required.', code: 'SERVICE_UNAVAILABLE' });
+  if (project.user_id && project.user_id !== req.user.id) {
+    throw AppError.forbidden('You do not own this project');
   }
 
-  deployments.update(req.params.projectId, {
+  if (!process.env.RAILWAY_API_TOKEN) {
+    throw new AppError('Deploy service not configured. RAILWAY_API_TOKEN is required.', 503, 'SERVICE_UNAVAILABLE');
+  }
+
+  const updateFields = {
     status: 'deploying',
-    user_id: req.user.id,
     updated_at: new Date().toISOString(),
-  });
+  };
+  if (!project.user_id) updateFields.user_id = req.user.id;
+  deployments.update(req.params.projectId, updateFields);
 
   setImmediate(() => runDeploy(req.params.projectId, project, req.user.id));
 
@@ -43,6 +46,7 @@ async function runDeploy(projectId, project, userId) {
 
   try {
     broadcast(deployStreamId, { type: 'status', status: 'deploying', message: 'Starting deployment...' });
+    logDeployEvent(projectId, userId, { status: 'deploying' });
 
     const projectName = `takeoff-${project.repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
 
@@ -74,20 +78,7 @@ async function runDeploy(projectId, project, userId) {
         status: 'live',
       });
 
-      // Auto-log deploy event to BuildStory
-      buildEntries.create({
-        id: uuidv4(),
-        project_id: projectId,
-        user_id: userId || 'system',
-        entry_type: 'deploy_event',
-        title: 'Deployed to production',
-        content: `App deployed to ${result.url}`,
-        metadata: JSON.stringify({
-          railway_project_id: result.projectId,
-          domain: result.domain,
-        }),
-        created_at: new Date().toISOString(),
-      });
+      logDeployEvent(projectId, userId, { status: 'live', liveUrl: result.url });
     } else {
       let buildLogs = '';
       try {
@@ -110,6 +101,8 @@ async function runDeploy(projectId, project, userId) {
         error: `Deploy finished with status: ${result.status}`,
         buildLogs,
       });
+
+      logDeployEvent(projectId, userId, { status: 'failed', error: `Deploy finished with status: ${result.status}` });
     }
   } catch (err) {
     console.error(`Deploy failed for ${projectId}:`, err);
@@ -119,6 +112,7 @@ async function runDeploy(projectId, project, userId) {
       updated_at: new Date().toISOString(),
     });
     broadcast(deployStreamId, { type: 'failed', error: err.message });
+    logDeployEvent(projectId, userId, { status: 'failed', error: err.message });
   }
 }
 
@@ -147,12 +141,14 @@ router.get('/:projectId/stream', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:projectId/redeploy', deployRateLimit, asyncHandler(async (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Login required to redeploy', code: 'UNAUTHORIZED' });
-  }
+  if (!req.user) throw AppError.unauthorized('Login required to redeploy');
 
   const project = deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
+
+  if (project.user_id && project.user_id !== req.user.id) {
+    throw AppError.forbidden('You do not own this project');
+  }
 
   if (!project.railway_deployment_id) {
     throw AppError.badRequest('No previous deployment to redeploy. Deploy first.');

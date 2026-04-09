@@ -179,6 +179,61 @@ export interface PlanStep {
   isDeploy?: boolean;
 }
 
+export interface GapInfo {
+  exists: boolean;
+  provider?: string | null;
+  type?: string | null;
+  platform?: string | null;
+  issues?: string[];
+  hasSchema?: boolean;
+  hasMigrations?: boolean;
+  hasCI?: boolean;
+  hasRoles?: boolean;
+  coverage?: string;
+  hasGlobalHandler?: boolean;
+  hasExample?: boolean;
+  missingVars?: string[];
+}
+
+export interface FeatureInfo {
+  name: string;
+  path: string;
+  hasUI: boolean;
+  hasAPI: boolean;
+  hasTests: boolean;
+  fileCount: number;
+}
+
+export interface AnalysisData {
+  meta: {
+    name: string;
+    description: string | null;
+    language: string | null;
+    stars: number;
+    forks: number;
+  };
+  structure: {
+    directories: string[];
+    entryPoints: string[];
+    routeFiles: string[];
+    configFiles: string[];
+  };
+  features: FeatureInfo[];
+  gaps: Record<string, GapInfo>;
+  deployInfo: {
+    detected: boolean;
+    hosting: Array<{ platform: string }>;
+    containers: Array<{ platform: string }>;
+    cicd: Array<{ platform: string }>;
+  };
+  existingContext: {
+    hasCursorRules: boolean;
+    hasClaudeMd: boolean;
+    hasContextMd: boolean;
+  };
+  fileTree: string[];
+}
+
 export interface Project {
   id: string;
   user_id: string | null;
@@ -187,6 +242,7 @@ export interface Project {
   repo: string;
   branch: string;
   framework: string | null;
+  description: string | null;
   deploy_type: string | null;
   stack_info: StackInfo | null;
   build_plan: BuildPlan | null;
@@ -194,6 +250,9 @@ export interface Project {
   readiness_categories: Record<string, ReadinessCategory> | null;
   plan_steps: PlanStep[] | null;
   recommendation: 'deploy' | 'plan' | null;
+  analysis_data: AnalysisData | null;
+  features_summary: string | null;
+  slug: string | null;
   status: string;
   live_url: string | null;
   error: string | null;
@@ -322,4 +381,33 @@ export async function deleteBuildEntry(projectId: string, entryId: string): Prom
 export async function generateContextFromStory(projectId: string): Promise<{ contextFile: string }> {
   const res = await authFetch(`${API_BASE}/projects/${projectId}/story/generate-context`, { method: 'POST' });
   return handleApiResponse<{ contextFile: string }>(res);
+}
+
+// Public story (no auth)
+
+export type PublicBuildEntry = Omit<BuildEntry, 'user_id' | 'metadata'>;
+
+export interface PublicStoryData {
+  project: {
+    owner: string;
+    repo: string;
+    framework: string | null;
+    description: string | null;
+    readiness_score: number | null;
+    live_url: string | null;
+    status: string;
+    slug: string;
+  };
+  entries: PublicBuildEntry[];
+  social_summary: string | null;
+}
+
+export async function fetchPublicStory(slug: string): Promise<PublicStoryData> {
+  const res = await fetch(`${API_BASE}/story/${slug}`);
+  return handleApiResponse<PublicStoryData>(res);
+}
+
+export async function generateSocialSummary(slug: string): Promise<{ summary: string }> {
+  const res = await authFetch(`${API_BASE}/story/${slug}/summary`, { method: 'POST' });
+  return handleApiResponse<{ summary: string }>(res);
 }

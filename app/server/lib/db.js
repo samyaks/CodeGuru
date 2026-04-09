@@ -144,6 +144,12 @@ function getDb() {
   try { db.exec('ALTER TABLE deployments ADD COLUMN readiness_categories TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE deployments ADD COLUMN plan_steps TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE deployments ADD COLUMN recommendation TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN description TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN analysis_data TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN features_summary TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN slug TEXT'); } catch (_) {}
+  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployments_slug ON deployments(slug)'); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN social_summary TEXT'); } catch (_) {}
 
   return db;
 }
@@ -253,9 +259,10 @@ const fixPromptEvents = {
 const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'status', 'owner', 'repo', 'branch', 'framework', 'deploy_type', 'stack_info',
   'build_plan', 'readiness_score', 'readiness_categories', 'plan_steps',
-  'recommendation', 'railway_project_id', 'railway_service_id', 'railway_environment_id',
+  'recommendation', 'description', 'analysis_data', 'features_summary',
+  'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
-  'updated_at', 'deployed_at', 'user_id',
+  'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary',
 ]);
 
 const deployments = {
@@ -270,6 +277,9 @@ const deployments = {
   },
   findById(id) {
     return getDb().prepare('SELECT * FROM deployments WHERE id = ?').get(id);
+  },
+  findBySlug(slug) {
+    return getDb().prepare('SELECT * FROM deployments WHERE slug = ?').get(slug);
   },
   findByUserId(userId, { limit = 20, offset = 0 } = {}) {
     return getDb().prepare(

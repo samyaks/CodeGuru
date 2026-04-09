@@ -10,6 +10,7 @@ COPY package.json package-lock.json ./
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/github/package.json packages/github/package.json
 COPY packages/sse/package.json packages/sse/package.json
+COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
@@ -35,6 +36,7 @@ COPY package.json package-lock.json ./
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/github/package.json packages/github/package.json
 COPY packages/sse/package.json packages/sse/package.json
+COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 

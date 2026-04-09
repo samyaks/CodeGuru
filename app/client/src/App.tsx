@@ -14,6 +14,7 @@ import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
 import ProjectView from './pages/ProjectView';
 import BuildStory from './pages/BuildStory';
+import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 
@@ -31,6 +32,9 @@ export default function App() {
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<Landing />} />
             <Route path="/dashboard" element={<Dashboard />} />
+
+            {/* Public story (no auth required) */}
+            <Route path="/story/:slug" element={<ShareableStory />} />
 
             {/* Projects */}
             <Route path="/projects/:id" element={<ProjectView />} />

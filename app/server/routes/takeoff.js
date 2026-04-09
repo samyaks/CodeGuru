@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { deployments } = require('../lib/db');
 const { addConnection, broadcast, getRecentEvents } = require('../lib/sse');
@@ -7,12 +8,14 @@ const { analyzeRepo } = require('../services/analyzer');
 const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
+const { describeFeatures } = require('../services/features-describer');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { seedFromAnalysis } = require('../lib/auto-entries');
 
-const JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps'];
+const JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
 
 function parseJsonFields(project) {
   const parsed = { ...project };
@@ -58,9 +61,17 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
     user_id: req.user?.id || null,
   });
 
+  let slug = `${owner}-${repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  try {
+    deployments.update(id, { slug });
+  } catch (_) {
+    slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
+    deployments.update(id, { slug });
+  }
+
   setImmediate(() => runTakeoff(id, repoUrl));
 
-  res.status(201).json({ projectId: id, status: 'pending' });
+  res.status(201).json({ projectId: id, slug, status: 'pending' });
 }));
 
 async function runTakeoff(id, repoUrl) {
@@ -78,8 +89,33 @@ async function runTakeoff(id, repoUrl) {
       repo: codebaseModel.meta.repo,
       branch: codebaseModel.meta.defaultBranch,
       framework: codebaseModel.stack.framework,
+      description: codebaseModel.meta.description || null,
       stack_info: codebaseModel.stack,
+      analysis_data: {
+        meta: {
+          name: codebaseModel.meta.name,
+          description: codebaseModel.meta.description,
+          language: codebaseModel.meta.language,
+          stars: codebaseModel.meta.stars,
+          forks: codebaseModel.meta.forks,
+        },
+        structure: codebaseModel.structure,
+        features: codebaseModel.features,
+        gaps: codebaseModel.gaps,
+        deployInfo: codebaseModel.deployInfo,
+        existingContext: codebaseModel.existingContext,
+        fileTree: codebaseModel.fileTree,
+      },
     });
+
+    // Stage 1b: Plain-English app summary (non-blocking — failure doesn't stop pipeline)
+    let featuresSummary = null;
+    try {
+      featuresSummary = await describeFeatures(id, codebaseModel);
+      deployments.update(id, { features_summary: featuresSummary });
+    } catch (err) {
+      console.error(`Features description for ${id} failed (non-fatal):`, err.message);
+    }
 
     // Stage 2: Build plan + Readiness score
     broadcast(id, { type: 'progress', phase: 'scoring', message: 'Scoring production readiness...' });
@@ -123,6 +159,9 @@ async function runTakeoff(id, repoUrl) {
         confidence: buildPlan.confidence,
       },
     });
+
+    const userId = deployments.findById(id)?.user_id;
+    seedFromAnalysis(id, userId, codebaseModel, readiness.score);
 
     // Stage 3: Generate plan steps
     broadcast(id, { type: 'progress', phase: 'planning', message: 'Generating your plan...' });

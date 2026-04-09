@@ -15,15 +15,22 @@ import {
   Check,
   X,
   Sparkles,
+  Share2,
+  Eye,
+  EyeOff,
+  Link as LinkIcon,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
   fetchBuildStory,
+  fetchProjectDetail,
   createBuildEntry,
   updateBuildEntry,
   deleteBuildEntry,
   generateContextFromStory,
+  generateSocialSummary,
   type BuildEntry,
+  type ProjectWithEntries,
 } from '../services/api';
 
 interface BuildStoryProps {
@@ -94,12 +101,21 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
   const [contextResult, setContextResult] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [project, setProject] = useState<ProjectWithEntries | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [socialSummary, setSocialSummary] = useState<string | null>(null);
+  const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
+
   useEffect(() => {
     if (!projectId) return;
     fetchBuildStory(projectId)
       .then(setEntries)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+    fetchProjectDetail(projectId)
+      .then(setProject)
+      .catch(() => {});
   }, [projectId]);
 
   const handleCreate = useCallback(async () => {
@@ -149,6 +165,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
   }, [projectId, editingId, editForm]);
 
   const handleDelete = useCallback(async (entryId: string) => {
+    if (!window.confirm('Delete this entry? This cannot be undone.')) return;
     try {
       await deleteBuildEntry(projectId, entryId);
       setEntries((prev) => prev.filter((e) => e.id !== entryId));
@@ -171,10 +188,52 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
 
   const copyContext = useCallback(async () => {
     if (!contextResult) return;
-    await navigator.clipboard.writeText(contextResult);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(contextResult);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Failed to copy — clipboard access denied');
+    }
   }, [contextResult]);
+
+  const toggleVisibility = useCallback(async (entry: BuildEntry) => {
+    setTogglingVisibility(entry.id);
+    try {
+      const newVal = entry.is_public ? 0 : 1;
+      const updated = await updateBuildEntry(projectId, entry.id, { is_public: newVal });
+      setEntries((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update visibility');
+    } finally {
+      setTogglingVisibility(null);
+    }
+  }, [projectId]);
+
+  const copyShareLink = useCallback(async () => {
+    if (!project?.slug) return;
+    try {
+      const url = `${window.location.origin}/story/${project.slug}`;
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      setError('Failed to copy — clipboard access denied');
+    }
+  }, [project?.slug]);
+
+  const handleGenerateSummary = useCallback(async () => {
+    if (!project?.slug) return;
+    setGeneratingSummary(true);
+    try {
+      const result = await generateSocialSummary(project.slug);
+      setSocialSummary(result.summary);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate summary');
+    } finally {
+      setGeneratingSummary(false);
+    }
+  }, [project?.slug]);
 
   const content = (
     <div className="space-y-6">
@@ -184,6 +243,50 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
           <button onClick={() => setError(null)} className="ml-2 underline">
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Share bar */}
+      {project?.slug && (
+        <div className="bg-navy border border-sky-border/50 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-sky-white">
+            <Share2 size={16} className="text-gold" />
+            Share your build story
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-midnight border border-sky-border/50 text-sm text-sky-off overflow-hidden">
+              <LinkIcon size={14} className="text-sky-muted flex-shrink-0" />
+              <span className="truncate">
+                {window.location.origin}/story/{project.slug}
+              </span>
+            </div>
+            <button
+              onClick={copyShareLink}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-gold text-midnight hover:bg-gold-dim transition-colors flex-shrink-0"
+            >
+              {linkCopied ? <Check size={14} /> : <Copy size={14} />}
+              {linkCopied ? 'Copied!' : 'Copy link'}
+            </button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleGenerateSummary}
+              disabled={generatingSummary}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-sky-border/50 text-sky-off hover:text-sky-white hover:border-sky-border transition-colors disabled:opacity-50"
+            >
+              {generatingSummary ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Sparkles size={13} />
+              )}
+              {generatingSummary ? 'Generating...' : 'Generate summary'}
+            </button>
+            {socialSummary && (
+              <p className="text-xs text-sky-muted italic flex-1 min-w-0 truncate">
+                {socialSummary}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -272,17 +375,34 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.is_public ? 'text-emerald-400 bg-emerald-500/10' : 'text-sky-muted bg-sky-muted/10'}`}>
+                            {entry.is_public ? 'Public' : 'Private'}
+                          </span>
+                          <button
+                            onClick={() => toggleVisibility(entry)}
+                            disabled={togglingVisibility === entry.id}
+                            className="p-1.5 rounded-md text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors disabled:opacity-50"
+                            title={entry.is_public ? 'Make private' : 'Make public'}
+                          >
+                            {togglingVisibility === entry.id ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : entry.is_public ? (
+                              <Eye size={14} />
+                            ) : (
+                              <EyeOff size={14} />
+                            )}
+                          </button>
                           <button
                             onClick={() => startEdit(entry)}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors"
+                            className="p-1.5 rounded-md text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors opacity-0 group-hover:opacity-100"
                             title="Edit"
                           >
                             <Pencil size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(entry.id)}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                            className="p-1.5 rounded-md text-sky-muted hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
                             title="Delete"
                           >
                             <Trash2 size={14} />
@@ -345,9 +465,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
               </div>
             </div>
             <div className="flex-1 overflow-auto p-5">
-              <pre className="text-xs text-sky-off whitespace-pre-wrap font-mono">
-                {contextResult}
-              </pre>
+              <pre className="text-xs text-sky-off whitespace-pre-wrap font-mono">{contextResult}</pre>
             </div>
           </div>
         </div>

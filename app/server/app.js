@@ -11,6 +11,7 @@ const takeoffRoutes = require('./routes/takeoff');
 const deployRoutes = require('./routes/deploy');
 const projectRoutes = require('./routes/projects');
 const buildStoryRoutes = require('./routes/build-story');
+const publicStoryRoutes = require('./routes/public-story');
 const reviewRoutes = require('./routes/reviews');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
@@ -97,6 +98,7 @@ app.post('/auth/token', express.json(), async (req, res) => {
 app.use(healthRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/analyze', analyzeRoutes);
+app.use('/api/story', publicStoryRoutes);
 
 // Takeoff routes — analyze is public, deploy requires auth
 if (supabase) {
