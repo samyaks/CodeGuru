@@ -302,6 +302,18 @@ const deployments = {
   delete(id) {
     getDb().prepare('DELETE FROM deployments WHERE id = ?').run(id);
   },
+  countUserDeployments(userId) {
+    const row = getDb().prepare(
+      "SELECT COUNT(*) as count FROM deployments WHERE user_id = ? AND status IN ('live', 'building', 'deploying')"
+    ).get(userId);
+    return row.count;
+  },
+  countUserActiveBuilds(userId) {
+    const row = getDb().prepare(
+      "SELECT COUNT(*) as count FROM deployments WHERE user_id = ? AND status IN ('building', 'deploying')"
+    ).get(userId);
+    return row.count;
+  },
 };
 
 // ── Build Entries (BuildStory) ──

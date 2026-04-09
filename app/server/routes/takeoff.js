@@ -75,6 +75,7 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
 }));
 
 async function runTakeoff(id, repoUrl) {
+  console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, timestamp: new Date().toISOString() }));
   try {
     deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
@@ -194,6 +195,8 @@ async function runTakeoff(id, repoUrl) {
       },
     });
 
+    console.log(JSON.stringify({ event: 'takeoff_complete', projectId: id, repoUrl, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
+
   } catch (err) {
     console.error(`Takeoff failed for ${id}:`, err);
     deployments.update(id, {
@@ -202,6 +205,7 @@ async function runTakeoff(id, repoUrl) {
       updated_at: new Date().toISOString(),
     });
     broadcast(id, { type: 'error', error: err.message });
+    console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
   }
 }
 
