@@ -14,6 +14,8 @@ import {
   type AnalysisData,
   type FeatureInfo,
   type GapInfo,
+  type StackInfo,
+  type BuildPlan,
 } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 
@@ -86,8 +88,8 @@ export default function ReadinessReport() {
   const score = project.readiness_score ?? 0;
   const categories: Record<string, ReadinessCategory> = project.readiness_categories || {};
   const recommendation = project.recommendation || 'plan';
-  const stack = project.stack_info || {};
-  const buildPlan = project.build_plan || {};
+  const stack: Partial<StackInfo> = project.stack_info || {};
+  const buildPlan: Partial<BuildPlan> = project.build_plan || {};
   const analysis = project.analysis_data;
   const isDeployRecommended = recommendation === 'deploy';
 

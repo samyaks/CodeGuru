@@ -23,4 +23,20 @@ export interface SSEConnectedMessage {
   id: string;
 }
 
-export type SSEMessage = SSEProgressMessage | SSECompletedMessage | SSEErrorMessage | SSEConnectedMessage;
+export interface SSETakeoffMessage {
+  type: 'scored' | 'complete' | 'error' | 'status';
+  [key: string]: unknown;
+}
+
+export interface SSEDeployMessage {
+  type: 'deployed' | 'failed';
+  [key: string]: unknown;
+}
+
+export type SSEMessage =
+  | SSEProgressMessage
+  | SSECompletedMessage
+  | SSEErrorMessage
+  | SSEConnectedMessage
+  | SSETakeoffMessage
+  | SSEDeployMessage;

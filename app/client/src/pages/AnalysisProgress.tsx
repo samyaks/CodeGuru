@@ -80,7 +80,7 @@ export default function AnalysisProgress() {
                   {completed ? 'Analysis Complete' : scored ? 'Generating plan...' : 'Analyzing your repo'}
                 </h2>
                 <p className="text-sky-muted text-sm">
-                  {message || PHASE_LABELS[phase] || 'Starting analysis...'}
+                  {message || (phase && PHASE_LABELS[phase]) || 'Starting analysis...'}
                 </p>
               </div>
 
