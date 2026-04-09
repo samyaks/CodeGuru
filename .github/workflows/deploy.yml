@@ -35,9 +35,14 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Install Railway CLI
-        run: npm install -g @railway/cli
+        run: npm install -g @railway/cli@3.22.0
+
+      - name: Verify Railway auth
+        run: railway whoami
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Deploy to Railway
-        run: railway up --service codeguru
+        run: railway up --service Takeoff --environment production
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
