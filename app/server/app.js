@@ -51,12 +51,15 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
 const FRONTEND_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000';
 
 if (supabase) {
+  console.log(`[Auth] Supabase initialized. REDIRECT_URL=${process.env.SUPABASE_REDIRECT_URL || 'NOT SET'}, FRONTEND_URL=${FRONTEND_URL || '(empty/production)'}`);
   app.use(createAuthRouter({
     supabase,
     providers: ['github', 'google'],
     afterLogin: `${FRONTEND_URL}/dashboard`,
     afterLogout: `${FRONTEND_URL}/`,
   }));
+} else {
+  console.log(`[Auth] Supabase NOT initialized. SUPABASE_URL=${process.env.SUPABASE_URL ? 'set' : 'NOT SET'}, SUPABASE_ANON_KEY=${process.env.SUPABASE_ANON_KEY ? 'set' : 'NOT SET'}`);
 }
 
 app.get('/auth/clear', (req, res) => {

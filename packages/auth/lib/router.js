@@ -33,6 +33,7 @@ function createAuthRouter(config) {
   // OAuth login — GET /auth/login?provider=github
   router.get('/auth/login', async (req, res) => {
     const provider = req.query.provider;
+    console.log(`[Auth] /auth/login hit — provider=${provider}, redirectUrl=${redirectUrl}`);
 
     if (!provider || !providers.includes(provider)) {
       return res.status(400).json({
@@ -46,15 +47,18 @@ function createAuthRouter(config) {
     });
 
     if (error) {
+      console.error('[Auth] signInWithOAuth error:', error.message);
       return res.status(500).json({ error: error.message });
     }
 
+    console.log(`[Auth] Redirecting to OAuth URL: ${data.url?.substring(0, 120)}...`);
     res.redirect(data.url);
   });
 
   // OAuth callback — GET /auth/callback
   router.get('/auth/callback', async (req, res) => {
     const code = req.query.code;
+    console.log(`[Auth] /auth/callback hit — code=${code ? code.substring(0, 10) + '...' : 'MISSING'}, query=${JSON.stringify(req.query)}`);
 
     if (!code) {
       return res.status(400).json({ error: 'Missing authorization code' });
@@ -63,10 +67,11 @@ function createAuthRouter(config) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      console.error('Auth callback error:', error.message);
+      console.error('[Auth] exchangeCodeForSession error:', error.message);
       return res.redirect(`${afterLogin}?auth_error=${encodeURIComponent(error.message)}`);
     }
 
+    console.log(`[Auth] Login successful — user=${data.session?.user?.email}, redirecting to ${afterLogin}`);
     res.cookie(COOKIE_NAME, data.session.access_token, COOKIE_OPTIONS);
     res.cookie(REFRESH_COOKIE, data.session.refresh_token, COOKIE_OPTIONS);
     res.redirect(afterLogin);
