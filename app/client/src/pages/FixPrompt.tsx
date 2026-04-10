@@ -68,7 +68,7 @@ export default function FixPrompt() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center gap-2 text-neutral-400">
+        <div className="flex items-center gap-2 text-zinc-400">
           <Loader size={18} className="animate-spin" />
           Loading fix prompt…
         </div>
@@ -82,7 +82,7 @@ export default function FixPrompt() {
         <div className="text-center space-y-3">
           <AlertCircle size={32} className="mx-auto text-red-400" />
           <h2 className="text-xl font-semibold">Fix prompt not found</h2>
-          <p className="text-neutral-400 text-sm max-w-md">
+          <p className="text-zinc-400 text-sm max-w-md">
             {error || 'This fix prompt may have expired or the link is invalid.'}
           </p>
         </div>
@@ -102,16 +102,16 @@ export default function FixPrompt() {
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sev}`}>
               {severityIcon[prompt.severity]} {prompt.severity}
             </span>
-            <span className="text-xs text-neutral-500 uppercase tracking-wider font-medium">
+            <span className="text-xs text-zinc-500 uppercase tracking-wider font-medium">
               {prompt.issue_category}
             </span>
           </div>
           <h1 className="text-2xl font-bold">{prompt.issue_title}</h1>
-          <p className="flex items-center gap-1.5 text-sm text-neutral-400 font-mono">
+          <p className="flex items-center gap-1.5 text-sm text-zinc-400 font-mono">
             <Code2 size={14} className="shrink-0" />
             {prompt.file_path}
             {prompt.line_start && (
-              <span className="text-neutral-500">
+              <span className="text-zinc-500">
                 :{prompt.line_start}{prompt.line_end ? `-${prompt.line_end}` : ''}
               </span>
             )}
@@ -119,7 +119,7 @@ export default function FixPrompt() {
         </div>
 
         {prompt.issue_description && (
-          <p className="text-sm text-neutral-300 leading-relaxed">{prompt.issue_description}</p>
+          <p className="text-sm text-zinc-300 leading-relaxed">{prompt.issue_description}</p>
         )}
 
         {isStale && (
@@ -133,14 +133,14 @@ export default function FixPrompt() {
           className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-colors ${
             copied
               ? 'bg-green-600 text-white'
-              : 'bg-violet-600 hover:bg-violet-500 text-white'
+              : 'bg-sky-500 hover:bg-sky-400 text-white'
           }`}
         >
           {copied ? <><Check size={18} /> Copied to clipboard!</> : <><Copy size={18} /> Copy fix prompt to clipboard</>}
         </button>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-neutral-500">Then paste into:</span>
+          <span className="text-xs text-zinc-500">Then paste into:</span>
           {[
             { target: 'cursor', label: 'Cursor', icon: <Terminal size={14} /> },
             { target: 'claude_code', label: 'Claude Code', icon: <Terminal size={14} /> },
@@ -149,30 +149,30 @@ export default function FixPrompt() {
             <button
               key={dl.target}
               onClick={() => handleDeeplink(dl.target)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 border border-neutral-700 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
             >
               {dl.icon} {dl.label}
             </button>
           ))}
         </div>
 
-        <div className="rounded-xl border border-neutral-800 overflow-hidden">
-          <div className="px-4 py-2.5 bg-neutral-800/60 border-b border-neutral-800 text-xs font-medium text-neutral-400">
+        <div className="rounded-xl border border-zinc-800 overflow-hidden">
+          <div className="px-4 py-2.5 bg-zinc-800/60 border-b border-zinc-800 text-xs font-medium text-zinc-400">
             Fix Prompt
           </div>
-          <pre className="p-4 text-sm text-neutral-300 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
+          <pre className="p-4 text-sm text-zinc-300 whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
             {prompt.full_prompt}
           </pre>
         </div>
 
         {prompt.related_files.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-neutral-300">Related Files</h3>
+            <h3 className="text-sm font-medium text-zinc-300">Related Files</h3>
             <div className="space-y-1.5">
               {prompt.related_files.map((rf, i) => (
-                <div key={i} className="flex items-start gap-3 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-sm">
-                  <code className="text-violet-400 shrink-0">{rf.path}</code>
-                  <span className="text-neutral-500">{rf.reason}</span>
+                <div key={i} className="flex items-start gap-3 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm">
+                  <code className="text-sky-400 shrink-0">{rf.path}</code>
+                  <span className="text-zinc-500">{rf.reason}</span>
                 </div>
               ))}
             </div>
@@ -180,7 +180,7 @@ export default function FixPrompt() {
         )}
 
         <div className="flex items-center gap-4">
-          <span className="text-sm text-neutral-400">Was this helpful?</span>
+          <span className="text-sm text-zinc-400">Was this helpful?</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => handleFeedback('up')}
@@ -188,7 +188,7 @@ export default function FixPrompt() {
               className={`p-2 rounded-lg border transition-colors ${
                 feedback === 'up'
                   ? 'bg-green-500/15 border-green-500/30 text-green-400'
-                  : 'border-neutral-700 text-neutral-500 hover:text-white hover:border-neutral-600 disabled:opacity-40'
+                  : 'border-zinc-700 text-zinc-500 hover:text-white hover:border-zinc-600 disabled:opacity-40'
               }`}
             >
               <ThumbsUp size={16} />
@@ -199,17 +199,17 @@ export default function FixPrompt() {
               className={`p-2 rounded-lg border transition-colors ${
                 feedback === 'down'
                   ? 'bg-red-500/15 border-red-500/30 text-red-400'
-                  : 'border-neutral-700 text-neutral-500 hover:text-white hover:border-neutral-600 disabled:opacity-40'
+                  : 'border-zinc-700 text-zinc-500 hover:text-white hover:border-zinc-600 disabled:opacity-40'
               }`}
             >
               <ThumbsDown size={16} />
             </button>
           </div>
-          {feedback && <span className="text-xs text-neutral-500">Thanks for the feedback!</span>}
+          {feedback && <span className="text-xs text-zinc-500">Thanks for the feedback!</span>}
         </div>
 
-        <div className="pt-4 border-t border-neutral-800/50 text-center text-xs text-neutral-600">
-          Powered by <strong className="text-neutral-500">CodeGuru</strong> &middot;
+        <div className="pt-4 border-t border-zinc-800/50 text-center text-xs text-zinc-600">
+          Powered by <strong className="text-zinc-500">CodeGuru</strong> &middot;
           Expires {new Date(prompt.expires_at).toLocaleDateString()}
         </div>
       </div>

@@ -6,13 +6,13 @@ export default function NotFound() {
     <div className="min-h-screen">
       <Header />
       <main className="flex flex-col items-center justify-center px-6 py-32 text-center space-y-6">
-        <h1 className="text-4xl font-bold text-neutral-200">Page not found</h1>
-        <p className="text-neutral-500 max-w-md">
+        <h1 className="text-4xl font-extrabold tracking-tighter text-zinc-200">Page not found</h1>
+        <p className="text-zinc-500 max-w-md">
           The page you're looking for doesn't exist or has been moved.
         </p>
         <Link
           to="/"
-          className="px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+          className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-black text-sm font-bold transition-all btn-glow"
         >
           Go home
         </Link>

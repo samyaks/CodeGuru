@@ -65,7 +65,7 @@ export default function ReviewReport() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader size={32} className="animate-spin text-violet-400" />
+        <Loader size={32} className="animate-spin text-sky-400" />
       </div>
     );
   }
@@ -76,7 +76,7 @@ export default function ReviewReport() {
         <Header backTo="/dashboard" title="Error" />
         <main className="max-w-4xl mx-auto px-6 py-12 text-center">
           <p className="text-red-400">{error || 'Review not found'}</p>
-          <Link to="/dashboard" className="text-violet-400 underline mt-4 inline-block">Go back</Link>
+          <Link to="/dashboard" className="text-sky-400 underline mt-4 inline-block">Go back</Link>
         </main>
       </div>
     );
@@ -93,17 +93,17 @@ export default function ReviewReport() {
         <div>
           <h1 className="text-lg font-semibold">
             {review.owner}/{review.repo}
-            {review.pr_number && <span className="text-neutral-500"> #{review.pr_number}</span>}
+            {review.pr_number && <span className="text-zinc-500"> #{review.pr_number}</span>}
           </h1>
-          <p className="text-xs text-neutral-500">{review.type} review</p>
+          <p className="text-xs text-zinc-500">{review.type} review</p>
         </div>
       </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {report?.summary && (
-          <div className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl p-6">
+          <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-2">Summary</h2>
-            <p className="text-neutral-300 text-sm leading-relaxed">{report.summary}</p>
+            <p className="text-zinc-300 text-sm leading-relaxed">{report.summary}</p>
             {report.verdict && (
               <span className={`inline-block mt-3 px-3 py-1 rounded-full text-xs font-medium ${
                 report.verdict === 'approve' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
@@ -124,9 +124,9 @@ export default function ReviewReport() {
               { label: 'Warnings', value: report.stats.warnings, color: 'text-amber-400' },
               { label: 'Info', value: report.stats.info, color: 'text-blue-400' },
             ].map((s) => (
-              <div key={s.label} className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl p-4 text-center">
+              <div key={s.label} className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 text-center">
                 <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-xs text-neutral-500 mt-1">{s.label}</p>
+                <p className="text-xs text-zinc-500 mt-1">{s.label}</p>
               </div>
             ))}
           </div>
@@ -139,22 +139,22 @@ export default function ReviewReport() {
         {fixPrompts.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <FileText size={20} className="text-violet-400" />
+              <FileText size={20} className="text-sky-400" />
               Fix Prompts
-              <span className="text-xs bg-violet-500/10 text-violet-400 px-2 py-0.5 rounded-full">{fixPrompts.length}</span>
+              <span className="text-xs bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded-full">{fixPrompts.length}</span>
             </h2>
             {fixPrompts.map((fp) => (
               <Link
                 key={fp.id}
                 to={`/fix/${fp.short_id}`}
-                className="block bg-neutral-900/50 border border-neutral-800/50 rounded-xl px-5 py-3 hover:border-violet-500/30 transition-colors"
+                className="block bg-zinc-900/50 border border-zinc-800/50 rounded-xl px-5 py-3 hover:border-sky-500/30 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{fp.issue_title}</p>
-                    <p className="text-xs text-neutral-500 mt-0.5">{fp.file_path}</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">{fp.file_path}</p>
                   </div>
-                  <ExternalLink size={14} className="text-neutral-600" />
+                  <ExternalLink size={14} className="text-zinc-600" />
                 </div>
               </Link>
             ))}
@@ -163,9 +163,9 @@ export default function ReviewReport() {
 
         {!report && (
           <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
-            <FileText size={48} className="text-neutral-600" />
-            <h2 className="text-xl font-semibold text-neutral-300">No report available</h2>
-            <p className="text-neutral-500">This review may still be processing.</p>
+            <FileText size={48} className="text-zinc-600" />
+            <h2 className="text-xl font-semibold text-zinc-300">No report available</h2>
+            <p className="text-zinc-500">This review may still be processing.</p>
           </div>
         )}
       </main>
@@ -179,20 +179,20 @@ function FindingsSection({ title, findings, icon }: { title: string; findings: F
       <h2 className="text-lg font-semibold flex items-center gap-2">
         {icon}
         {title}
-        <span className="text-xs bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-full">{findings.length}</span>
+        <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">{findings.length}</span>
       </h2>
       {findings.map((f, i) => (
-        <div key={i} className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl px-5 py-4">
+        <div key={i} className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl px-5 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="font-medium text-sm">{f.title}</p>
-              <p className="text-xs text-neutral-500 mt-0.5">
+              <p className="text-xs text-zinc-500 mt-0.5">
                 {f.file}{f.line ? `:${f.line}` : ''} &middot; {f.category}
               </p>
             </div>
             <SeverityBadge severity={f.severity} />
           </div>
-          <p className="text-sm text-neutral-400 mt-2 leading-relaxed">{f.description}</p>
+          <p className="text-sm text-zinc-400 mt-2 leading-relaxed">{f.description}</p>
         </div>
       ))}
     </div>

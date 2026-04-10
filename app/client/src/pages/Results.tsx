@@ -70,7 +70,7 @@ export default function Results() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader size={32} className="animate-spin text-violet-400" />
+        <Loader size={32} className="animate-spin text-sky-400" />
       </div>
     );
   }
@@ -81,7 +81,7 @@ export default function Results() {
         <Header backTo="/dashboard" title="Error" />
         <main className="max-w-4xl mx-auto px-6 py-12 text-center">
           <p className="text-red-400">{error || 'Analysis not found'}</p>
-          <Link to="/" className="text-violet-400 underline mt-4 inline-block">Go back</Link>
+          <Link to="/" className="text-sky-400 underline mt-4 inline-block">Go back</Link>
         </main>
       </div>
     );
@@ -95,7 +95,7 @@ export default function Results() {
   return (
     <div className="min-h-screen">
       <Header backTo="/dashboard" title="Results">
-        <span className="text-sm text-neutral-400">{data.owner}/{data.repo}</span>
+        <span className="text-sm text-zinc-400">{data.owner}/{data.repo}</span>
       </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
@@ -109,14 +109,14 @@ export default function Results() {
         )}
 
         {/* Completion overview */}
-        <div className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl p-6">
+        <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Completion</h2>
-            <span className="text-2xl font-bold text-violet-400">{data.completion_pct || 0}%</span>
+            <span className="text-2xl font-bold text-sky-400">{data.completion_pct || 0}%</span>
           </div>
-          <div className="w-full h-3 bg-neutral-800 rounded-full overflow-hidden">
+          <div className="w-full h-3 bg-zinc-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-violet-600 to-violet-400 rounded-full transition-all duration-500"
+              className="h-full bg-gradient-to-r from-sky-600 to-sky-400 rounded-full transition-all duration-500"
               style={{ width: `${data.completion_pct || 0}%` }}
             />
           </div>
@@ -143,7 +143,7 @@ export default function Results() {
           <div className="flex justify-end">
             <button
               onClick={downloadAll}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-white text-sm font-medium transition-colors"
             >
               <Download size={14} />
               Download all context files
@@ -189,9 +189,9 @@ export default function Results() {
 
         {contextFiles.length === 0 && !data.features_summary && (
           <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
-            <FileText size={48} className="text-neutral-600" />
-            <h2 className="text-xl font-semibold text-neutral-300">No results generated</h2>
-            <p className="text-neutral-500">The analysis may still be in progress.</p>
+            <FileText size={48} className="text-zinc-600" />
+            <h2 className="text-xl font-semibold text-zinc-300">No results generated</h2>
+            <p className="text-zinc-500">The analysis may still be in progress.</p>
           </div>
         )}
       </main>
@@ -204,20 +204,20 @@ function FeaturesSummary({ summary, copied, onCopy }: { summary: string; copied:
   const sections = parseSummaryIntoSections(summary);
 
   return (
-    <div className="bg-gradient-to-br from-violet-950/40 to-neutral-900/60 border border-violet-500/20 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-violet-500/10">
+    <div className="bg-gradient-to-br from-sky-950/40 to-zinc-900/60 border border-sky-500/20 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-sky-500/10">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-violet-500/10">
-            <BookOpen size={20} className="text-violet-400" />
+          <div className="p-2 rounded-lg bg-sky-500/10">
+            <BookOpen size={20} className="text-sky-400" />
           </div>
           <div>
             <h2 className="text-lg font-semibold text-white">What this project does</h2>
-            <p className="text-xs text-neutral-400">Plain-English explanation — no technical jargon</p>
+            <p className="text-xs text-zinc-400">Plain-English explanation — no technical jargon</p>
           </div>
         </div>
         <button
           onClick={onCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 hover:bg-sky-400/20 text-sky-300 border border-sky-500/20 transition-colors"
         >
           {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
@@ -242,15 +242,15 @@ function SummarySection({ title, content, defaultOpen }: { title: string; conten
         className="flex items-center gap-2 w-full text-left group"
       >
         {open
-          ? <ChevronDown size={16} className="text-violet-400 flex-shrink-0" />
-          : <ChevronRight size={16} className="text-neutral-500 group-hover:text-violet-400 flex-shrink-0" />
+          ? <ChevronDown size={16} className="text-sky-400 flex-shrink-0" />
+          : <ChevronRight size={16} className="text-zinc-500 group-hover:text-sky-400 flex-shrink-0" />
         }
-        <h3 className="text-sm font-semibold text-violet-300 group-hover:text-violet-200 transition-colors">
+        <h3 className="text-sm font-semibold text-sky-300 group-hover:text-sky-200 transition-colors">
           {title}
         </h3>
       </button>
       {open && (
-        <div className="mt-2 ml-6 text-sm text-neutral-300 leading-relaxed whitespace-pre-wrap">
+        <div className="mt-2 ml-6 text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">
           {content}
         </div>
       )}
@@ -292,9 +292,9 @@ function ContextCard({ file, copied, onCopy }: { file: ContextFile; copied: bool
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-neutral-900/50 border border-neutral-800/50 rounded-xl overflow-hidden">
+    <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl overflow-hidden">
       <div
-        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-neutral-800/30 transition-colors"
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-zinc-800/30 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
@@ -305,19 +305,19 @@ function ContextCard({ file, copied, onCopy }: { file: ContextFile; copied: bool
           }`}>
             {file.type === 'existing' ? 'existing' : 'needs building'}
           </span>
-          <code className="text-sm text-neutral-300">{file.path}</code>
+          <code className="text-sm text-zinc-300">{file.path}</code>
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onCopy(); }}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
         >
           {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
       {expanded && (
-        <div className="border-t border-neutral-800/50 px-4 py-4 max-h-96 overflow-auto">
-          <pre className="text-sm text-neutral-300 whitespace-pre-wrap font-mono leading-relaxed">{file.content}</pre>
+        <div className="border-t border-zinc-800/50 px-4 py-4 max-h-96 overflow-auto">
+          <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed">{file.content}</pre>
         </div>
       )}
     </div>

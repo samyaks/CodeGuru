@@ -261,7 +261,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
     <div className="space-y-6">
       {/* Project structure */}
       <CollapsibleSection
-        icon={<FolderTree size={18} className="text-violet-400" />}
+        icon={<FolderTree size={18} className="text-sky-400" />}
         title="Project Structure"
         subtitle={`${analysis.fileTree.length} files · ${analysis.structure.directories.length} directories`}
         defaultOpen
@@ -353,13 +353,13 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
       {(analysis.existingContext.hasCursorRules || analysis.existingContext.hasClaudeMd || analysis.existingContext.hasContextMd) && (
         <div className="flex flex-wrap gap-2 pt-2">
           {analysis.existingContext.hasCursorRules && (
-            <span className="px-3 py-1 rounded-full text-xs bg-violet-500/10 border border-violet-500/20 text-violet-400">Has .cursorrules</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has .cursorrules</span>
           )}
           {analysis.existingContext.hasClaudeMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-violet-500/10 border border-violet-500/20 text-violet-400">Has CLAUDE.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has CLAUDE.md</span>
           )}
           {analysis.existingContext.hasContextMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-violet-500/10 border border-violet-500/20 text-violet-400">Has .context.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has .context.md</span>
           )}
         </div>
       )}
@@ -396,7 +396,7 @@ function FeatureRow({ feature }: { feature: FeatureInfo }) {
     <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-midnight/50 border border-sky-border/30">
       <code className="text-xs text-sky-off font-medium truncate flex-1">{feature.name}</code>
       <div className="flex items-center gap-2 shrink-0">
-        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">UI</span>}
+        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">UI</span>}
         {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">API</span>}
         {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Tests</span>}
         <span className="text-[10px] text-sky-muted">{feature.fileCount} files</span>
@@ -416,11 +416,11 @@ function FeaturesSummary({ summary }: { summary: string }) {
   };
 
   return (
-    <div className="rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-950/40 to-midnight overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-violet-500/10">
+    <div className="rounded-xl border border-sky-500/20 bg-gradient-to-br from-sky-950/40 to-midnight overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-sky-500/10">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-violet-500/10">
-            <BookOpen size={20} className="text-violet-400" />
+          <div className="p-2 rounded-lg bg-sky-500/10">
+            <BookOpen size={20} className="text-sky-400" />
           </div>
           <div>
             <h2 className="text-base font-semibold text-sky-white">What this project does</h2>
@@ -429,7 +429,7 @@ function FeaturesSummary({ summary }: { summary: string }) {
         </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/20 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/20 transition-colors"
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
@@ -450,9 +450,9 @@ function SummarySection({ title, content, defaultOpen }: { title: string; conten
     <div>
       <button onClick={() => setOpen(!open)} className="flex items-center gap-2 w-full text-left group">
         {open
-          ? <ChevronDown size={16} className="text-violet-400 shrink-0" />
-          : <ChevronRight size={16} className="text-sky-muted group-hover:text-violet-400 shrink-0" />}
-        <h3 className="text-sm font-semibold text-violet-300 group-hover:text-violet-200 transition-colors">{title}</h3>
+          ? <ChevronDown size={16} className="text-sky-400 shrink-0" />
+          : <ChevronRight size={16} className="text-sky-muted group-hover:text-sky-400 shrink-0" />}
+        <h3 className="text-sm font-semibold text-sky-300 group-hover:text-sky-200 transition-colors">{title}</h3>
       </button>
       {open && (
         <div className="mt-2 ml-6 text-sm text-sky-off leading-relaxed whitespace-pre-wrap">{content}</div>

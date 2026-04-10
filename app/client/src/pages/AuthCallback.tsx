@@ -44,10 +44,10 @@ export default function AuthCallback() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+      <div className="min-h-screen bg-midnight flex items-center justify-center">
         <div className="text-center space-y-4">
           <p className="text-red-400 text-lg">{error}</p>
-          <a href="/" className="text-violet-400 hover:text-violet-300 underline">
+          <a href="/" className="text-sky-400 hover:text-sky-300 underline">
             Back to home
           </a>
         </div>
@@ -56,8 +56,8 @@ export default function AuthCallback() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
-      <p className="text-neutral-400 text-lg animate-pulse">Signing you in...</p>
+    <div className="min-h-screen bg-midnight flex items-center justify-center">
+      <p className="text-zinc-400 text-lg animate-pulse">Signing you in...</p>
     </div>
   );
 }

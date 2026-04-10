@@ -28,9 +28,9 @@ const TYPE_ICON: Record<PublicBuildEntry['entry_type'], React.ReactNode> = {
 
 const TYPE_STYLES: Record<PublicBuildEntry['entry_type'], { badge: string; dot: string; line: string; label: string }> = {
   prompt: {
-    badge: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
-    dot: 'border-violet-500/40 text-violet-400',
-    line: 'bg-violet-500/20',
+    badge: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+    dot: 'border-sky-500/40 text-sky-400',
+    line: 'bg-sky-500/20',
     label: 'Prompt',
   },
   decision: {

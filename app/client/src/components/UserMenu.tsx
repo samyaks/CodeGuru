@@ -21,7 +21,7 @@ export default function UserMenu() {
     return (
       <button
         onClick={() => login('github')}
-        className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors"
+        className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
       >
         <Github size={16} />
         Sign in
@@ -33,16 +33,16 @@ export default function UserMenu() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-sm text-neutral-300 hover:text-white transition-colors"
+        className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 transition-colors"
       >
         {user.avatar_url ? (
           <img
             src={user.avatar_url}
             alt=""
-            className="w-6 h-6 rounded-full ring-1 ring-neutral-700"
+            className="w-6 h-6 rounded-full ring-1 ring-zinc-700"
           />
         ) : (
-          <div className="w-6 h-6 rounded-full bg-violet-600 flex items-center justify-center text-xs font-medium">
+          <div className="w-6 h-6 rounded-full bg-sky-500 flex items-center justify-center text-xs font-bold text-black">
             {(user.full_name || user.user_name || user.email)[0].toUpperCase()}
           </div>
         )}
@@ -50,13 +50,13 @@ export default function UserMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg bg-neutral-800 border border-neutral-700 shadow-xl py-1 z-50">
-          <div className="px-3 py-2 text-xs text-neutral-400 border-b border-neutral-700 truncate">
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-xl glass shadow-xl py-1 z-50">
+          <div className="px-3 py-2 text-xs text-zinc-500 border-b border-zinc-700/40 truncate">
             {user.email}
           </div>
           <button
             onClick={() => { setOpen(false); logout(); }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700/50 transition-colors"
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/30 transition-colors"
           >
             <LogOut size={14} />
             Sign out
