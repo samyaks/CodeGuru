@@ -2,14 +2,13 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, UI-update]
   workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy to Railway
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@v4
