@@ -16,15 +16,12 @@ COPY app/client/package.json app/client/package.json
 
 RUN npm ci --include=dev
 
-# Bust Docker layer cache (change this value to force full rebuild)
-ARG CACHE_DATE=2026-04-11
-
 # Copy source code
 COPY packages/ packages/
 COPY app/ app/
 
-# Install client dependencies (not a workspace member) and build
-RUN cd app/client && npm install && npm run build
+# Install client dependencies and build — echo ensures layer is never cached
+RUN cd app/client && npm install && echo "build:$(date +%s)" && npm run build
 
 # Stage 2: Production image — server + built client
 FROM node:20-slim AS production
