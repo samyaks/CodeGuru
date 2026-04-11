@@ -12,6 +12,7 @@ import AnalysisProgress from './pages/AnalysisProgress';
 import ReadinessReport from './pages/ReadinessReport';
 import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
+import EnvSetup from './pages/EnvSetup';
 import ProjectView from './pages/ProjectView';
 import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />
             <Route path="/takeoff/:id/report" element={<ReadinessReport />} />
             <Route path="/takeoff/:id/plan" element={<ProductionPlan />} />
+            <Route path="/takeoff/:id/env-setup" element={<EnvSetup />} />
             <Route path="/deploy/:id" element={<DeployProgress />} />
 
             {/* Legacy CodeGuru routes */}

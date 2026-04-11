@@ -251,6 +251,40 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
   }
 }));
 
+router.get('/:id/env-vars', asyncHandler(async (req, res) => {
+  if (!req.user) throw AppError.unauthorized('Login required');
+
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  const denied = checkProjectAccess(project, req);
+  if (denied) throw AppError.forbidden('Forbidden');
+
+  let vars = {};
+  try { vars = JSON.parse(project.env_vars || '{}'); } catch {}
+  res.json({ vars });
+}));
+
+router.post('/:id/env-vars', asyncHandler(async (req, res) => {
+  if (!req.user) throw AppError.unauthorized('Login required');
+
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  const denied = checkProjectAccess(project, req);
+  if (denied) throw AppError.forbidden('Forbidden');
+
+  const { vars } = req.body;
+  if (!vars || typeof vars !== 'object') throw AppError.badRequest('vars must be an object');
+
+  deployments.update(req.params.id, {
+    env_vars: JSON.stringify(vars),
+    updated_at: new Date().toISOString(),
+  });
+
+  res.json({ ok: true });
+}));
+
 router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');

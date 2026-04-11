@@ -148,6 +148,12 @@ export interface ReadinessCategory {
   detail: string;
 }
 
+export interface EnvVarDef {
+  name: string;
+  hasDefault: boolean;
+  value: string | null;
+}
+
 export interface BuildPlan {
   type: string;
   framework: string;
@@ -155,6 +161,7 @@ export interface BuildPlan {
   reason?: string;
   buildCommand?: string | null;
   startCommand?: string | null;
+  envVarsRequired?: EnvVarDef[];
 }
 
 export interface StackInfo {
@@ -261,13 +268,13 @@ export interface Project {
 }
 
 // Takeoff
-export async function startTakeoff(repoUrl: string): Promise<{ projectId: string }> {
+export async function startTakeoff(repoUrl: string): Promise<{ projectId: string; slug: string; status: string }> {
   const res = await authFetch(`${API_BASE}/takeoff`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl }),
   });
-  return handleApiResponse<{ projectId: string }>(res);
+  return handleApiResponse<{ projectId: string; slug: string; status: string }>(res);
 }
 
 export async function fetchProject(id: string): Promise<Project> {
@@ -282,6 +289,22 @@ export async function updatePlanStep(projectId: string, stepId: string, status: 
     body: JSON.stringify({ status }),
   });
   return handleApiResponse<{ step: PlanStep }>(res);
+}
+
+// Env vars
+export async function saveEnvVars(projectId: string, vars: Record<string, string>) {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/env-vars`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vars }),
+  });
+  return handleApiResponse(res);
+}
+
+export async function getEnvVars(projectId: string): Promise<Record<string, string>> {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/env-vars`);
+  const data = await handleApiResponse<{ vars: Record<string, string> }>(res);
+  return data.vars || {};
 }
 
 // Deploy
@@ -408,6 +431,6 @@ export async function fetchPublicStory(slug: string): Promise<PublicStoryData> {
 }
 
 export async function generateSocialSummary(slug: string): Promise<{ summary: string }> {
-  const res = await authFetch(`${API_BASE}/story/${slug}/summary`, { method: 'POST' });
+  const res = await fetch(`${API_BASE}/story/${slug}/summary`);
   return handleApiResponse<{ summary: string }>(res);
 }

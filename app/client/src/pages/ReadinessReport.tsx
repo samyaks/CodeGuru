@@ -199,7 +199,7 @@ export default function ReadinessReport() {
               <button
                 onClick={() => {
                   if (!user) { alert('Please log in to deploy.'); return; }
-                  navigate(`/deploy/${id}`);
+                  navigate(`/takeoff/${id}/env-setup`);
                 }}
                 className={`p-6 rounded-xl border text-left transition-all ${
                   isDeployRecommended

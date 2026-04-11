@@ -71,6 +71,7 @@ router.get('/:slug', readLimit, asyncHandler(async (req, res) => {
       slug: parsed.slug,
     },
     entries: entries.map(sanitizeEntry),
+    social_summary: parsed.social_summary || null,
   });
 }));
 

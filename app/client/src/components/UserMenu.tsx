@@ -21,7 +21,7 @@ export default function UserMenu() {
     return (
       <button
         onClick={() => login('github')}
-        className="flex items-center gap-1.5 font-mono text-[0.62rem] tracking-[0.15em] uppercase text-sky-muted hover:text-sky-white transition-colors"
+        className="flex items-center gap-1.5 text-sm font-medium text-sky-muted hover:text-sky-white transition-colors"
       >
         <Github size={14} />
         Sign in
@@ -33,7 +33,7 @@ export default function UserMenu() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-sm text-sky-off hover:text-sky-white transition-colors"
+        className="flex items-center gap-2 text-sm text-sky-muted hover:text-sky-white transition-colors"
       >
         {user.avatar_url ? (
           <img
@@ -42,7 +42,7 @@ export default function UserMenu() {
             className="w-6 h-6 rounded-full ring-1 ring-sky-border"
           />
         ) : (
-          <div className="w-6 h-6 rounded-full bg-ink flex items-center justify-center text-xs font-bold text-gold-bright">
+          <div className="w-6 h-6 rounded-full bg-navy-mid flex items-center justify-center text-xs font-bold text-gold">
             {(user.full_name || user.user_name || user.email)[0].toUpperCase()}
           </div>
         )}
@@ -50,13 +50,13 @@ export default function UserMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg glass shadow-lg py-1 z-50">
-          <div className="px-3 py-2 text-xs text-sky-muted border-b border-sky-border/60 truncate">
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-xl glass shadow-lg py-1 z-50">
+          <div className="px-3 py-2 text-xs text-sky-muted border-b border-sky-border truncate">
             {user.email}
           </div>
           <button
             onClick={() => { setOpen(false); logout(); }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-sky-off hover:bg-navy-mid transition-colors"
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors"
           >
             <LogOut size={14} />
             Sign out

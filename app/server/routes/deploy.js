@@ -61,9 +61,13 @@ async function runDeploy(projectId, project, userId) {
 
     const projectName = `takeoff-${project.repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
 
+    let envVars = {};
+    try { envVars = JSON.parse(project.env_vars || '{}'); } catch {}
+
     const result = await railway.deployFromRepo(`${project.owner}/${project.repo}`, {
       projectName,
       branch: project.branch || 'main',
+      variables: envVars,
       onProgress: (p) => {
         broadcast(deployStreamId, { type: 'progress', ...p });
       },
@@ -91,6 +95,26 @@ async function runDeploy(projectId, project, userId) {
 
       logDeployEvent(projectId, userId, { status: 'live', liveUrl: result.url });
       console.log(JSON.stringify({ event: 'deploy_success', projectId, repo: project.repo, userId, url: result.url, timestamp: new Date().toISOString() }));
+
+      setImmediate(async () => {
+        try {
+          const { syncLiveUrl } = require('../services/url-sync');
+
+          broadcast(deployStreamId, { type: 'progress', phase: 'url-sync', message: 'Syncing live URL across services...' });
+
+          const syncResults = await syncLiveUrl(projectId, result.url, {
+            railwayProjectId: result.projectId,
+            railwayServiceId: result.serviceId,
+            railwayEnvironmentId: result.environmentId,
+            envVars,
+            supabaseProjectRef: envVars.SUPABASE_PROJECT_REF || null,
+          });
+
+          broadcast(deployStreamId, { type: 'url-synced', results: syncResults });
+        } catch (err) {
+          console.error('URL sync failed (non-fatal):', err.message);
+        }
+      });
     } else {
       let buildLogs = '';
       try {

@@ -96,29 +96,28 @@ export default function Landing() {
       <Header />
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 relative overflow-hidden">
-        {/* Grid background */}
+        {/* Subtle grid background */}
         <div className="absolute inset-0 pointer-events-none" style={{
-          backgroundImage: 'linear-gradient(#dddbd4 1px, transparent 1px), linear-gradient(90deg, #dddbd4 1px, transparent 1px)',
+          backgroundImage: 'linear-gradient(rgba(63,63,70,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(63,63,70,0.15) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
-          opacity: 0.4,
         }} />
         <div className="absolute inset-0 pointer-events-none" style={{
-          background: 'radial-gradient(ellipse at center, transparent 30%, #fafaf8 75%)',
+          background: 'radial-gradient(ellipse at center, transparent 30%, #050505 75%)',
         }} />
 
         <div className="max-w-3xl w-full text-center space-y-10 relative z-10">
-          <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 border border-gold/40 bg-gold/[0.08] font-mono text-[0.58rem] tracking-[0.25em] uppercase text-gold">
-              <span className="w-[5px] h-[5px] rounded-full bg-gold flex-shrink-0" />
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-gold/30 bg-gold/[0.08] text-xs font-medium text-gold">
+              <span className="w-[5px] h-[5px] rounded-full bg-gold animate-pulse flex-shrink-0" />
               Now in early access
             </div>
-            <h1 className="font-serif font-light text-[clamp(3.2rem,8vw,6.5rem)] leading-[0.98] tracking-[-0.025em] text-ink">
-              You built it.<br />Now <em className="italic text-gold">ship</em> it.
+            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tighter leading-[1.05] gradient-text">
+              You built it,<br />now let's ship it!
             </h1>
-            <p className="font-serif italic font-light text-[clamp(1rem,2vw,1.35rem)] text-sky-muted max-w-lg mx-auto leading-relaxed">
+            <p className="text-lg text-sky-muted max-w-lg mx-auto leading-relaxed">
               {user
                 ? 'Select a repo below or paste any GitHub URL to get started.'
-                : 'The missing last mile for AI-built apps — auth, database, payments, deploy. One click.'}
+                : 'The missing last mile for AI-built apps \u2014 auth, database, payments, deploy. One click.'}
             </p>
           </div>
 
@@ -126,13 +125,13 @@ export default function Landing() {
             <div className="flex items-center justify-center gap-2 text-sm">
               <button
                 onClick={() => setMode('picker')}
-                className={`px-3 py-1.5 rounded-lg transition-colors font-mono text-xs tracking-wider uppercase ${mode === 'picker' ? 'bg-gold/[0.08] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                className={`px-4 py-1.5 rounded-lg transition-colors text-sm font-medium ${mode === 'picker' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
               >
                 My Repos
               </button>
               <button
                 onClick={() => setMode('url')}
-                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 font-mono text-xs tracking-wider uppercase ${mode === 'url' ? 'bg-gold/[0.08] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'url' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
               >
                 <Link2 size={14} />
                 Paste URL
@@ -143,7 +142,7 @@ export default function Landing() {
           {user && mode === 'picker' ? (
             <div ref={dropdownRef} className="relative max-w-xl mx-auto">
               <div
-                className="glass flex items-center gap-2 px-4 py-3 rounded-lg text-sky-white cursor-pointer hover:border-gold/40 transition-colors"
+                className="glass flex items-center gap-2 px-4 py-3 rounded-xl text-sky-white cursor-pointer hover:border-gold/40 transition-colors"
                 onClick={() => setShowDropdown(!showDropdown)}
               >
                 <Search size={16} className="text-sky-muted shrink-0" />
@@ -160,7 +159,7 @@ export default function Landing() {
               </div>
 
               {showDropdown && (
-                <div className="absolute z-50 top-full mt-1 w-full rounded-lg glass shadow-lg max-h-80 overflow-y-auto">
+                <div className="absolute z-50 top-full mt-1 w-full rounded-xl glass shadow-lg max-h-80 overflow-y-auto">
                   {reposLoading ? (
                     <div className="px-4 py-6 text-center text-sky-muted text-sm">
                       <span className="inline-block w-4 h-4 border-2 border-sky-border border-t-sky-muted rounded-full animate-spin mr-2" />
@@ -228,17 +227,17 @@ export default function Landing() {
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="https://github.com/owner/repo"
-                className="flex-1 px-4 py-3.5 glass text-ink placeholder-sky-muted focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/50 transition-all text-sm font-mono"
+                className="flex-1 px-4 py-3.5 rounded-xl glass text-sky-white placeholder-sky-muted focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/50 transition-all text-sm font-mono"
                 disabled={loading}
               />
               <button
                 type="submit"
                 disabled={loading || !repoUrl.trim()}
-                className="px-6 py-3.5 bg-ink text-paper font-mono text-[0.68rem] tracking-[0.18em] uppercase hover:bg-sky-off transition-all btn-glow disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-3.5 rounded-xl bg-gold text-midnight font-semibold text-sm hover:bg-gold-dim transition-all btn-glow disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {loading ? (
                   <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-paper/30 border-t-paper rounded-full animate-spin" />
+                    <span className="w-4 h-4 border-2 border-midnight/30 border-t-midnight rounded-full animate-spin" />
                     Analyzing...
                   </span>
                 ) : (
@@ -249,13 +248,13 @@ export default function Landing() {
           )}
 
           {error && (
-            <div className="text-red-600 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
+            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
               {error}
             </div>
           )}
 
           {(!user || mode === 'url') && (
-            <div className="text-sm text-sky-muted font-mono text-xs tracking-wide">
+            <div className="text-sm text-sky-muted">
               Try an example:
               {EXAMPLES.map((ex, i) => (
                 <button
@@ -270,27 +269,27 @@ export default function Landing() {
             </div>
           )}
 
-          <div className="grid sm:grid-cols-3 gap-[1px] bg-sky-border pt-6">
-            <div className="bg-midnight p-8 text-left hover:bg-navy transition-colors group">
+          <div className="grid sm:grid-cols-3 gap-4 pt-6">
+            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
               <CheckCircle2 size={20} className="text-gold mb-4" />
-              <h3 className="font-serif text-lg font-normal text-ink mb-2">Readiness Score</h3>
+              <h3 className="text-base font-semibold text-sky-white mb-2">Readiness Score</h3>
               <p className="text-sm text-sky-muted leading-relaxed">See exactly what's ready and what's missing — auth, database, tests, and more.</p>
             </div>
-            <div className="bg-midnight p-8 text-left hover:bg-navy transition-colors group">
+            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
               <ClipboardList size={20} className="text-gold mb-4" />
-              <h3 className="font-serif text-lg font-normal text-ink mb-2">Plan to Ship</h3>
+              <h3 className="text-base font-semibold text-sky-white mb-2">Plan to Ship</h3>
               <p className="text-sm text-sky-muted leading-relaxed">Step-by-step plan with context files and Cursor prompts for each thing you need to add.</p>
             </div>
-            <div className="bg-midnight p-8 text-left hover:bg-navy transition-colors group">
+            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
               <Rocket size={20} className="text-gold mb-4" />
-              <h3 className="font-serif text-lg font-normal text-ink mb-2">One-Click Deploy</h3>
+              <h3 className="text-base font-semibold text-sky-white mb-2">One-Click Deploy</h3>
               <p className="text-sm text-sky-muted leading-relaxed">When you're ready, deploy to production with a single click. No config needed.</p>
             </div>
           </div>
         </div>
       </main>
 
-      <footer className="text-center py-6 font-mono text-[0.56rem] tracking-[0.08em] text-border-dark border-t border-sky-border">
+      <footer className="text-center py-6 text-xs text-sky-muted border-t border-sky-border">
         Takeoff &middot; From vibe code to production
       </footer>
     </div>

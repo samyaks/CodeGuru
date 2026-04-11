@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Loader2, Rocket, ExternalLink, AlertCircle } from 'lucide-react';
+import { Loader2, Rocket, ExternalLink, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import Header from '../components/Header';
 import { useSSE } from '../hooks/useSSE';
 import { triggerDeploy, fetchProject } from '../services/api';
@@ -16,6 +16,8 @@ export default function DeployProgress() {
 
   const deployed = messages.find((m) => m.type === 'deployed') as any;
   const failed = messages.find((m) => m.type === 'failed') as any;
+  const urlSynced = messages.find((m) => m.type === 'url-synced') as any;
+  const isSyncing = messages.some((m) => m.type === 'progress' && (m as any).phase === 'url-sync') && !urlSynced;
   const latestProgress = [...messages].reverse().find((m) => m.type === 'progress') as any;
 
   useEffect(() => {
@@ -25,6 +27,10 @@ export default function DeployProgress() {
     fetchProject(id)
       .then((project) => {
         if (cancelled) return;
+        if (project.status === 'ready') {
+          navigate(`/takeoff/${id}/env-setup`, { replace: true });
+          return;
+        }
         if (ALREADY_ACTIVE.has(project.status)) {
           setDeployStarted(true);
         } else {
@@ -91,6 +97,40 @@ export default function DeployProgress() {
                   Dashboard
                 </button>
               </div>
+
+              {(isSyncing || urlSynced) && (
+                <div className="mt-6 text-left glass rounded-lg p-4 border border-sky-border/30">
+                  <h3 className="text-sm font-medium text-sky-white mb-3">URL Sync</h3>
+                  {isSyncing && !urlSynced && (
+                    <div className="flex items-center gap-2 text-xs text-sky-muted">
+                      <Loader2 size={14} className="animate-spin text-gold" />
+                      Syncing live URL across services...
+                    </div>
+                  )}
+                  {urlSynced?.results?.map((r: any, i: number) => (
+                    <div key={i} className="flex items-start gap-2 text-xs py-1">
+                      {r.status === 'synced' ? (
+                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 shrink-0" />
+                      ) : (
+                        <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                      )}
+                      <div>
+                        <span className="text-sky-white">
+                          {r.service === 'railway_env' ? 'Railway env vars' : 'Supabase Auth'}
+                        </span>
+                        {r.status === 'synced' && r.updated && (
+                          <span className="text-sky-muted ml-1">
+                            ({r.updated.join(', ')})
+                          </span>
+                        )}
+                        {r.status === 'failed' && (
+                          <span className="text-amber-400 ml-1">{r.error}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : failed ? (
             <div className="space-y-6">

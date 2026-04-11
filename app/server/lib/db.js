@@ -1,4 +1,5 @@
 const Database = require('better-sqlite3');
+const crypto = require('crypto');
 const path = require('path');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'takeoff.db');
@@ -134,6 +135,16 @@ function getDb() {
       sort_order INTEGER DEFAULT 0,
       FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS project_services (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      service_type TEXT NOT NULL CHECK(service_type IN ('supabase', 'railway', 'vercel', 'github')),
+      external_id TEXT,
+      config TEXT DEFAULT '{}',
+      synced_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
+    );
   `);
 
   // Migrate existing databases
@@ -150,6 +161,7 @@ function getDb() {
   try { db.exec('ALTER TABLE deployments ADD COLUMN slug TEXT'); } catch (_) {}
   try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployments_slug ON deployments(slug)'); } catch (_) {}
   try { db.exec('ALTER TABLE deployments ADD COLUMN social_summary TEXT'); } catch (_) {}
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN env_vars TEXT DEFAULT '{}'`); } catch (_) {}
 
   return db;
 }
@@ -262,7 +274,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'recommendation', 'description', 'analysis_data', 'features_summary',
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
-  'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary',
+  'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
 ]);
 
 const deployments = {
@@ -364,6 +376,35 @@ const buildEntries = {
   },
 };
 
+// ── Project Services ──
+
+const projectServices = {
+  create(data) {
+    const d = getDb();
+    const id = crypto.randomUUID();
+    d.prepare(
+      'INSERT INTO project_services (id, project_id, service_type, external_id, config) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, data.project_id, data.service_type, data.external_id || null, JSON.stringify(data.config || {}));
+    return { id, ...data };
+  },
+  findByProject(projectId) {
+    return getDb().prepare('SELECT * FROM project_services WHERE project_id = ?').all(projectId);
+  },
+  update(id, data) {
+    const sets = [];
+    const vals = [];
+    if (data.external_id !== undefined) { sets.push('external_id = ?'); vals.push(data.external_id); }
+    if (data.config !== undefined) { sets.push('config = ?'); vals.push(JSON.stringify(data.config)); }
+    if (data.synced_at !== undefined) { sets.push('synced_at = ?'); vals.push(data.synced_at); }
+    if (sets.length === 0) return;
+    vals.push(id);
+    getDb().prepare(`UPDATE project_services SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  },
+  delete(id) {
+    getDb().prepare('DELETE FROM project_services WHERE id = ?').run(id);
+  },
+};
+
 // ── Analyses ──
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
@@ -413,4 +454,4 @@ function closeDb() {
   }
 }
 
-module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries };
+module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices };

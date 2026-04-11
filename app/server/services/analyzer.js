@@ -1,7 +1,7 @@
 const github = require('./github');
 const { detectDeploymentFiles } = require('./deployment');
 
-const MAX_FILES_TO_READ = 30;
+const MAX_FILES_TO_READ = 150;
 
 const PRIORITY_FILES = [
   /^package\.json$/,

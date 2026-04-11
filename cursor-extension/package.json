@@ -1,0 +1,59 @@
+{
+  "name": "takeoff-buildstory",
+  "displayName": "Takeoff BuildStory",
+  "description": "Capture prompts and commits for your BuildStory timeline",
+  "version": "0.1.0",
+  "publisher": "takeoff",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Takeoff BuildStory",
+      "properties": {
+        "takeoff.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "Your Takeoff project ID"
+        },
+        "takeoff.apiUrl": {
+          "type": "string",
+          "default": "https://takeoff.app",
+          "description": "Takeoff API URL"
+        },
+        "takeoff.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your Takeoff API key"
+        },
+        "takeoff.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable BuildStory capture"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "takeoff.addNote",
+        "title": "Takeoff: Add BuildStory Note"
+      },
+      {
+        "command": "takeoff.setProject",
+        "title": "Takeoff: Set Project ID"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
