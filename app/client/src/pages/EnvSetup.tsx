@@ -78,12 +78,13 @@ export default function EnvSetup() {
 
     (async () => {
       try {
-        const [proj, savedVars] = await Promise.all([
+        const [proj, rawVars] = await Promise.all([
           fetchProject(id),
-          getEnvVars(id).catch((): Record<string, string> => ({})),
+          getEnvVars(id).catch(() => ({}) as Record<string, string>),
         ]);
         if (cancelled) return;
         setProject(proj);
+        const savedVars: Record<string, string> = rawVars;
 
         const envDefs: EnvVarDef[] = proj.build_plan?.envVarsRequired || [];
         const initial: Record<string, string> = {};
