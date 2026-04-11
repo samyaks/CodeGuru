@@ -116,6 +116,41 @@ async function fetchRepoPulls(owner, repo, { state = 'open', page = 1, perPage =
   return res.json();
 }
 
+async function fetchCommits(owner, repo, { branch = 'main', perPage = 50, since = null } = {}) {
+  let url = `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}`;
+  if (since) url += `&since=${since}`;
+
+  const res = await githubFetch(url);
+  const commits = await res.json();
+
+  return commits.map((c) => ({
+    sha: c.sha,
+    shortSha: c.sha.slice(0, 7),
+    message: c.commit.message,
+    title: c.commit.message.split('\n')[0].trim(),
+    author: c.commit.author?.name || c.author?.login || 'Unknown',
+    authorLogin: c.author?.login || null,
+    authorAvatar: c.author?.avatar_url || null,
+    date: c.commit.author?.date || c.commit.committer?.date,
+    url: c.html_url,
+  }));
+}
+
+async function fetchCommitDetail(owner, repo, sha) {
+  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`);
+  const data = await res.json();
+  return {
+    sha: data.sha,
+    files: (data.files || []).map((f) => ({
+      path: f.filename,
+      status: f.status,
+      additions: f.additions,
+      deletions: f.deletions,
+    })),
+    stats: data.stats,
+  };
+}
+
 module.exports = {
   parseRepoUrl,
   parsePRUrl,
@@ -128,4 +163,6 @@ module.exports = {
   fetchUserRepos,
   searchRepos,
   fetchRepoPulls,
+  fetchCommits,
+  fetchCommitDetail,
 };

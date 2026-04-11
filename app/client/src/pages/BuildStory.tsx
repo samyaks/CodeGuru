@@ -4,6 +4,7 @@ import {
   Terminal,
   FileText,
   GitBranch,
+  GitCommit as GitCommitIcon,
   Flag,
   Rocket,
   File,
@@ -19,6 +20,9 @@ import {
   Eye,
   EyeOff,
   Link as LinkIcon,
+  ExternalLink,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
@@ -32,9 +36,25 @@ import {
   type BuildEntry,
   type ProjectWithEntries,
 } from '../services/api';
+import { useCommits, type GitCommit } from '../hooks/useCommits';
+
+type TimelineItem =
+  | { kind: 'entry'; data: BuildEntry; date: string }
+  | { kind: 'commit'; data: GitCommit; date: string };
+
+type FilterMode = 'all' | 'commits' | 'entries';
+
+function mergeTimeline(entries: BuildEntry[], commits: GitCommit[]): TimelineItem[] {
+  const items: TimelineItem[] = [
+    ...entries.map((e) => ({ kind: 'entry' as const, data: e, date: e.created_at })),
+    ...commits.map((c) => ({ kind: 'commit' as const, data: c, date: c.date })),
+  ];
+  return items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
 
 interface BuildStoryProps {
   projectId?: string;
+  onCounts?: (commits: number, entries: number) => void;
 }
 
 const ENTRY_TYPES: BuildEntry['entry_type'][] = [
@@ -81,7 +101,7 @@ interface EntryForm {
 
 const EMPTY_FORM: EntryForm = { entry_type: 'note', title: '', content: '' };
 
-export default function BuildStory({ projectId: propProjectId }: BuildStoryProps) {
+export default function BuildStory({ projectId: propProjectId, onCounts }: BuildStoryProps) {
   const params = useParams<{ id: string }>();
   const projectId = propProjectId || params.id || '';
   const isStandalone = !propProjectId;
@@ -89,6 +109,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
   const [entries, setEntries] = useState<BuildEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterMode>('all');
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState<EntryForm>(EMPTY_FORM);
@@ -107,6 +128,8 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
   const [socialSummary, setSocialSummary] = useState<string | null>(null);
   const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
 
+  const { commits, loading: commitsLoading, reason: commitsReason } = useCommits(projectId);
+
   useEffect(() => {
     if (!projectId) return;
     fetchBuildStory(projectId)
@@ -117,6 +140,16 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
       .then(setProject)
       .catch(() => {});
   }, [projectId]);
+
+  useEffect(() => {
+    onCounts?.(commits.length, entries.length);
+  }, [commits.length, entries.length, onCounts]);
+
+  const timeline = mergeTimeline(entries, commits);
+  const filteredTimeline = filter === 'all'
+    ? timeline
+    : timeline.filter((item) => item.kind === (filter === 'commits' ? 'commit' : 'entry'));
+  const isLoading = loading || commitsLoading;
 
   const handleCreate = useCallback(async () => {
     if (!addForm.content.trim()) return;
@@ -311,29 +344,84 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
       )}
 
       {/* Loading */}
-      {loading && (
+      {isLoading && (
         <div className="flex justify-center py-16">
           <Loader2 size={32} className="animate-spin text-sky-muted" />
         </div>
       )}
 
-      {/* Empty state */}
-      {!loading && entries.length === 0 && (
+      {/* Empty states */}
+      {!isLoading && entries.length === 0 && commits.length === 0 && (
         <div className="text-center py-16 space-y-3">
           <FileText size={48} className="mx-auto text-sky-muted" />
-          <h3 className="text-lg font-semibold text-sky-white">No entries yet</h3>
+          <h3 className="text-lg font-semibold text-sky-white">Your BuildStory is empty</h3>
           <p className="text-sm text-sky-muted max-w-md mx-auto">
-            Start documenting your build journey — prompts, decisions, milestones, and more.
+            {commitsReason
+              ? "Commit history couldn't be loaded (private repo or rate limit). Add entries manually to document your build."
+              : 'Start documenting your build journey — prompts, decisions, milestones, and more.'}
           </p>
         </div>
       )}
 
-      {/* Timeline */}
-      {!loading && entries.length > 0 && (
+      {!isLoading && entries.length === 0 && commits.length > 0 && (
+        <div className="bg-navy border border-sky-border/50 rounded-xl p-5 text-center space-y-2">
+          <p className="text-sm text-sky-white font-medium">
+            Your commit history is here — {commits.length} commit{commits.length !== 1 ? 's' : ''}
+          </p>
+          <p className="text-xs text-sky-muted">
+            Add a note, decision, or milestone to tell the story behind what you built.
+          </p>
+          {!showAddForm && (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors mt-2"
+            >
+              <Plus size={16} />
+              Add First Entry
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filter bar */}
+      {!isLoading && timeline.length > 0 && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-sky-muted mr-1">Show:</span>
+          {(['all', 'commits', 'entries'] as FilterMode[]).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setFilter(mode)}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                filter === mode
+                  ? 'bg-gold/10 text-gold border border-gold/20'
+                  : 'text-sky-muted hover:text-sky-white border border-transparent'
+              }`}
+            >
+              {mode === 'all' ? 'All' : mode === 'commits' ? 'Commits only' : 'My entries only'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Merged timeline */}
+      {!isLoading && filteredTimeline.length > 0 && (
         <div className="relative">
-          {entries.map((entry, idx) => {
+          {filteredTimeline.map((item, idx) => {
+            const isLast = idx === filteredTimeline.length - 1;
+
+            if (item.kind === 'commit') {
+              return (
+                <CommitCard
+                  key={item.data.sha}
+                  commit={item.data}
+                  isLast={isLast}
+                  projectId={projectId}
+                />
+              );
+            }
+
+            const entry = item.data;
             const isEditing = editingId === entry.id;
-            const isLast = idx === entries.length - 1;
 
             return (
               <div key={entry.id} className="relative flex gap-4">
@@ -425,7 +513,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
       )}
 
       {/* Generate context button */}
-      {!loading && entries.length > 0 && (
+      {!isLoading && entries.length > 0 && (
         <div className="pt-4 border-t border-sky-border/30">
           <button
             onClick={handleGenerate}
@@ -563,4 +651,126 @@ function EntryFormCard({
       </div>
     </div>
   );
+}
+
+function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: boolean; projectId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+
+  const handleExpand = async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (!commit.filesChanged) {
+      setLoadingFiles(true);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/commits/${commit.sha}`, { credentials: 'include' });
+        const data = await res.json();
+        commit.filesChanged = data.files;
+      } catch {
+        // silently fail — files just won't show
+      } finally {
+        setLoadingFiles(false);
+      }
+    }
+    setExpanded(true);
+  };
+
+  const timeAgo = formatRelativeTime(commit.date);
+
+  return (
+    <div className="relative flex gap-4">
+      <div className="flex flex-col items-center flex-shrink-0 w-8">
+        <div className="w-8 h-8 rounded-full flex items-center justify-center border border-sky-400/30 bg-sky-400/10 text-sky-400/60">
+          <GitCommitIcon size={16} />
+        </div>
+        {!isLast && <div className="w-0.5 flex-1 min-h-6 bg-sky-400/20" />}
+      </div>
+
+      <div className="flex-1 pb-6 min-w-0">
+        <div className="bg-midnight/50 border border-sky-400/20 rounded-xl p-4">
+          <div className="flex items-start justify-between gap-3 mb-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono text-xs bg-sky-400/10 text-sky-400/80 px-1.5 py-0.5 rounded flex-shrink-0">
+                {commit.shortSha}
+              </span>
+              <span className="text-sm text-sky-white truncate">{commit.title}</span>
+            </div>
+            <a
+              href={commit.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1 rounded text-sky-muted hover:text-sky-white transition-colors flex-shrink-0"
+              title="Open in GitHub"
+            >
+              <ExternalLink size={13} />
+            </a>
+          </div>
+
+          <div className="flex items-center gap-2 text-[11px] text-sky-muted">
+            {commit.authorAvatar && (
+              <img src={commit.authorAvatar} alt="" className="w-4 h-4 rounded-full" />
+            )}
+            <span>{commit.authorLogin || commit.author}</span>
+            <span>·</span>
+            <span>{timeAgo}</span>
+          </div>
+
+          <button
+            onClick={handleExpand}
+            className="mt-2 flex items-center gap-1 text-xs text-sky-muted hover:text-sky-white transition-colors"
+          >
+            {loadingFiles ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : expanded ? (
+              <ChevronDown size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
+            {commit.filesChanged
+              ? `${commit.filesChanged.length} file${commit.filesChanged.length !== 1 ? 's' : ''} changed`
+              : 'Show files'}
+          </button>
+
+          {expanded && commit.filesChanged && (
+            <div className="mt-2 space-y-1">
+              {commit.filesChanged.map((f) => (
+                <div key={f.path} className="flex items-center gap-2 text-xs font-mono">
+                  <span className={
+                    f.status === 'added' ? 'text-emerald-500' :
+                    f.status === 'removed' ? 'text-red-500' :
+                    f.status === 'renamed' ? 'text-amber-500' :
+                    'text-sky-muted'
+                  }>
+                    {f.status === 'added' ? 'A' : f.status === 'removed' ? 'D' : f.status === 'renamed' ? 'R' : 'M'}
+                  </span>
+                  <span className="text-sky-off truncate">{f.path}</span>
+                  <span className="ml-auto flex-shrink-0 text-sky-muted">
+                    {f.additions > 0 && <span className="text-emerald-500">+{f.additions}</span>}
+                    {f.additions > 0 && f.deletions > 0 && ' '}
+                    {f.deletions > 0 && <span className="text-red-500">-{f.deletions}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return new Date(dateStr).toLocaleDateString();
 }

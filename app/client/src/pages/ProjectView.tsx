@@ -52,6 +52,8 @@ export default function ProjectView() {
   const [tab, setTab] = useState<Tab>('overview');
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [commitCount, setCommitCount] = useState(0);
+  const [entryCount, setEntryCount] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -107,9 +109,13 @@ export default function ProjectView() {
 
   const statusClass = STATUS_COLORS[project.status] || 'bg-sky-muted/10 text-sky-muted border-sky-border';
 
+  const storyCounts = commitCount > 0 || entryCount > 0
+    ? ` ${commitCount} commit${commitCount !== 1 ? 's' : ''} + ${entryCount} entr${entryCount !== 1 ? 'ies' : 'y'}`
+    : '';
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'story', label: 'Build Story' },
+    { key: 'story', label: `Build Story${storyCounts}` },
     { key: 'settings', label: 'Settings' },
   ];
 
@@ -290,7 +296,12 @@ export default function ProjectView() {
         )}
 
         {/* Build Story Tab */}
-        {tab === 'story' && id && <BuildStory projectId={id} />}
+        {tab === 'story' && id && (
+          <BuildStory
+            projectId={id}
+            onCounts={(c, e) => { setCommitCount(c); setEntryCount(e); }}
+          />
+        )}
 
         {/* Settings Tab */}
         {tab === 'settings' && (

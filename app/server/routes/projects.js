@@ -2,6 +2,7 @@ const express = require('express');
 const { deployments, buildEntries } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const railway = require('@codeguru/railway');
+const github = require('../services/github');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { parseJsonFields, checkProjectAccess } = require('../lib/helpers');
@@ -56,6 +57,38 @@ router.get('/:id', readLimit, asyncHandler(async (req, res) => {
   parsed.entries = entries;
 
   res.json(parsed);
+}));
+
+router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  if (!project.owner || !project.repo) {
+    return res.json({ commits: [], reason: 'no_repo' });
+  }
+
+  try {
+    const commits = await github.fetchCommits(project.owner, project.repo, {
+      branch: project.branch || 'main',
+      perPage: 50,
+    });
+    res.json({ commits, owner: project.owner, repo: project.repo });
+  } catch (err) {
+    console.warn(`Commit fetch failed for ${project.owner}/${project.repo}:`, err.message);
+    res.json({ commits: [], reason: 'fetch_failed', error: err.message });
+  }
+}));
+
+router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  const detail = await github.fetchCommitDetail(project.owner, project.repo, req.params.sha);
+  res.json(detail);
 }));
 
 router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {

@@ -367,6 +367,20 @@ export async function generateContextFromStory(projectId: string): Promise<{ con
   return handleApiResponse<{ contextFile: string }>(res);
 }
 
+// Commits (live from GitHub, not stored)
+
+export async function fetchProjectCommits(projectId: string) {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commits`);
+  if (!res.ok) return { commits: [], reason: 'fetch_failed' };
+  return res.json();
+}
+
+export async function fetchCommitDetail(projectId: string, sha: string) {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commits/${sha}`);
+  if (!res.ok) throw new Error('Failed to load commit detail');
+  return res.json();
+}
+
 // Public story (no auth)
 
 export type PublicBuildEntry = Omit<BuildEntry, 'user_id' | 'metadata'>;
