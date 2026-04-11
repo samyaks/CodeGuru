@@ -56,10 +56,10 @@ const TYPE_ICON: Record<BuildEntry['entry_type'], React.ReactNode> = {
 };
 
 const TYPE_COLORS: Record<BuildEntry['entry_type'], string> = {
-  prompt: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  prompt: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
   note: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  decision: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  milestone: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  decision: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  milestone: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   deploy_event: 'bg-gold/10 text-gold border-gold/20',
   file: 'bg-sky-muted/10 text-sky-muted border-sky-border',
 };
@@ -238,7 +238,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
   const content = (
     <div className="space-y-6">
       {error && (
-        <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+        <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm">
           {error}
           <button onClick={() => setError(null)} className="ml-2 underline">
             Dismiss
@@ -376,7 +376,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
                           )}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.is_public ? 'text-emerald-400 bg-emerald-500/10' : 'text-sky-muted bg-sky-muted/10'}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.is_public ? 'text-emerald-600 bg-emerald-500/10' : 'text-sky-muted bg-sky-muted/10'}`}>
                             {entry.is_public ? 'Public' : 'Private'}
                           </span>
                           <button
@@ -402,7 +402,7 @@ export default function BuildStory({ projectId: propProjectId }: BuildStoryProps
                           </button>
                           <button
                             onClick={() => handleDelete(entry.id)}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 rounded-md text-sky-muted hover:text-red-600 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
                             title="Delete"
                           >
                             <Trash2 size={14} />

@@ -28,9 +28,9 @@ const TYPE_ICON: Record<PublicBuildEntry['entry_type'], React.ReactNode> = {
 
 const TYPE_STYLES: Record<PublicBuildEntry['entry_type'], { badge: string; dot: string; line: string; label: string }> = {
   prompt: {
-    badge: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
-    dot: 'border-sky-500/40 text-sky-400',
-    line: 'bg-sky-500/20',
+    badge: 'bg-gold/10 text-gold border-gold/20',
+    dot: 'border-gold/40 text-gold',
+    line: 'bg-gold/20',
     label: 'Prompt',
   },
   decision: {
@@ -40,14 +40,14 @@ const TYPE_STYLES: Record<PublicBuildEntry['entry_type'], { badge: string; dot: 
     label: 'Decision',
   },
   milestone: {
-    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    dot: 'border-emerald-500/40 text-emerald-400',
+    badge: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+    dot: 'border-emerald-500/40 text-emerald-600',
     line: 'bg-emerald-500/20',
     label: 'Milestone',
   },
   deploy_event: {
-    badge: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    dot: 'border-blue-500/40 text-blue-400',
+    badge: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+    dot: 'border-blue-500/40 text-blue-600',
     line: 'bg-blue-500/20',
     label: 'Deploy',
   },
@@ -58,8 +58,8 @@ const TYPE_STYLES: Record<PublicBuildEntry['entry_type'], { badge: string; dot: 
     label: 'Note',
   },
   file: {
-    badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    dot: 'border-amber-500/40 text-amber-400',
+    badge: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+    dot: 'border-amber-500/40 text-amber-600',
     line: 'bg-amber-500/20',
     label: 'File',
   },
@@ -100,9 +100,9 @@ function useOgMeta(story: PublicStoryData | null) {
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
-    score >= 80 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' :
+    score >= 80 ? 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10' :
     score >= 50 ? 'text-gold border-gold/30 bg-gold/10' :
-    'text-red-400 border-red-500/30 bg-red-500/10';
+    'text-red-600 border-red-500/30 bg-red-500/10';
 
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${color}`}>
@@ -157,7 +157,7 @@ export default function ShareableStory() {
         <StoryHeader />
         <main className="flex-1 flex flex-col items-center justify-center px-6 text-center space-y-6">
           <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
-            <AlertTriangle size={28} className="text-red-400" />
+            <AlertTriangle size={28} className="text-red-600" />
           </div>
           <h1 className="text-2xl font-bold text-sky-white">Something went wrong</h1>
           <p className="text-sky-muted max-w-md">{error}</p>
@@ -224,7 +224,7 @@ export default function ShareableStory() {
                 href={project.live_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
               >
                 <ExternalLink size={12} />
                 Live site
@@ -334,9 +334,9 @@ export default function ShareableStory() {
 
 function StoryHeader() {
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b border-sky-border/50">
+    <header className="flex items-center justify-between px-6 py-4 border-b border-sky-border">
       <Link to="/" className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-lg bg-gold/20 border border-gold/30 flex items-center justify-center font-bold text-sm text-gold">
+        <div className="w-8 h-8 rounded-lg bg-gold/10 border border-gold/20 flex items-center justify-center font-bold text-sm text-gold">
           T
         </div>
         <span className="font-semibold text-lg text-sky-white">Takeoff</span>

@@ -20,9 +20,9 @@ import {
 import { useAuth } from '../hooks/useAuth';
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  ready: <CheckCircle2 size={18} className="text-emerald-400" />,
-  partial: <AlertCircle size={18} className="text-amber-400" />,
-  missing: <XCircle size={18} className="text-red-400" />,
+  ready: <CheckCircle2 size={18} className="text-emerald-600" />,
+  partial: <AlertCircle size={18} className="text-amber-600" />,
+  missing: <XCircle size={18} className="text-red-600" />,
 };
 
 const GAP_META: Record<string, { icon: React.ReactNode; label: string }> = {
@@ -77,7 +77,7 @@ export default function ReadinessReport() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-red-400">{error || 'Project not found'}</div>
+          <div className="text-red-600">{error || 'Project not found'}</div>
         </main>
       </div>
     );
@@ -261,7 +261,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
     <div className="space-y-6">
       {/* Project structure */}
       <CollapsibleSection
-        icon={<FolderTree size={18} className="text-sky-400" />}
+        icon={<FolderTree size={18} className="text-gold" />}
         title="Project Structure"
         subtitle={`${analysis.fileTree.length} files · ${analysis.structure.directories.length} directories`}
         defaultOpen
@@ -272,7 +272,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
               <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Entry Points</h4>
               <div className="flex flex-wrap gap-1.5">
                 {analysis.structure.entryPoints.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-400">{f}</code>
+                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-600">{f}</code>
                 ))}
               </div>
             </div>
@@ -324,7 +324,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
 
       {/* Gap detail */}
       <CollapsibleSection
-        icon={<Code2 size={18} className="text-amber-400" />}
+        icon={<Code2 size={18} className="text-amber-600" />}
         title="Infrastructure Gaps"
         subtitle={`${Object.values(gaps).filter((g) => g.exists).length} of ${Object.keys(gaps).length} areas covered`}
         defaultOpen
@@ -353,13 +353,13 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
       {(analysis.existingContext.hasCursorRules || analysis.existingContext.hasClaudeMd || analysis.existingContext.hasContextMd) && (
         <div className="flex flex-wrap gap-2 pt-2">
           {analysis.existingContext.hasCursorRules && (
-            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has .cursorrules</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .cursorrules</span>
           )}
           {analysis.existingContext.hasClaudeMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has CLAUDE.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has CLAUDE.md</span>
           )}
           {analysis.existingContext.hasContextMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-sky-500/10 border border-sky-500/20 text-sky-400">Has .context.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .context.md</span>
           )}
         </div>
       )}
@@ -396,9 +396,9 @@ function FeatureRow({ feature }: { feature: FeatureInfo }) {
     <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-midnight/50 border border-sky-border/30">
       <code className="text-xs text-sky-off font-medium truncate flex-1">{feature.name}</code>
       <div className="flex items-center gap-2 shrink-0">
-        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">UI</span>}
-        {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">API</span>}
-        {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Tests</span>}
+        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold/10 text-gold border border-gold/20">UI</span>}
+        {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">API</span>}
+        {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">Tests</span>}
         <span className="text-[10px] text-sky-muted">{feature.fileCount} files</span>
       </div>
     </div>
@@ -416,11 +416,11 @@ function FeaturesSummary({ summary }: { summary: string }) {
   };
 
   return (
-    <div className="rounded-xl border border-sky-500/20 bg-gradient-to-br from-sky-950/40 to-midnight overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-sky-500/10">
+    <div className="rounded-xl border border-gold/20 bg-navy overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gold/10">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-sky-500/10">
-            <BookOpen size={20} className="text-sky-400" />
+          <div className="p-2 rounded-lg bg-gold/10">
+            <BookOpen size={20} className="text-gold" />
           </div>
           <div>
             <h2 className="text-base font-semibold text-sky-white">What this project does</h2>
@@ -429,9 +429,9 @@ function FeaturesSummary({ summary }: { summary: string }) {
         </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/20 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold/10 hover:bg-gold/20 text-gold border border-gold/20 transition-colors"
         >
-          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
@@ -450,9 +450,9 @@ function SummarySection({ title, content, defaultOpen }: { title: string; conten
     <div>
       <button onClick={() => setOpen(!open)} className="flex items-center gap-2 w-full text-left group">
         {open
-          ? <ChevronDown size={16} className="text-sky-400 shrink-0" />
-          : <ChevronRight size={16} className="text-sky-muted group-hover:text-sky-400 shrink-0" />}
-        <h3 className="text-sm font-semibold text-sky-300 group-hover:text-sky-200 transition-colors">{title}</h3>
+          ? <ChevronDown size={16} className="text-gold shrink-0" />
+          : <ChevronRight size={16} className="text-sky-muted group-hover:text-gold shrink-0" />}
+        <h3 className="text-sm font-semibold text-gold group-hover:text-gold-dim transition-colors">{title}</h3>
       </button>
       {open && (
         <div className="mt-2 ml-6 text-sm text-sky-off leading-relaxed whitespace-pre-wrap">{content}</div>
@@ -503,7 +503,7 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
 
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-midnight/50 border border-sky-border/30">
-      <span className={gap.exists ? 'text-emerald-400' : 'text-red-400'}>{meta.icon}</span>
+      <span className={gap.exists ? 'text-emerald-600' : 'text-red-600'}>{meta.icon}</span>
       <div className="flex-1 min-w-0">
         <div className="text-sm text-sky-white">{meta.label}</div>
         {details.length > 0 && (
@@ -512,8 +512,8 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
       </div>
       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
         gap.exists
-          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-          : 'bg-red-500/10 text-red-400 border border-red-500/20'
+          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+          : 'bg-red-500/10 text-red-600 border border-red-500/20'
       }`}>
         {gap.exists ? 'Found' : 'Missing'}
       </span>

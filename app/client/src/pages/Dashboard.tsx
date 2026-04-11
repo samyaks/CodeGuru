@@ -40,16 +40,16 @@ interface Review {
 type Tab = 'projects' | 'analyses' | 'reviews';
 
 const STATUS_COLORS: Record<string, string> = {
-  live: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  deployed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  live: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  deployed: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   deploying: 'bg-gold/10 text-gold border-gold/20',
   building: 'bg-gold/10 text-gold border-gold/20',
   ready: 'bg-sky-muted/10 text-sky-muted border-sky-border',
   scored: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  analyzing: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  failed: 'bg-red-500/10 text-red-600 border-red-500/20',
+  error: 'bg-red-500/10 text-red-600 border-red-500/20',
+  pending: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  analyzing: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
 };
 
 function statusBadgeClass(status: string): string {
@@ -250,7 +250,7 @@ function ProjectCard({ project }: { project: Project }) {
       {/* Bottom: live URL or date */}
       <div className="flex items-center justify-between text-xs">
         {deployed && project.live_url ? (
-          <span className="flex items-center gap-1 text-emerald-400">
+          <span className="flex items-center gap-1 text-emerald-600">
             <Rocket size={12} />
             Live
           </span>

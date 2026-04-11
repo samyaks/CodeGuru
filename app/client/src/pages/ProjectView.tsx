@@ -24,22 +24,22 @@ import { useAuth } from '../hooks/useAuth';
 type Tab = 'overview' | 'story' | 'settings';
 
 const STATUS_ICON = {
-  ready: <CheckCircle2 size={18} className="text-emerald-400" />,
-  partial: <AlertCircle size={18} className="text-amber-400" />,
-  missing: <XCircle size={18} className="text-red-400" />,
+  ready: <CheckCircle2 size={18} className="text-emerald-600" />,
+  partial: <AlertCircle size={18} className="text-amber-600" />,
+  missing: <XCircle size={18} className="text-red-600" />,
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  live: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  deployed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  live: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  deployed: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   deploying: 'bg-gold/10 text-gold border-gold/20',
   building: 'bg-gold/10 text-gold border-gold/20',
   ready: 'bg-sky-muted/10 text-sky-muted border-sky-border',
   scored: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20',
-  pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  analyzing: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  failed: 'bg-red-500/10 text-red-600 border-red-500/20',
+  error: 'bg-red-500/10 text-red-600 border-red-500/20',
+  pending: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  analyzing: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
 };
 
 export default function ProjectView() {
@@ -90,7 +90,7 @@ export default function ProjectView() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/dashboard" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-red-400">{error || 'Project not found'}</div>
+          <div className="text-red-600">{error || 'Project not found'}</div>
         </main>
       </div>
     );
@@ -150,7 +150,7 @@ export default function ProjectView() {
               href={project.live_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
             >
               <ExternalLink size={12} />
               Live URL
@@ -322,14 +322,14 @@ export default function ProjectView() {
 
             {/* Danger zone */}
             <div className="bg-navy border border-red-500/20 rounded-xl p-5 space-y-4">
-              <h3 className="font-medium text-red-400">Danger Zone</h3>
+              <h3 className="font-medium text-red-600">Danger Zone</h3>
               <p className="text-sm text-sky-muted">
                 Permanently delete this project and all associated data.
               </p>
               {!confirmDelete ? (
                 <button
                   onClick={() => setConfirmDelete(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 text-sm font-medium transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 text-sm font-medium transition-colors"
                 >
                   <Trash2 size={14} />
                   Delete Project

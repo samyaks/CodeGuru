@@ -6,9 +6,9 @@ import { fetchProject, updatePlanStep, type Project, type PlanStep } from '../se
 import { useAuth } from '../hooks/useAuth';
 
 const EFFORT_BADGE: Record<string, { label: string; className: string }> = {
-  small: { label: 'Quick', className: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  medium: { label: 'Medium', className: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-  large: { label: 'Larger', className: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  small: { label: 'Quick', className: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' },
+  medium: { label: 'Medium', className: 'bg-amber-500/10 text-amber-600 border-amber-500/20' },
+  large: { label: 'Larger', className: 'bg-red-500/10 text-red-600 border-red-500/20' },
 };
 
 export default function ProductionPlan() {
@@ -128,7 +128,7 @@ export default function ProductionPlan() {
                     className="flex-shrink-0"
                   >
                     {step.status === 'done'
-                      ? <CheckCircle2 size={22} className="text-emerald-400" />
+                      ? <CheckCircle2 size={22} className="text-emerald-600" />
                       : <Circle size={22} className="text-sky-border" />}
                   </button>
                   <div className="flex-1 min-w-0">

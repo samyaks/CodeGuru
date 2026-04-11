@@ -83,14 +83,14 @@ export default function ReviewProgress() {
 
       <main className="max-w-2xl mx-auto px-6 py-16">
         <div className="flex flex-col items-center space-y-8 text-center">
-          {!failed && <Loader size={32} className="animate-spin text-sky-400" />}
-          {failed && <AlertCircle size={32} className="text-red-400" />}
+          {!failed && <Loader size={32} className="animate-spin text-gold" />}
+          {failed && <AlertCircle size={32} className="text-red-600" />}
 
           <div className="space-y-2">
             <h2 className="text-xl font-semibold">
               {failed ? 'Review failed' : 'Reviewing code'}
             </h2>
-            <p className="text-zinc-400 text-sm">{currentMessage}</p>
+            <p className="text-sky-muted text-sm">{currentMessage}</p>
           </div>
 
           <div className="w-full space-y-3 text-left">
@@ -99,29 +99,29 @@ export default function ReviewProgress() {
                 key={i}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all ${
                   step.status === 'active'
-                    ? 'bg-sky-500/5 border-sky-500/30'
+                    ? 'bg-gold/5 border-gold/30'
                     : step.status === 'done'
-                    ? 'bg-green-500/5 border-green-500/20'
+                    ? 'bg-emerald-500/5 border-emerald-500/20'
                     : step.status === 'error'
                     ? 'bg-red-500/5 border-red-500/20'
-                    : 'bg-zinc-900/50 border-zinc-800/50'
+                    : 'bg-navy border-sky-border'
                 }`}
               >
-                {step.status === 'done' && <Check size={16} className="text-green-400 shrink-0" />}
-                {step.status === 'active' && <Loader size={16} className="animate-spin text-sky-400 shrink-0" />}
-                {step.status === 'error' && <AlertCircle size={16} className="text-red-400 shrink-0" />}
-                {step.status === 'pending' && <Circle size={16} className="text-zinc-700 shrink-0" />}
+                {step.status === 'done' && <Check size={16} className="text-emerald-600 shrink-0" />}
+                {step.status === 'active' && <Loader size={16} className="animate-spin text-gold shrink-0" />}
+                {step.status === 'error' && <AlertCircle size={16} className="text-red-600 shrink-0" />}
+                {step.status === 'pending' && <Circle size={16} className="text-border-dark shrink-0" />}
 
                 <div className="flex-1 min-w-0">
                   <span className={`text-sm ${
-                    step.status === 'active' ? 'text-white' :
-                    step.status === 'done' ? 'text-green-300' :
-                    'text-zinc-500'
+                    step.status === 'active' ? 'text-ink' :
+                    step.status === 'done' ? 'text-emerald-600' :
+                    'text-sky-muted'
                   }`}>
                     {step.label}
                   </span>
                   {step.status === 'active' && step.message && (
-                    <p className="text-xs text-zinc-500 truncate mt-0.5">{step.message}</p>
+                    <p className="text-xs text-sky-muted truncate mt-0.5">{step.message}</p>
                   )}
                 </div>
               </div>
@@ -129,7 +129,7 @@ export default function ReviewProgress() {
           </div>
 
           {sseError && (
-            <p className="text-red-400 text-sm">Connection lost. Refresh to check status.</p>
+            <p className="text-red-600 text-sm">Connection lost. Refresh to check status.</p>
           )}
         </div>
       </main>

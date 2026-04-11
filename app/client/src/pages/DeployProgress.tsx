@@ -49,7 +49,7 @@ export default function DeployProgress() {
         <div className="max-w-lg w-full text-center space-y-8">
           {deployError && !deployed && !failed ? (
             <div className="space-y-4">
-              <AlertCircle size={48} className="text-red-400 mx-auto" />
+              <AlertCircle size={48} className="text-red-600 mx-auto" />
               <h2 className="text-xl font-semibold text-sky-white">Deploy Failed to Start</h2>
               <p className="text-sm text-sky-muted">{deployError}</p>
               <button
@@ -62,7 +62,7 @@ export default function DeployProgress() {
           ) : deployed ? (
             <div className="space-y-6">
               <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center">
-                <Rocket size={36} className="text-emerald-400" />
+                <Rocket size={36} className="text-emerald-600" />
               </div>
               <div className="space-y-2">
                 <h2 className="text-2xl font-bold text-sky-white">Your app is live!</h2>
@@ -94,7 +94,7 @@ export default function DeployProgress() {
             </div>
           ) : failed ? (
             <div className="space-y-6">
-              <AlertCircle size={48} className="text-red-400 mx-auto" />
+              <AlertCircle size={48} className="text-red-600 mx-auto" />
               <div className="space-y-2">
                 <h2 className="text-xl font-semibold text-sky-white">Deploy Failed</h2>
                 <p className="text-sm text-sky-muted">{(failed as any).error}</p>

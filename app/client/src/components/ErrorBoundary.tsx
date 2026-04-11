@@ -32,7 +32,7 @@ export default class ErrorBoundary extends Component<Props, State> {
           <div className="w-full max-w-md rounded-2xl border border-sky-border bg-red-500/10 p-8 text-center space-y-6">
             <div className="flex justify-center">
               <div className="rounded-full bg-red-500/10 p-4 border border-red-400/20">
-                <AlertTriangle className="h-10 w-10 text-red-400" aria-hidden />
+                <AlertTriangle className="h-10 w-10 text-red-600" aria-hidden />
               </div>
             </div>
             <div className="space-y-2">

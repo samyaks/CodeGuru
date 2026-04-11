@@ -21,9 +21,9 @@ export default function UserMenu() {
     return (
       <button
         onClick={() => login('github')}
-        className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100 transition-colors"
+        className="flex items-center gap-1.5 font-mono text-[0.62rem] tracking-[0.15em] uppercase text-sky-muted hover:text-sky-white transition-colors"
       >
-        <Github size={16} />
+        <Github size={14} />
         Sign in
       </button>
     );
@@ -33,30 +33,30 @@ export default function UserMenu() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 transition-colors"
+        className="flex items-center gap-2 text-sm text-sky-off hover:text-sky-white transition-colors"
       >
         {user.avatar_url ? (
           <img
             src={user.avatar_url}
             alt=""
-            className="w-6 h-6 rounded-full ring-1 ring-zinc-700"
+            className="w-6 h-6 rounded-full ring-1 ring-sky-border"
           />
         ) : (
-          <div className="w-6 h-6 rounded-full bg-sky-500 flex items-center justify-center text-xs font-bold text-black">
+          <div className="w-6 h-6 rounded-full bg-ink flex items-center justify-center text-xs font-bold text-gold-bright">
             {(user.full_name || user.user_name || user.email)[0].toUpperCase()}
           </div>
         )}
-        <span className="hidden sm:inline">{user.full_name || user.user_name || 'Account'}</span>
+        <span className="hidden sm:inline text-sm">{user.full_name || user.user_name || 'Account'}</span>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-xl glass shadow-xl py-1 z-50">
-          <div className="px-3 py-2 text-xs text-zinc-500 border-b border-zinc-700/40 truncate">
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg glass shadow-lg py-1 z-50">
+          <div className="px-3 py-2 text-xs text-sky-muted border-b border-sky-border/60 truncate">
             {user.email}
           </div>
           <button
             onClick={() => { setOpen(false); logout(); }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700/30 transition-colors"
+            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-sky-off hover:bg-navy-mid transition-colors"
           >
             <LogOut size={14} />
             Sign out
