@@ -29,7 +29,7 @@ export interface SSETakeoffMessage {
 }
 
 export interface SSEDeployMessage {
-  type: 'deployed' | 'failed';
+  type: 'deployed' | 'failed' | 'url-synced';
   [key: string]: unknown;
 }
 

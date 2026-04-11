@@ -80,7 +80,7 @@ export default function EnvSetup() {
       try {
         const [proj, savedVars] = await Promise.all([
           fetchProject(id),
-          getEnvVars(id).catch(() => ({})),
+          getEnvVars(id).catch((): Record<string, string> => ({})),
         ]);
         if (cancelled) return;
         setProject(proj);
