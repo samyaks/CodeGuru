@@ -1,10 +1,7 @@
-const Anthropic = require('@anthropic-ai/sdk');
 const { broadcast } = require('../lib/sse');
 const { buildPRReviewPrompt } = require('../prompts/pr-review');
 const { buildRepoReviewPrompt } = require('../prompts/repo-review');
-const { CLAUDE_MODEL } = require('../lib/constants');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const MAX_TOKENS = 6144;
 
 async function reviewPR(reviewId, { owner, repo, prNumber, prMeta, prFiles, deployInfo }) {

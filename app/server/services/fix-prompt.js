@@ -1,12 +1,9 @@
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const Anthropic = require('@anthropic-ai/sdk');
 const { fixPrompts } = require('../lib/db');
 const { broadcast } = require('../lib/sse');
 const { buildConventionSearchPrompt } = require('../prompts/fix-convention');
-const { CLAUDE_MODEL } = require('../lib/constants');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 
 const ACTIONABLE_CATEGORIES = new Set([
   'bug', 'security', 'performance', 'complexity', 'style',

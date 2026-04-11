@@ -1,8 +1,5 @@
-const Anthropic = require('@anthropic-ai/sdk');
 const { broadcast } = require('../lib/sse');
-const { CLAUDE_MODEL, truncate } = require('../lib/constants');
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
 
 const SYSTEM_PROMPT = `You explain software projects to people who have NEVER written code.
 

@@ -4,6 +4,7 @@ const { fixPrompts, fixPromptEvents } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { safeParseJson } = require('../lib/helpers');
 
 const router = express.Router();
 
@@ -45,10 +46,5 @@ router.post('/:shortId/events', rateLimit, express.json(), asyncHandler(async (r
 
   res.json({ message: 'Event recorded' });
 }));
-
-function safeParseJson(str, fallback) {
-  if (!str) return fallback;
-  try { return JSON.parse(str); } catch { return fallback; }
-}
 
 module.exports = router;

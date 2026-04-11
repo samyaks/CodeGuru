@@ -1,13 +1,5 @@
 const express = require('express');
-const { COOKIE_NAME, REFRESH_COOKIE } = require('./middleware');
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  path: '/',
-};
+const { COOKIE_NAME, REFRESH_COOKIE, COOKIE_OPTIONS } = require('./middleware');
 
 /**
  * Creates an Express router with auth routes backed by Supabase.
@@ -144,9 +136,24 @@ function createAuthRouter(config) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    let user = null;
 
-    if (error || !user) {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (!error && data.user) {
+      user = data.user;
+    } else {
+      const refreshToken = req.cookies && req.cookies[REFRESH_COOKIE];
+      if (refreshToken) {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+        if (!refreshError && refreshData.session) {
+          res.cookie(COOKIE_NAME, refreshData.session.access_token, COOKIE_OPTIONS);
+          res.cookie(REFRESH_COOKIE, refreshData.session.refresh_token, COOKIE_OPTIONS);
+          user = refreshData.session.user;
+        }
+      }
+    }
+
+    if (!user) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 

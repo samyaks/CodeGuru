@@ -19,7 +19,7 @@ const { getDb, closeDb } = require('./lib/db');
 const { requestLogger } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
 
-const { createClient, createAuthRouter, requireAuth, optionalAuth } = require('@codeguru/auth');
+const { createClient, createAuthRouter, requireAuth, optionalAuth, COOKIE_OPTIONS } = require('@codeguru/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -62,20 +62,6 @@ if (supabase) {
   console.log(`[Auth] Supabase NOT initialized. SUPABASE_URL=${process.env.SUPABASE_URL ? 'set' : 'NOT SET'}, SUPABASE_ANON_KEY=${process.env.SUPABASE_ANON_KEY ? 'set' : 'NOT SET'}`);
 }
 
-app.get('/auth/clear', (req, res) => {
-  res.clearCookie('sb-access-token', { path: '/' });
-  res.clearCookie('sb-refresh-token', { path: '/' });
-  res.json({ message: 'Auth cookies cleared' });
-});
-
-const TOKEN_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-};
-
 app.post('/auth/token', express.json(), async (req, res) => {
   const { access_token, refresh_token, provider_token } = req.body;
   if (!access_token) {
@@ -87,12 +73,12 @@ app.post('/auth/token', express.json(), async (req, res) => {
       return res.status(401).json({ error: 'Invalid token' });
     }
   }
-  res.cookie('sb-access-token', access_token, TOKEN_COOKIE_OPTIONS);
+  res.cookie('sb-access-token', access_token, COOKIE_OPTIONS);
   if (refresh_token) {
-    res.cookie('sb-refresh-token', refresh_token, TOKEN_COOKIE_OPTIONS);
+    res.cookie('sb-refresh-token', refresh_token, COOKIE_OPTIONS);
   }
   if (provider_token) {
-    res.cookie('gh-provider-token', provider_token, TOKEN_COOKIE_OPTIONS);
+    res.cookie('gh-provider-token', provider_token, COOKIE_OPTIONS);
   }
   res.json({ ok: true });
 });

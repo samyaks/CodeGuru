@@ -1,5 +1,5 @@
 const { createClient } = require('./lib/client');
-const { requireAuth, optionalAuth } = require('./lib/middleware');
+const { requireAuth, optionalAuth, COOKIE_NAME, REFRESH_COOKIE, COOKIE_OPTIONS } = require('./lib/middleware');
 const { createAuthRouter } = require('./lib/router');
 
 module.exports = {
@@ -7,4 +7,7 @@ module.exports = {
   requireAuth,
   optionalAuth,
   createAuthRouter,
+  COOKIE_NAME,
+  REFRESH_COOKIE,
+  COOKIE_OPTIONS,
 };

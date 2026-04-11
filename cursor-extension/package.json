@@ -24,10 +24,10 @@
           "default": "https://takeoff.app",
           "description": "Takeoff API URL"
         },
-        "takeoff.apiKey": {
+        "takeoff.accessToken": {
           "type": "string",
           "default": "",
-          "description": "Your Takeoff API key"
+          "description": "Your Supabase access token (copy from browser session after logging in)"
         },
         "takeoff.enabled": {
           "type": "boolean",

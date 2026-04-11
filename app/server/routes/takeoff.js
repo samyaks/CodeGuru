@@ -14,25 +14,9 @@ const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { seedFromAnalysis } = require('../lib/auto-entries');
+const { parseJsonFields, checkProjectAccess } = require('../lib/helpers');
 
-const JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
-
-function parseJsonFields(project) {
-  const parsed = { ...project };
-  for (const field of JSON_FIELDS) {
-    if (parsed[field] && typeof parsed[field] === 'string') {
-      try { parsed[field] = JSON.parse(parsed[field]); } catch {}
-    }
-  }
-  return parsed;
-}
-
-function checkProjectAccess(project, req) {
-  if (!project.user_id) return null;
-  if (!req.user) return 403;
-  if (project.user_id !== req.user.id) return 403;
-  return null;
-}
+const TAKEOFF_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
 
 const router = express.Router();
 
@@ -213,18 +197,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
-  res.json(parseJsonFields(project));
+  res.json(parseJsonFields(project, TAKEOFF_JSON_FIELDS));
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   addConnection(req.params.id, res, { origin: req.headers.origin });
 
@@ -234,7 +216,7 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
   }
 
   if (project.status === 'ready' || project.status === 'live') {
-    const parsed = parseJsonFields(project);
+    const parsed = parseJsonFields(project, TAKEOFF_JSON_FIELDS);
     broadcast(req.params.id, {
       type: 'complete',
       score: parsed.readiness_score,
@@ -257,8 +239,7 @@ router.get('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   let vars = {};
   try { vars = JSON.parse(project.env_vars || '{}'); } catch {}
@@ -271,8 +252,7 @@ router.post('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   const { vars } = req.body;
   if (!vars || typeof vars !== 'object') throw AppError.badRequest('vars must be an object');
@@ -289,8 +269,7 @@ router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
   const project = deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   let steps = project.plan_steps;
   if (typeof steps === 'string') {

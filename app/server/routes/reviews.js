@@ -195,22 +195,4 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 }));
 
-router.patch('/:id', asyncHandler(async (req, res) => {
-  const review = reviews.findById(req.params.id);
-  if (!review) throw AppError.notFound('Review not found');
-  const { human_notes } = req.body;
-  if (human_notes === undefined) throw AppError.badRequest('human_notes is required');
-  reviews.updateHumanNotes(req.params.id, human_notes);
-  res.json({ message: 'Human notes updated' });
-}));
-
-router.patch('/:id/files/:fileId', asyncHandler(async (req, res) => {
-  const review = reviews.findById(req.params.id);
-  if (!review) throw AppError.notFound('Review not found');
-  const { human_comments } = req.body;
-  if (human_comments === undefined) throw AppError.badRequest('human_comments is required');
-  reviewFiles.updateHumanComments(req.params.fileId, human_comments);
-  res.json({ message: 'Human comments updated' });
-}));
-
 module.exports = router;

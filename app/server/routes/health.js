@@ -20,12 +20,4 @@ router.get('/health', (req, res) => {
   res.status(503).json({ status: 'degraded', checks: { database: 'error', error: dbError }, timestamp: new Date().toISOString() });
 });
 
-router.get('/api/info', (req, res) => {
-  res.json({
-    name: 'CodeGuru API',
-    status: 'ok',
-    version: '0.1.0',
-  });
-});
-
 module.exports = router;

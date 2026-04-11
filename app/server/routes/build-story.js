@@ -2,20 +2,14 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { deployments, buildEntries } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
-const Anthropic = require('@anthropic-ai/sdk');
+const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { checkProjectAccess } = require('../lib/helpers');
 
 const VALID_ENTRY_TYPES = ['prompt', 'note', 'decision', 'milestone', 'deploy_event', 'file'];
 
 const router = express.Router({ mergeParams: true });
-
-function checkProjectAccess(project, req) {
-  if (!project.user_id) return null;
-  if (!req.user) return 403;
-  if (project.user_id !== req.user.id) return 403;
-  return null;
-}
 
 function parseMetadata(entry) {
   const parsed = { ...entry };
@@ -48,8 +42,7 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   const project = deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   const entries = buildEntries.findByProjectId(projectId);
   res.json(entries.map(parseMetadata));
@@ -64,8 +57,7 @@ router.post('/', writeLimit, asyncHandler(async (req, res) => {
   const project = deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   const { entry_type, title, content, metadata } = req.body;
 
@@ -156,8 +148,7 @@ router.post('/generate-context', generateLimit, asyncHandler(async (req, res) =>
   const project = deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
-  const denied = checkProjectAccess(project, req);
-  if (denied) throw AppError.forbidden('Forbidden');
+  checkProjectAccess(project, req);
 
   const entries = buildEntries.findByProjectId(projectId);
   if (entries.length === 0) {
@@ -185,10 +176,8 @@ router.post('/generate-context', generateLimit, asyncHandler(async (req, res) =>
     project.live_url ? `Live URL: ${project.live_url}` : null,
   ].filter(Boolean).join('\n');
 
-  const client = new Anthropic();
-
-  const message = await client.messages.create({
-    model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+  const message = await anthropic.messages.create({
+    model: CLAUDE_MODEL,
     max_tokens: 4096,
     system: 'You are generating a .context.md file from a developer\'s build journal. The file follows the .context.md spec with sections: ## owner, ## purpose, ## constraints, ## decisions, ## ai-log, ## dependencies, ## status. Synthesize the build entries (prompts, notes, decisions, milestones, deploy events) into a coherent context file. Keep language clear and readable.',
     messages: [{

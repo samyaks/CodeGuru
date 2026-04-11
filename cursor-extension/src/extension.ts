@@ -109,12 +109,12 @@ export function activate(context: vscode.ExtensionContext) {
 async function sendEntry(projectId: string, entry: { entry_type: string; content: string; metadata: Record<string, unknown> }) {
   const config = vscode.workspace.getConfiguration('takeoff');
   const apiUrl = config.get<string>('apiUrl') || 'https://takeoff.app';
-  const apiKey = config.get<string>('apiKey');
+  const accessToken = config.get<string>('accessToken');
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
 
-  const res = await fetch(`${apiUrl}/api/projects/${projectId}/build-story`, {
+  const res = await fetch(`${apiUrl}/api/projects/${projectId}/story`, {
     method: 'POST',
     headers,
     body: JSON.stringify(entry),

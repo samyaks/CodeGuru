@@ -7,15 +7,6 @@ function authFetch(url: string, opts: RequestInit = {}) {
 }
 
 // Analysis
-export async function analyzeRepo(repoUrl: string): Promise<{ projectId: string }> {
-  const res = await authFetch(`${API_BASE}/analyze`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoUrl }),
-  });
-  return handleApiResponse<{ projectId: string }>(res);
-}
-
 export async function fetchAnalysis(id: string) {
   const res = await authFetch(`${API_BASE}/analyze/${id}`);
   if (!res.ok) throw new Error('Analysis not found');
@@ -29,24 +20,6 @@ export async function fetchAnalyses() {
 }
 
 // Reviews
-export async function createReview(data: {
-  repoUrl: string;
-  prNumber?: number;
-  type?: 'pr' | 'repo';
-  branch?: string;
-}): Promise<{ reviewId: string }> {
-  const res = await authFetch(`${API_BASE}/reviews`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: 'Failed to create review' }));
-    throw new Error(body.error || 'Failed to create review');
-  }
-  return res.json();
-}
-
 export async function fetchReview(id: string) {
   const res = await authFetch(`${API_BASE}/reviews/${id}`);
   if (!res.ok) throw new Error('Review not found');
@@ -122,18 +95,6 @@ export async function fetchMyRepos(page = 1): Promise<{ repos: GitHubRepo[]; tot
   const res = await authFetch(`${API_BASE}/github/my-repos?page=${page}&per_page=100`);
   if (res.status === 401) return { repos: [], total: 0, needsRelogin: true };
   if (!res.ok) return { repos: [], total: 0 };
-  return res.json();
-}
-
-export async function searchGitHubRepos(query: string) {
-  const res = await authFetch(`${API_BASE}/github/repos?search=${encodeURIComponent(query)}`);
-  if (!res.ok) return { repos: [], total: 0 };
-  return res.json();
-}
-
-export async function fetchRepoPulls(owner: string, repo: string) {
-  const res = await authFetch(`${API_BASE}/github/repos/${owner}/${repo}/pulls`);
-  if (!res.ok) return { pulls: [] };
   return res.json();
 }
 

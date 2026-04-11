@@ -1,24 +1,14 @@
 const express = require('express');
-const Anthropic = require('@anthropic-ai/sdk');
 const { deployments, buildEntries } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
-const { CLAUDE_MODEL } = require('../lib/constants');
+const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { parseJsonFields, safeParseJson } = require('../lib/helpers');
 
 const router = express.Router();
 
-const JSON_FIELDS = ['stack_info', 'readiness_categories', 'plan_steps'];
-
-function parseJsonFields(project) {
-  const parsed = { ...project };
-  for (const field of JSON_FIELDS) {
-    if (parsed[field] && typeof parsed[field] === 'string') {
-      try { parsed[field] = JSON.parse(parsed[field]); } catch {}
-    }
-  }
-  return parsed;
-}
+const STORY_JSON_FIELDS = ['stack_info', 'readiness_categories', 'plan_steps'];
 
 function parseMetadata(entry) {
   const parsed = { ...entry };
@@ -56,7 +46,7 @@ router.get('/:slug', readLimit, asyncHandler(async (req, res) => {
   const project = deployments.findBySlug(req.params.slug);
   if (!project) throw AppError.notFound('Story not found');
 
-  const parsed = parseJsonFields(project);
+  const parsed = parseJsonFields(project, STORY_JSON_FIELDS);
   const entries = buildEntries.findPublicByProjectId(project.id);
 
   res.json({
@@ -101,9 +91,7 @@ router.get('/:slug/summary', summaryLimit, asyncHandler(async (req, res) => {
     project.readiness_score != null ? `Readiness: ${project.readiness_score}/100` : null,
   ].filter(Boolean).join('\n');
 
-  const client = new Anthropic();
-
-  const message = await client.messages.create({
+  const message = await anthropic.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 256,
     system: 'You write concise, engaging social media summaries of software build stories. Write 2-3 sentences that capture what was built, key decisions, and current status. Be factual and enthusiastic without being cheesy. No hashtags or emojis.',
