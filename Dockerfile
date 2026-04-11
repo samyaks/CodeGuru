@@ -16,7 +16,8 @@ COPY app/client/package.json app/client/package.json
 
 RUN npm ci --include=dev
 
-# Copy source code
+# Copy source code (ARG busts Docker layer cache on each deploy)
+ARG CACHEBUST=1
 COPY packages/ packages/
 COPY app/ app/
 
