@@ -223,6 +223,7 @@ export interface Project {
   slug: string | null;
   status: string;
   live_url: string | null;
+  suggestions_count?: number;
   error: string | null;
   created_at: string;
   updated_at: string | null;
@@ -438,4 +439,56 @@ export async function fetchAnalyticsOverview(projectId: string): Promise<Analyti
 export async function fetchAnalyticsSetup(projectId: string): Promise<AnalyticsSetup> {
   const res = await authFetch(`${API_BASE}/projects/${projectId}/analytics/setup`);
   return handleApiResponse<AnalyticsSetup>(res);
+}
+
+// Suggestions
+
+export interface SuggestionEvidence {
+  file: string;
+  line?: number;
+  snippet?: string;
+  reason: string;
+}
+
+export interface Suggestion {
+  id: string;
+  type: 'bug' | 'fix' | 'feature' | 'idea' | 'perf';
+  category: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  evidence: SuggestionEvidence[];
+  effort: 'quick' | 'medium' | 'large';
+  cursor_prompt: string;
+  affected_files: string[];
+  status: 'open' | 'dismissed' | 'done';
+  source: 'static' | 'ai';
+  created_at: string;
+}
+
+export interface SuggestionsSummary {
+  total: number;
+  byType: Record<string, number>;
+  byPriority: { critical: number; high: number; medium: number; low: number };
+}
+
+export async function fetchSuggestions(projectId: string): Promise<{ suggestions: Suggestion[]; summary: SuggestionsSummary }> {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/suggestions`);
+  return handleApiResponse<{ suggestions: Suggestion[]; summary: SuggestionsSummary }>(res);
+}
+
+export async function updateSuggestionStatus(projectId: string, suggestionId: string, status: 'open' | 'dismissed' | 'done') {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/suggestions/${suggestionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  return handleApiResponse<{ ok: boolean; status: string }>(res);
+}
+
+export async function refreshSuggestions(projectId: string) {
+  const res = await authFetch(`${API_BASE}/takeoff/${projectId}/suggestions/refresh`, {
+    method: 'POST',
+  });
+  return handleApiResponse<{ ok: boolean; message: string }>(res);
 }

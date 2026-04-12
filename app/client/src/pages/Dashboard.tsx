@@ -7,6 +7,7 @@ import {
   ExternalLink,
   Rocket,
   Plus,
+  Lightbulb,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
@@ -243,6 +244,12 @@ function ProjectCard({ project }: { project: Project }) {
         {project.framework && (
           <span className="px-2 py-0.5 rounded text-xs bg-navy-mid border border-sky-border text-sky-off">
             {project.framework}
+          </span>
+        )}
+        {project.suggestions_count != null && project.suggestions_count > 0 && (
+          <span className="px-2 py-0.5 rounded text-xs bg-gold/10 border border-gold/20 text-gold flex items-center gap-1">
+            <Lightbulb size={10} />
+            {project.suggestions_count}
           </span>
         )}
       </div>

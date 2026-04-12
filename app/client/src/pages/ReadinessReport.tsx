@@ -4,12 +4,15 @@ import {
   CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
   ChevronDown, ChevronRight, FolderTree, Layers, Code2, GitFork,
   Star, Shield, Database, TestTube2, AlertTriangle, FileCode, Settings2,
-  BookOpen, Copy, Check,
+  BookOpen, Copy, Check, Lightbulb,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
   fetchProject,
+  fetchSuggestions,
   type Project,
+  type Suggestion,
+  type SuggestionsSummary,
   type ReadinessCategory,
   type AnalysisData,
   type FeatureInfo,
@@ -42,7 +45,9 @@ export default function ReadinessReport() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'summary' | 'overview' | 'details'>('overview');
+  const [activeTab, setActiveTab] = useState<'summary' | 'overview' | 'details' | 'suggestions'>('overview');
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionsSummary, setSuggestionsSummary] = useState<SuggestionsSummary | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -50,6 +55,13 @@ export default function ReadinessReport() {
       .then(setProject)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    fetchSuggestions(id)
+      .then(data => { setSuggestions(data.suggestions); setSuggestionsSummary(data.summary); })
+      .catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -174,10 +186,24 @@ export default function ReadinessReport() {
           >
             Codebase Details
           </button>
+          <button
+            onClick={() => setActiveTab('suggestions')}
+            className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${activeTab === 'suggestions' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+          >
+            <Lightbulb size={14} />
+            Suggestions
+            {suggestionsSummary && suggestionsSummary.total > 0 && (
+              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
+                {suggestionsSummary.total}
+              </span>
+            )}
+          </button>
         </div>
 
         {activeTab === 'summary' && project.features_summary ? (
           <FeaturesSummary summary={project.features_summary} />
+        ) : activeTab === 'suggestions' ? (
+          <SuggestionsPreview suggestions={suggestions} summary={suggestionsSummary} projectId={id!} />
         ) : activeTab === 'overview' ? (
           <>
             {/* Category breakdown */}
@@ -517,6 +543,72 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
       }`}>
         {gap.exists ? 'Found' : 'Missing'}
       </span>
+    </div>
+  );
+}
+
+function SuggestionsPreview({ suggestions, summary, projectId }: { suggestions: Suggestion[]; summary: SuggestionsSummary | null; projectId: string }) {
+  const openSuggestions = suggestions.filter(s => s.status === 'open');
+  const criticalCount = openSuggestions.filter(s => s.priority === 'critical').length;
+  const highCount = openSuggestions.filter(s => s.priority === 'high').length;
+
+  if (openSuggestions.length === 0) {
+    return (
+      <div className="text-center py-12 space-y-3">
+        <Lightbulb size={32} className="text-sky-muted mx-auto" />
+        <p className="text-sm text-sky-muted">No suggestions found for this project.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Quick stats */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-sky-white font-medium">{openSuggestions.length} suggestions</span>
+        {criticalCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-red-500/10 text-red-600 border-red-500/20">
+            {criticalCount} critical
+          </span>
+        )}
+        {highCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-amber-500/10 text-amber-600 border-amber-500/20">
+            {highCount} high
+          </span>
+        )}
+      </div>
+
+      {/* Top 5 suggestions preview */}
+      <div className="grid gap-2">
+        {openSuggestions.slice(0, 5).map(s => (
+          <div key={s.id} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
+            <span className={`mt-0.5 text-xs font-medium px-1.5 py-0.5 rounded border ${
+              s.priority === 'critical' ? 'bg-red-500/10 text-red-600 border-red-500/20' :
+              s.priority === 'high' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
+              s.priority === 'medium' ? 'bg-gold/10 text-gold border-gold/20' :
+              'bg-sky-muted/10 text-sky-muted border-sky-border'
+            }`}>
+              {s.priority}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-sky-white">{s.title}</div>
+              <div className="text-xs text-sky-muted mt-0.5 truncate">{s.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* View all link */}
+      {openSuggestions.length > 5 && (
+        <p className="text-xs text-sky-muted">Showing top 5 of {openSuggestions.length}</p>
+      )}
+
+      <Link
+        to={`/takeoff/${projectId}/suggestions`}
+        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors"
+      >
+        View All Suggestions →
+      </Link>
     </div>
   );
 }
