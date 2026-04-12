@@ -1,4 +1,4 @@
-function createRateLimit({ windowMs = 60000, max = 20, message = 'Too many requests. Please try again later.' } = {}) {
+function createRateLimit({ windowMs = 60000, max = 20, message = 'Too many requests. Please try again later.', keyFn } = {}) {
   const hits = new Map();
 
   const cleanup = setInterval(() => {
@@ -10,7 +10,8 @@ function createRateLimit({ windowMs = 60000, max = 20, message = 'Too many reque
   cleanup.unref();
 
   return function rateLimit(req, res, next) {
-    const key = req.ip || req.connection.remoteAddress;
+    const key = keyFn ? keyFn(req) : (req.ip || req.connection.remoteAddress);
+    if (!key) return next();
     const now = Date.now();
     const entry = hits.get(key);
 

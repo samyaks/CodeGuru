@@ -15,6 +15,8 @@ const publicStoryRoutes = require('./routes/public-story');
 const reviewRoutes = require('./routes/reviews');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
+const projectAnalyticsRoutes = require('./routes/project-analytics');
+const collectRoutes = require('./routes/collect');
 const { getDb, closeDb } = require('./lib/db');
 const { requestLogger } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
@@ -40,7 +42,10 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path === '/api/collect') return next();
+  express.json()(req, res, next);
+});
 app.use(cookieParser());
 
 // Auth setup
@@ -85,6 +90,7 @@ app.post('/auth/token', express.json(), async (req, res) => {
 
 // Public routes
 app.use(healthRoutes);
+app.use(collectRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/story', publicStoryRoutes);
@@ -95,6 +101,7 @@ if (supabase) {
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
   app.use('/api/projects', requireAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
+  app.use('/api/projects/:projectId/analytics', requireAuth(supabase), projectAnalyticsRoutes);
 } else {
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/deploy', (req, res) => {
@@ -104,6 +111,7 @@ if (supabase) {
   app.use('/api/projects/:projectId/story', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured for BuildStory.' });
   });
+  app.use('/api/projects/:projectId/analytics', projectAnalyticsRoutes);
 }
 
 // Protected routes (require auth when Supabase is configured)

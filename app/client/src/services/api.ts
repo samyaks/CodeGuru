@@ -409,3 +409,33 @@ export async function generateSocialSummary(slug: string): Promise<{ summary: st
   const res = await fetch(`${API_BASE}/story/${slug}/summary`);
   return handleApiResponse<{ summary: string }>(res);
 }
+
+// Analytics
+
+export interface AnalyticsOverview {
+  visitors: { today: number; week: number; month: number };
+  pageviews: { today: number; week: number; month: number };
+  topPages: Array<{ path: string; count: number }>;
+  topReferrers: Array<{ referrer: string; count: number }>;
+  topEvents: Array<{ event: string; count: number }>;
+  hasData: boolean;
+}
+
+export interface AnalyticsSetup {
+  projectId: string;
+  hasEvents: boolean;
+  eventCount: number;
+  scriptTag: string;
+  npmInstall: string;
+  npmUsage: string;
+}
+
+export async function fetchAnalyticsOverview(projectId: string): Promise<AnalyticsOverview> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/analytics`);
+  return handleApiResponse<AnalyticsOverview>(res);
+}
+
+export async function fetchAnalyticsSetup(projectId: string): Promise<AnalyticsSetup> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/analytics/setup`);
+  return handleApiResponse<AnalyticsSetup>(res);
+}

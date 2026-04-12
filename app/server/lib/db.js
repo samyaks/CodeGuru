@@ -145,6 +145,23 @@ function getDb() {
       synced_at TEXT,
       FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS project_events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      path TEXT,
+      referrer TEXT,
+      device TEXT,
+      session_id TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_events_project ON project_events(project_id);
+    CREATE INDEX IF NOT EXISTS idx_project_events_event ON project_events(event);
+    CREATE INDEX IF NOT EXISTS idx_project_events_created ON project_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_project_events_session ON project_events(project_id, session_id);
   `);
 
   // Migrate existing databases
@@ -405,6 +422,121 @@ const projectServices = {
   },
 };
 
+// ── Project Events (Analytics) ──
+
+const projectEvents = {
+  create(event) {
+    getDb().prepare(`INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
+      VALUES (@id, @project_id, @event, @path, @referrer, @device, @session_id, @metadata, @created_at)`).run({
+      ...event,
+      metadata: event.metadata && typeof event.metadata === 'object'
+        ? JSON.stringify(event.metadata) : (event.metadata || null),
+    });
+    return event;
+  },
+
+  createBatch(events) {
+    const d = getDb();
+    const stmt = d.prepare(`INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
+      VALUES (@id, @project_id, @event, @path, @referrer, @device, @session_id, @metadata, @created_at)`);
+    const tx = d.transaction((rows) => {
+      for (const row of rows) {
+        stmt.run({
+          ...row,
+          metadata: row.metadata && typeof row.metadata === 'object'
+            ? JSON.stringify(row.metadata) : (row.metadata || null),
+        });
+      }
+    });
+    tx(events);
+  },
+
+  findByProjectId(projectId, { event, since, limit = 100 } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (event) { conditions.push('event = ?'); params.push(event); }
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    params.push(limit);
+    return getDb().prepare(
+      `SELECT * FROM project_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
+    ).all(...params);
+  },
+
+  countByProject(projectId, { event, since } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (event) { conditions.push('event = ?'); params.push(event); }
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    const row = getDb().prepare(
+      `SELECT COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')}`
+    ).get(...params);
+    return row.count;
+  },
+
+  aggregateByPath(projectId, { since } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    return getDb().prepare(
+      `SELECT path, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY path ORDER BY count DESC`
+    ).all(...params);
+  },
+
+  aggregateByReferrer(projectId, { since } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    return getDb().prepare(
+      `SELECT referrer, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY referrer ORDER BY count DESC`
+    ).all(...params);
+  },
+
+  aggregateByEvent(projectId, { since } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    return getDb().prepare(
+      `SELECT event, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY event ORDER BY count DESC`
+    ).all(...params);
+  },
+
+  uniqueSessions(projectId, { since } = {}) {
+    const conditions = ['project_id = ?'];
+    const params = [projectId];
+    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    const row = getDb().prepare(
+      `SELECT COUNT(DISTINCT session_id) as count FROM project_events WHERE ${conditions.join(' AND ')}`
+    ).get(...params);
+    return row.count;
+  },
+
+  overviewStats(projectId, { today, week, month }) {
+    const row = getDb().prepare(`
+      SELECT
+        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_today,
+        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_week,
+        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_month,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_today,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_week,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_month
+      FROM project_events
+      WHERE project_id = ?
+    `).get(today, week, month, today, week, month, projectId);
+    return {
+      visitors: {
+        today: row.visitors_today || 0,
+        week: row.visitors_week || 0,
+        month: row.visitors_month || 0,
+      },
+      pageviews: {
+        today: row.pageviews_today || 0,
+        week: row.pageviews_week || 0,
+        month: row.pageviews_month || 0,
+      },
+    };
+  },
+};
+
 // ── Analyses ──
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
@@ -454,4 +586,4 @@ function closeDb() {
   }
 }
 
-module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices };
+module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices, projectEvents };

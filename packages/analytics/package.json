@@ -1,0 +1,12 @@
+{
+  "name": "@codeguru/analytics",
+  "version": "1.0.0",
+  "description": "Lightweight analytics snippet for apps built with Takeoff",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "require": "./index.js",
+      "import": "./index.mjs"
+    }
+  }
+}

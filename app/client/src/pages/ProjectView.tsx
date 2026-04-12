@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import Header from '../components/Header';
 import BuildStory from './BuildStory';
+import Analytics from './Analytics';
 import {
   fetchProjectDetail,
   deleteProject,
@@ -21,7 +22,7 @@ import {
 } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 
-type Tab = 'overview' | 'story' | 'settings';
+type Tab = 'overview' | 'story' | 'analytics' | 'settings';
 
 const STATUS_ICON = {
   ready: <CheckCircle2 size={18} className="text-emerald-600" />,
@@ -116,6 +117,7 @@ export default function ProjectView() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'story', label: `Build Story${storyCounts}` },
+    { key: 'analytics', label: 'Analytics' },
     { key: 'settings', label: 'Settings' },
   ];
 
@@ -301,6 +303,11 @@ export default function ProjectView() {
             projectId={id}
             onCounts={(c, e) => { setCommitCount(c); setEntryCount(e); }}
           />
+        )}
+
+        {/* Analytics Tab */}
+        {tab === 'analytics' && id && (
+          <Analytics projectId={id} />
         )}
 
         {/* Settings Tab */}
