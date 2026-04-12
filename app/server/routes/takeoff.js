@@ -9,7 +9,7 @@ const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
-const { runStaticSuggestions, runGapSuggestions } = require('../services/suggestion-rules');
+const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = require('../services/suggestion-rules');
 const { runAISuggestions } = require('../services/suggestion-ai');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
@@ -169,12 +169,16 @@ async function runTakeoff(id, repoUrl) {
       }
       allStaticSuggestions = [...staticSuggestions];
 
-      const coveredCategories = new Set(staticSuggestions.map(s => s.category));
+      const gapKeysFromStaticRules = new Set(Object.values(STATIC_RULE_GAP_KEYS));
+      const coveredGapKeys = new Set();
+      for (const s of staticSuggestions) {
+        if (gapKeysFromStaticRules.has(s.category)) coveredGapKeys.add(s.category);
+      }
       try {
         const gapSuggestions = runGapSuggestions({
           gaps: codebaseModel.gaps,
           readinessCategories: readiness.categories,
-          coveredCategories,
+          coveredGapKeys,
         });
         if (gapSuggestions.length > 0) {
           suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));

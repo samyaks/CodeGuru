@@ -143,14 +143,15 @@ export default function SuggestionsView() {
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [aiDonePolling, setAiDonePolling] = useState(false);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
-
-  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const pollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
     setLoading(true);
+    setAiDonePolling(false);
     Promise.all([
       fetchProject(id),
       fetchSuggestions(id),
@@ -160,16 +161,20 @@ export default function SuggestionsView() {
       setSuggestions(data.suggestions);
       const hasAi = data.suggestions.some((s: Suggestion) => s.source === 'ai');
       if (!hasAi && data.suggestions.length > 0 && proj.status === 'ready') {
-        pollTimeoutRef.current = setTimeout(() => {
+        const reFetch = () => fetchSuggestions(id).then(fresh => {
+          if (!cancelled) setSuggestions(fresh.suggestions);
+        }).catch(() => {});
+        pollTimers.current.push(setTimeout(() => { if (!cancelled) reFetch(); }, 15000));
+        pollTimers.current.push(setTimeout(() => {
           if (cancelled) return;
-          fetchSuggestions(id).then(fresh => {
-            if (!cancelled) setSuggestions(fresh.suggestions);
-          }).catch(() => {});
-        }, 15000);
+          reFetch().finally(() => { if (!cancelled) setAiDonePolling(true); });
+        }, 45000));
+      } else {
+        setAiDonePolling(true);
       }
     }).catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current); };
+    return () => { cancelled = true; pollTimers.current.forEach(clearTimeout); pollTimers.current = []; };
   }, [id]);
 
   useEffect(() => {
@@ -271,8 +276,8 @@ export default function SuggestionsView() {
       <Header backTo={`/takeoff/${id}/report`} title={`${project.owner}/${project.repo}`} />
 
       <main className="flex-1 px-6 py-10 max-w-3xl mx-auto w-full space-y-8">
-        {/* AI analysis in-progress banner */}
-        {suggestions.length > 0 && !suggestions.some(s => s.source === 'ai') && project.status === 'ready' && (
+        {/* AI analysis in-progress banner — auto-hides after polling completes */}
+        {suggestions.length > 0 && !suggestions.some(s => s.source === 'ai') && project.status === 'ready' && !aiDonePolling && (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-500/5 border border-purple-500/10 text-xs text-purple-400">
             <Sparkles size={14} className="animate-pulse flex-shrink-0" />
             AI is analyzing your codebase for deeper suggestions — they'll appear here shortly.

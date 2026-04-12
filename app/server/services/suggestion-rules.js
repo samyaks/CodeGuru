@@ -470,18 +470,24 @@ function runStaticSuggestions({ stack, gaps, features, structure, fileContents, 
 // Gap-based suggestions
 // ---------------------------------------------------------------------------
 
-function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
+const STATIC_RULE_GAP_KEYS = {
+  ruleNoTests: 'testing',
+  ruleNoErrorHandler: 'errorHandling',
+  ruleNoEnvValidation: 'envConfig',
+};
+
+function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
   const results = [];
   const cat = readinessCategories || {};
-  const covered = coveredCategories || new Set();
+  const covered = coveredGapKeys || new Set();
 
-  function add(suggestion) {
-    if (covered.has(suggestion.category)) return;
+  function add(gapKey, suggestion) {
+    if (covered.has(gapKey)) return;
     results.push(suggestion);
   }
 
   if (!gaps.auth?.exists && cat.auth?.status !== 'ready') {
-    add(makeSuggestion({
+    add('auth', makeSuggestion({
       type: 'feature',
       category: 'auth',
       priority: 'high',
@@ -495,7 +501,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.database?.exists && cat.database?.status !== 'ready') {
-    add(makeSuggestion({
+    add('database', makeSuggestion({
       type: 'feature',
       category: 'database',
       priority: 'high',
@@ -509,7 +515,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (gaps.database?.exists && !gaps.database.hasSchema && cat.database?.status !== 'ready') {
-    add(makeSuggestion({
+    add('database.schema', makeSuggestion({
       type: 'fix',
       category: 'database',
       priority: 'medium',
@@ -523,7 +529,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.deployment?.exists && cat.deployment?.status !== 'ready') {
-    add(makeSuggestion({
+    add('deployment', makeSuggestion({
       type: 'feature',
       category: 'deployment',
       priority: 'medium',
@@ -537,7 +543,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (gaps.deployment?.exists && !gaps.deployment.hasCI && cat.deployment?.status !== 'ready') {
-    add(makeSuggestion({
+    add('deployment.ci', makeSuggestion({
       type: 'fix',
       category: 'deployment',
       priority: 'low',
@@ -551,7 +557,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.permissions?.exists && cat.auth?.status !== 'ready') {
-    add(makeSuggestion({
+    add('permissions', makeSuggestion({
       type: 'feature',
       category: 'security',
       priority: 'medium',
@@ -565,7 +571,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.testing?.exists && cat.testing?.status !== 'ready') {
-    add(makeSuggestion({
+    add('testing', makeSuggestion({
       type: 'fix',
       category: 'testing',
       priority: 'medium',
@@ -579,7 +585,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.errorHandling?.exists && cat.errorHandling?.status !== 'ready') {
-    add(makeSuggestion({
+    add('errorHandling', makeSuggestion({
       type: 'fix',
       category: 'errorHandling',
       priority: 'medium',
@@ -593,7 +599,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (!gaps.envConfig?.exists && cat.envConfig?.status !== 'ready') {
-    add(makeSuggestion({
+    add('envConfig', makeSuggestion({
       type: 'fix',
       category: 'envConfig',
       priority: 'medium',
@@ -607,7 +613,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (cat.frontend?.status === 'missing') {
-    add(makeSuggestion({
+    add('frontend', makeSuggestion({
       type: 'feature',
       category: 'frontend',
       priority: 'medium',
@@ -621,7 +627,7 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   }
 
   if (cat.backend?.status === 'missing') {
-    add(makeSuggestion({
+    add('backend', makeSuggestion({
       type: 'feature',
       category: 'backend',
       priority: 'medium',
@@ -639,4 +645,4 @@ function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
   return results;
 }
 
-module.exports = { runStaticSuggestions, runGapSuggestions };
+module.exports = { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS };
