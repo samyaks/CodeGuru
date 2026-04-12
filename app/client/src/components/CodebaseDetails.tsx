@@ -89,103 +89,114 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
 }
 
 export default function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Record<string, GapInfo> }) {
+  const fileTree = analysis.fileTree || [];
+  const structure = analysis.structure || { directories: [], entryPoints: [], routeFiles: [], configFiles: [] };
+  const features = analysis.features || [];
+  const existingContext = analysis.existingContext || {};
+
   return (
     <div className="space-y-6">
-      <CollapsibleSection
-        icon={<FolderTree size={18} className="text-gold" />}
-        title="Project Structure"
-        subtitle={`${analysis.fileTree.length} files · ${analysis.structure.directories.length} directories`}
-        defaultOpen
-      >
-        <div className="space-y-4">
-          {analysis.structure.entryPoints.length > 0 && (
-            <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Entry Points</h4>
-              <div className="flex flex-wrap gap-1.5">
-                {analysis.structure.entryPoints.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-600">{f}</code>
-                ))}
-              </div>
-            </div>
-          )}
-          {analysis.structure.routeFiles.length > 0 && (
-            <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Routes / API</h4>
-              <div className="flex flex-wrap gap-1.5">
-                {analysis.structure.routeFiles.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-off">{f}</code>
-                ))}
-              </div>
-            </div>
-          )}
-          {analysis.structure.configFiles.length > 0 && (
-            <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Config Files</h4>
-              <div className="flex flex-wrap gap-1.5">
-                {analysis.structure.configFiles.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-muted">{f}</code>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </CollapsibleSection>
-
-      {analysis.features.length > 0 && (
+      {fileTree.length > 0 && (
         <CollapsibleSection
-          icon={<Layers size={18} className="text-gold" />}
-          title="Feature Modules"
-          subtitle={`${analysis.features.length} modules detected`}
+          icon={<FolderTree size={18} className="text-gold" />}
+          title="Project Structure"
+          subtitle={`${fileTree.length} files · ${(structure.directories || []).length} directories`}
           defaultOpen
         >
-          <div className="grid gap-2">
-            {analysis.features
-              .sort((a, b) => b.fileCount - a.fileCount)
-              .slice(0, 20)
-              .map((feat) => (
-                <FeatureRow key={feat.path} feature={feat} />
-              ))}
-            {analysis.features.length > 20 && (
-              <p className="text-xs text-sky-muted pt-1">...and {analysis.features.length - 20} more</p>
+          <div className="space-y-4">
+            {(structure.entryPoints || []).length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Entry Points</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {structure.entryPoints.map((f) => (
+                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-600">{f}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(structure.routeFiles || []).length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Routes / API</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {structure.routeFiles.map((f) => (
+                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-off">{f}</code>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(structure.configFiles || []).length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Config Files</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {structure.configFiles.map((f) => (
+                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-muted">{f}</code>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </CollapsibleSection>
       )}
 
-      <CollapsibleSection
-        icon={<Code2 size={18} className="text-amber-600" />}
-        title="Infrastructure Gaps"
-        subtitle={`${Object.values(gaps).filter((g) => g.exists).length} of ${Object.keys(gaps).length} areas covered`}
-        defaultOpen
-      >
-        <div className="grid gap-2">
-          {Object.entries(gaps).map(([key, gap]) => (
-            <GapRow key={key} gapKey={key} gap={gap} />
-          ))}
-        </div>
-      </CollapsibleSection>
+      {features.length > 0 && (
+        <CollapsibleSection
+          icon={<Layers size={18} className="text-gold" />}
+          title="Feature Modules"
+          subtitle={`${features.length} modules detected`}
+          defaultOpen
+        >
+          <div className="grid gap-2">
+            {features
+              .sort((a, b) => b.fileCount - a.fileCount)
+              .slice(0, 20)
+              .map((feat) => (
+                <FeatureRow key={feat.path} feature={feat} />
+              ))}
+            {features.length > 20 && (
+              <p className="text-xs text-sky-muted pt-1">...and {features.length - 20} more</p>
+            )}
+          </div>
+        </CollapsibleSection>
+      )}
 
-      <CollapsibleSection
-        icon={<FileCode size={18} className="text-sky-muted" />}
-        title="File Tree"
-        subtitle={`${analysis.fileTree.length} files analyzed`}
-      >
-        <div className="max-h-64 overflow-y-auto space-y-0.5">
-          {analysis.fileTree.map((f) => (
-            <div key={f} className="text-xs text-sky-muted font-mono truncate">{f}</div>
-          ))}
-        </div>
-      </CollapsibleSection>
+      {Object.keys(gaps).length > 0 && (
+        <CollapsibleSection
+          icon={<Code2 size={18} className="text-amber-600" />}
+          title="Infrastructure Gaps"
+          subtitle={`${Object.values(gaps).filter((g) => g.exists).length} of ${Object.keys(gaps).length} areas covered`}
+          defaultOpen
+        >
+          <div className="grid gap-2">
+            {Object.entries(gaps).map(([key, gap]) => (
+              <GapRow key={key} gapKey={key} gap={gap} />
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
 
-      {(analysis.existingContext.hasCursorRules || analysis.existingContext.hasClaudeMd || analysis.existingContext.hasContextMd) && (
+      {fileTree.length > 0 && (
+        <CollapsibleSection
+          icon={<FileCode size={18} className="text-sky-muted" />}
+          title="File Tree"
+          subtitle={`${fileTree.length} files analyzed`}
+        >
+          <div className="max-h-64 overflow-y-auto space-y-0.5">
+            {fileTree.map((f) => (
+              <div key={f} className="text-xs text-sky-muted font-mono truncate">{f}</div>
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
+
+      {(existingContext.hasCursorRules || existingContext.hasClaudeMd || existingContext.hasContextMd) && (
         <div className="flex flex-wrap gap-2 pt-2">
-          {analysis.existingContext.hasCursorRules && (
+          {existingContext.hasCursorRules && (
             <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .cursorrules</span>
           )}
-          {analysis.existingContext.hasClaudeMd && (
+          {existingContext.hasClaudeMd && (
             <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has CLAUDE.md</span>
           )}
-          {analysis.existingContext.hasContextMd && (
+          {existingContext.hasContextMd && (
             <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .context.md</span>
           )}
         </div>
