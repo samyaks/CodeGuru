@@ -36,7 +36,7 @@ export default function AnalysisProgress() {
 
   useEffect(() => {
     if (completed && id) {
-      const timer = setTimeout(() => navigate(`/takeoff/${id}/report`), 800);
+      const timer = setTimeout(() => navigate(`/projects/${id}`), 800);
       return () => clearTimeout(timer);
     }
   }, [completed, id, navigate]);

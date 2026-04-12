@@ -49,7 +49,7 @@ export default function DeployProgress() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header backTo={id ? `/takeoff/${id}/report` : '/'} />
+      <Header backTo={id ? `/projects/${id}` : '/'} />
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24">
         <div className="max-w-lg w-full text-center space-y-8">
@@ -59,10 +59,10 @@ export default function DeployProgress() {
               <h2 className="text-xl font-semibold text-sky-white">Deploy Failed to Start</h2>
               <p className="text-sm text-sky-muted">{deployError}</p>
               <button
-                onClick={() => navigate(`/takeoff/${id}/report`)}
+                onClick={() => navigate(`/projects/${id}`)}
                 className="px-6 py-2 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
               >
-                Back to Report
+                Back to Project
               </button>
             </div>
           ) : deployed ? (
@@ -145,10 +145,10 @@ export default function DeployProgress() {
                 </pre>
               )}
               <button
-                onClick={() => navigate(`/takeoff/${id}/report`)}
+                onClick={() => navigate(`/projects/${id}`)}
                 className="px-6 py-2 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
               >
-                Back to Report
+                Back to Project
               </button>
             </div>
           ) : (

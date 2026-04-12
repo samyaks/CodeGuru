@@ -1,16 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  Rocket,
-  ClipboardList,
-  ExternalLink,
-  Loader2,
-  Trash2,
+  CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
+  ExternalLink, Loader2, Trash2, Lightbulb, Star, GitFork,
 } from 'lucide-react';
 import Header from '../components/Header';
+import FeaturesSummary from '../components/FeaturesSummary';
+import CodebaseDetails from '../components/CodebaseDetails';
+import SuggestionsPanel from '../components/SuggestionsPanel';
 import BuildStory from './BuildStory';
 import Analytics from './Analytics';
 import {
@@ -22,9 +19,9 @@ import {
 } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 
-type Tab = 'overview' | 'story' | 'analytics' | 'settings';
+type Tab = 'overview' | 'analysis' | 'suggestions' | 'settings';
 
-const STATUS_ICON = {
+const STATUS_ICON: Record<string, React.ReactNode> = {
   ready: <CheckCircle2 size={18} className="text-emerald-600" />,
   partial: <AlertCircle size={18} className="text-amber-600" />,
   missing: <XCircle size={18} className="text-red-600" />,
@@ -47,14 +44,19 @@ export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = ((['overview', 'analysis', 'suggestions', 'settings'] as Tab[]).includes(searchParams.get('tab') as Tab)
+    ? searchParams.get('tab') as Tab
+    : 'overview');
+  const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
+  const mountedTabs = useRef<Set<Tab>>(new Set(['overview']));
+  if (!mountedTabs.current.has(tab)) mountedTabs.current.add(tab);
+
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('overview');
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [commitCount, setCommitCount] = useState(0);
-  const [entryCount, setEntryCount] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -63,6 +65,12 @@ export default function ProjectView() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!loading && project && (project.status === 'analyzing' || project.status === 'pending')) {
+      navigate(`/takeoff/${id}`, { replace: true });
+    }
+  }, [loading, project, id, navigate]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -107,17 +115,18 @@ export default function ProjectView() {
   const stack = project.stack_info;
   const buildPlan = project.build_plan;
   const deployed = project.status === 'live' || project.status === 'deployed';
+  const recommendation = project.recommendation || 'plan';
+  const isDeployRecommended = recommendation === 'deploy';
+  const analysis = project.analysis_data;
 
   const statusClass = STATUS_COLORS[project.status] || 'bg-sky-muted/10 text-sky-muted border-sky-border';
 
-  const storyCounts = commitCount > 0 || entryCount > 0
-    ? ` ${commitCount} commit${commitCount !== 1 ? 's' : ''} + ${entryCount} entr${entryCount !== 1 ? 'ies' : 'y'}`
-    : '';
+  const suggestionsCount = project.suggestions_count ?? 0;
 
-  const tabs: { key: Tab; label: string }[] = [
+  const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'story', label: `Build Story${storyCounts}` },
-    { key: 'analytics', label: 'Analytics' },
+    { key: 'analysis', label: 'Analysis' },
+    { key: 'suggestions', label: 'Suggestions', badge: suggestionsCount > 0 ? suggestionsCount : undefined },
     { key: 'settings', label: 'Settings' },
   ];
 
@@ -167,38 +176,37 @@ export default function ProjectView() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-navy rounded-lg p-1 w-fit border border-sky-border/50">
+        <div role="tablist" className="flex gap-1 bg-navy rounded-lg p-1 w-fit border border-sky-border/50">
           {tabs.map((t) => (
             <button
               key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              aria-controls={`tabpanel-${t.key}`}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
                 tab === t.key
                   ? 'bg-gold/10 text-gold border border-gold/20'
                   : 'text-sky-muted hover:text-sky-white border border-transparent'
               }`}
             >
+              {t.key === 'suggestions' && <Lightbulb size={14} />}
               {t.label}
+              {t.badge !== undefined && (
+                <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
+                  {t.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
-        {/* Overview Tab */}
+        {/* ───────── Overview Tab ───────── */}
         {tab === 'overview' && (
-          <div className="space-y-8">
-            {/* Score circle */}
-            {score > 0 && (
-              <div className="text-center space-y-3">
-                <div className="inline-flex items-center justify-center w-24 h-24 rounded-full border-4 border-gold/30 bg-navy">
-                  <span className="text-3xl font-bold text-sky-white">{score}%</span>
-                </div>
-                <p className="text-sky-muted text-sm">Production Readiness Score</p>
-              </div>
-            )}
-
+          <div role="tabpanel" id="tabpanel-overview" className="space-y-8">
             {/* Stack badges */}
             {stack && (
-              <div className="flex flex-wrap justify-center gap-2">
+              <div className="flex flex-wrap gap-2">
                 {[stack.framework, stack.styling, stack.database, stack.auth, ...(stack.languages || [])]
                   .filter(Boolean)
                   .map((badge) => (
@@ -211,26 +219,32 @@ export default function ProjectView() {
                     {buildPlan.type === 'static' ? 'Static site' : buildPlan.type === 'fullstack' ? 'Full-stack' : buildPlan.type}
                   </span>
                 )}
+                {analysis?.meta && (
+                  <>
+                    {analysis.meta.stars > 0 && (
+                      <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                        <Star size={10} /> {analysis.meta.stars}
+                      </span>
+                    )}
+                    {analysis.meta.forks > 0 && (
+                      <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                        <GitFork size={10} /> {analysis.meta.forks}
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
-            {/* Category breakdown */}
-            {Object.keys(categories).length > 0 && (
-              <div className="grid gap-2">
-                {Object.entries(categories).map(([key, cat]) => (
-                  <div key={key} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
-                    {STATUS_ICON[cat.status]}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-sky-white">{cat.label}</div>
-                      <div className="text-xs text-sky-muted truncate">{cat.detail}</div>
-                    </div>
-                    <div className="text-xs text-sky-muted">{cat.earned}/{cat.weight}</div>
-                  </div>
-                ))}
-              </div>
+            {/* What It Does */}
+            {project.features_summary && (
+              <FeaturesSummary summary={project.features_summary} />
             )}
 
-            {/* Plan steps summary */}
+            {/* Build Story */}
+            {id && <BuildStory projectId={id} />}
+
+            {/* Plan progress bar */}
             {totalSteps > 0 && (
               <div className="bg-navy border border-sky-border/50 rounded-xl p-5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -297,23 +311,118 @@ export default function ProjectView() {
           </div>
         )}
 
-        {/* Build Story Tab */}
-        {tab === 'story' && id && (
-          <BuildStory
-            projectId={id}
-            onCounts={(c, e) => { setCommitCount(c); setEntryCount(e); }}
-          />
+        {/* ───────── Analysis Tab ───────── */}
+        {tab === 'analysis' && (
+          <div role="tabpanel" id="tabpanel-analysis" className="space-y-8">
+            {/* Readiness score circle */}
+            {score > 0 && (
+              <div className="text-center space-y-4">
+                <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-4 border-gold/30 bg-navy">
+                  <span className="text-4xl font-bold text-sky-white">{score}%</span>
+                </div>
+                <h2 className="text-2xl font-semibold text-sky-white">Production Readiness</h2>
+                {project.description && (
+                  <p className="text-sky-off text-sm max-w-lg mx-auto italic">{project.description}</p>
+                )}
+                <p className="text-sky-muted text-sm max-w-md mx-auto">
+                  {score >= 90
+                    ? 'Your app looks ready to deploy. You can ship it now or review the details below.'
+                    : `Your app is ${score}% of the way there. We've identified what's missing and built you a plan.`}
+                </p>
+              </div>
+            )}
+
+            {/* Category breakdown */}
+            {Object.keys(categories).length > 0 && (
+              <div className="grid gap-2">
+                {Object.entries(categories).map(([key, cat]) => (
+                  <div key={key} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
+                    {STATUS_ICON[cat.status]}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-sky-white">{cat.label}</div>
+                      <div className="text-xs text-sky-muted truncate">{cat.detail}</div>
+                    </div>
+                    <div className="text-xs text-sky-muted">{cat.earned}/{cat.weight}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Dual-path CTA */}
+            <div className="grid md:grid-cols-2 gap-4">
+              <button
+                onClick={() => {
+                  if (!user) { alert('Please log in to deploy.'); return; }
+                  navigate(`/takeoff/${id}/env-setup`);
+                }}
+                className={`p-6 rounded-xl border text-left transition-all ${
+                  isDeployRecommended
+                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
+                    : 'bg-navy border-sky-border hover:bg-navy-mid'
+                }`}
+              >
+                <Rocket size={24} className={isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
+                <h3 className="font-semibold text-sky-white mb-1">
+                  {isDeployRecommended ? 'Deploy Now' : 'Deploy Anyway'}
+                </h3>
+                <p className="text-xs text-sky-muted">
+                  {isDeployRecommended
+                    ? 'Your app looks ready. Ship it to the world.'
+                    : 'Ship as-is. You can improve later.'}
+                </p>
+                {isDeployRecommended && (
+                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                )}
+              </button>
+
+              <Link
+                to={`/takeoff/${id}/plan`}
+                className={`p-6 rounded-xl border text-left transition-all block ${
+                  !isDeployRecommended
+                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
+                    : 'bg-navy border-sky-border hover:bg-navy-mid'
+                }`}
+              >
+                <ClipboardList size={24} className={!isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
+                <h3 className="font-semibold text-sky-white mb-1">
+                  {!isDeployRecommended ? 'Plan to Ship' : 'See Plan Anyway'}
+                </h3>
+                <p className="text-xs text-sky-muted">
+                  {!isDeployRecommended
+                    ? `${Object.values(categories).filter((c) => c.status === 'missing').length} things to add. Context files + prompts for each step.`
+                    : 'Review what could be improved with context files for each area.'}
+                </p>
+                {!isDeployRecommended && (
+                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                )}
+              </Link>
+            </div>
+
+            {/* Codebase Details */}
+            {analysis ? (
+              <CodebaseDetails analysis={analysis} gaps={analysis.gaps || {}} />
+            ) : (
+              <div className="text-center py-12 text-sky-muted text-sm">
+                Detailed analysis data is not available for this project. Try re-analyzing.
+              </div>
+            )}
+          </div>
         )}
 
-        {/* Analytics Tab */}
-        {tab === 'analytics' && id && (
-          <Analytics projectId={id} />
+        {/* ───────── Suggestions Tab (lazy mount, stays mounted) ───────── */}
+        {mountedTabs.current.has('suggestions') && id && (
+          <div role="tabpanel" id="tabpanel-suggestions" className={tab !== 'suggestions' ? 'hidden' : ''}>
+            <SuggestionsPanel projectId={id} projectStatus={project.status} />
+          </div>
         )}
 
-        {/* Settings Tab */}
-        {tab === 'settings' && (
-          <div className="space-y-8">
-            {/* Detected environment */}
+        {/* ───────── Settings Tab (lazy mount, stays mounted) ───────── */}
+        {mountedTabs.current.has('settings') && (
+          <div role="tabpanel" id="tabpanel-settings" className={`space-y-8 ${tab !== 'settings' ? 'hidden' : ''}`}>
+            {/* Analytics */}
+            {id && <Analytics projectId={id} />}
+
+            {/* Build configuration */}
             <div className="bg-navy border border-sky-border/50 rounded-xl p-5 space-y-3">
               <h3 className="font-medium text-sky-white">Build Configuration</h3>
               {buildPlan ? (

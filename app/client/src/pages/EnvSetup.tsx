@@ -134,7 +134,7 @@ export default function EnvSetup() {
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header backTo={id ? `/takeoff/${id}/report` : '/'} />
+        <Header backTo={id ? `/projects/${id}` : '/'} />
         <main className="flex-1 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-gold animate-spin" />
         </main>
@@ -162,7 +162,7 @@ export default function EnvSetup() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header backTo={`/takeoff/${id}/report`} title={`${project.owner}/${project.repo}`} />
+      <Header backTo={`/projects/${id}`} title={`${project.owner}/${project.repo}`} />
 
       <main className="flex-1 px-6 py-10 max-w-2xl mx-auto w-full space-y-8">
         <div className="text-center space-y-3">

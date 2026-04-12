@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import Landing from './pages/Landing';
@@ -9,16 +9,19 @@ import ReviewProgress from './pages/ReviewProgress';
 import ReviewReport from './pages/ReviewReport';
 import FixPrompt from './pages/FixPrompt';
 import AnalysisProgress from './pages/AnalysisProgress';
-import ReadinessReport from './pages/ReadinessReport';
 import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
 import EnvSetup from './pages/EnvSetup';
-import SuggestionsView from './pages/SuggestionsView';
 import ProjectView from './pages/ProjectView';
 import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
+
+function NavigateToProject() {
+  const { id } = useParams();
+  return <Navigate to={`/projects/${id}`} replace />;
+}
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuthProvider();
@@ -44,9 +47,9 @@ export default function App() {
 
             {/* Takeoff flow */}
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />
-            <Route path="/takeoff/:id/report" element={<ReadinessReport />} />
+            <Route path="/takeoff/:id/report" element={<NavigateToProject />} />
+            <Route path="/takeoff/:id/suggestions" element={<NavigateToProject />} />
             <Route path="/takeoff/:id/plan" element={<ProductionPlan />} />
-            <Route path="/takeoff/:id/suggestions" element={<SuggestionsView />} />
             <Route path="/takeoff/:id/env-setup" element={<EnvSetup />} />
             <Route path="/deploy/:id" element={<DeployProgress />} />
 

@@ -57,7 +57,7 @@ export default function ProductionPlan() {
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header backTo={id ? `/takeoff/${id}/report` : '/'} />
+        <Header backTo={id ? `/projects/${id}` : '/'} />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-sky-muted">Loading plan...</div>
         </main>
@@ -71,7 +71,7 @@ export default function ProductionPlan() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header backTo={id ? `/takeoff/${id}/report` : '/'} title="Your Plan to Ship" />
+      <Header backTo={id ? `/projects/${id}` : '/'} title="Your Plan to Ship" />
 
       <main className="flex-1 px-6 py-10 max-w-2xl mx-auto w-full space-y-8">
         {/* Progress bar */}
@@ -92,7 +92,7 @@ export default function ProductionPlan() {
         <div className="space-y-3">
           {steps.map((step) => {
             const isExpanded = expanded === step.id;
-            const effortBadge = EFFORT_BADGE[step.effort];
+            const effortBadge = EFFORT_BADGE[step.effort] ?? { label: step.effort || 'Unknown', className: 'bg-sky-muted/10 text-sky-muted border-sky-border' };
 
             if (step.isDeploy) {
               return (
