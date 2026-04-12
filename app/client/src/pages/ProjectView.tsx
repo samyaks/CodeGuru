@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
   ExternalLink, Loader2, Trash2, Lightbulb, Star, GitFork,
@@ -43,12 +43,17 @@ const STATUS_COLORS: Record<string, string> = {
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = ((['overview', 'analysis', 'suggestions', 'settings'] as Tab[]).includes(searchParams.get('tab') as Tab)
-    ? searchParams.get('tab') as Tab
-    : 'overview');
-  const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
+
+  const VALID_TABS: Tab[] = ['overview', 'analysis', 'suggestions', 'settings'];
+  const params = new URLSearchParams(location.search);
+  const urlTab = params.get('tab') as Tab;
+  const tab: Tab = VALID_TABS.includes(urlTab) ? urlTab : 'overview';
+  const setTab = (t: Tab) => {
+    const search = t === 'overview' ? '' : `?tab=${t}`;
+    navigate(`${location.pathname}${search}`, { replace: true });
+  };
   const mountedTabs = useRef<Set<Tab>>(new Set(['overview']));
   if (!mountedTabs.current.has(tab)) mountedTabs.current.add(tab);
 
