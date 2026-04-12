@@ -162,6 +162,28 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_project_events_event ON project_events(event);
     CREATE INDEX IF NOT EXISTS idx_project_events_created ON project_events(created_at);
     CREATE INDEX IF NOT EXISTS idx_project_events_session ON project_events(project_id, session_id);
+
+    CREATE TABLE IF NOT EXISTS suggestions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('bug', 'fix', 'feature', 'idea', 'perf')),
+      category TEXT NOT NULL,
+      priority TEXT NOT NULL CHECK(priority IN ('critical', 'high', 'medium', 'low')),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      evidence TEXT,
+      effort TEXT,
+      context_file TEXT,
+      cursor_prompt TEXT,
+      affected_files TEXT,
+      related_docs TEXT,
+      status TEXT DEFAULT 'open' CHECK(status IN ('open', 'dismissed', 'done')),
+      source TEXT NOT NULL CHECK(source IN ('static', 'ai')),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_suggestions_project ON suggestions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_suggestions_priority ON suggestions(project_id, priority);
   `);
 
   // Migrate existing databases
@@ -179,8 +201,14 @@ function getDb() {
   try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployments_slug ON deployments(slug)'); } catch (_) {}
   try { db.exec('ALTER TABLE deployments ADD COLUMN social_summary TEXT'); } catch (_) {}
   try { db.exec(`ALTER TABLE deployments ADD COLUMN env_vars TEXT DEFAULT '{}'`); } catch (_) {}
+  try { db.exec('ALTER TABLE deployments ADD COLUMN suggestions_count INTEGER DEFAULT 0'); } catch (_) {}
 
   return db;
+}
+
+function safeParseArr(str) {
+  if (!str) return [];
+  try { return JSON.parse(str); } catch { return []; }
 }
 
 const reviews = {
@@ -292,6 +320,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
   'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
+  'suggestions_count',
 ]);
 
 const deployments = {
@@ -537,6 +566,69 @@ const projectEvents = {
   },
 };
 
+// ── Suggestions ──
+
+const suggestions = {
+  createBatch(items) {
+    const d = getDb();
+    const stmt = d.prepare(`INSERT OR IGNORE INTO suggestions 
+      (id, project_id, type, category, priority, title, description, evidence, effort, cursor_prompt, affected_files, source, status, created_at)
+      VALUES (@id, @project_id, @type, @category, @priority, @title, @description, @evidence, @effort, @cursor_prompt, @affected_files, @source, @status, @created_at)`);
+    const tx = d.transaction((rows) => {
+      for (const row of rows) {
+        const scopedId = row.project_id
+          ? crypto.createHash('sha256').update(row.project_id + ':' + row.id).digest('hex').slice(0, 16)
+          : row.id;
+        stmt.run({
+          ...row,
+          id: scopedId,
+          evidence: JSON.stringify(row.evidence || []),
+          affected_files: JSON.stringify(row.affected_files || []),
+          status: row.status || 'open',
+          created_at: row.created_at || new Date().toISOString(),
+        });
+      }
+    });
+    tx(items);
+  },
+  findByProjectId(projectId) {
+    const rows = getDb().prepare(
+      'SELECT * FROM suggestions WHERE project_id = ? ORDER BY CASE priority WHEN \'critical\' THEN 0 WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 WHEN \'low\' THEN 3 END, created_at DESC'
+    ).all(projectId);
+    return rows.map(r => ({
+      ...r,
+      evidence: safeParseArr(r.evidence),
+      affected_files: safeParseArr(r.affected_files),
+    }));
+  },
+  updateStatus(id, projectId, status) {
+    getDb().prepare('UPDATE suggestions SET status = ? WHERE id = ? AND project_id = ?').run(status, id, projectId);
+  },
+  deleteByProjectId(projectId) {
+    getDb().prepare('DELETE FROM suggestions WHERE project_id = ?').run(projectId);
+  },
+  countByProjectId(projectId) {
+    const row = getDb().prepare(
+      `SELECT COUNT(*) as total,
+        COALESCE(SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END), 0) as critical,
+        COALESCE(SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END), 0) as high,
+        COALESCE(SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END), 0) as medium,
+        COALESCE(SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END), 0) as low
+      FROM suggestions WHERE project_id = ? AND status = 'open'`
+    ).get(projectId);
+    return row;
+  },
+  summary(projectId) {
+    const rows = getDb().prepare(
+      'SELECT type, COUNT(*) as count FROM suggestions WHERE project_id = ? AND status = \'open\' GROUP BY type'
+    ).all(projectId);
+    const byType = {};
+    for (const r of rows) byType[r.type] = r.count;
+    const counts = this.countByProjectId(projectId);
+    return { total: counts.total, byType, byPriority: { critical: counts.critical, high: counts.high, medium: counts.medium, low: counts.low } };
+  },
+};
+
 // ── Analyses ──
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
@@ -586,4 +678,4 @@ function closeDb() {
   }
 }
 
-module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices, projectEvents };
+module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices, projectEvents, suggestions };

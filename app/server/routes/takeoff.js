@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments } = require('../lib/db');
+const { deployments, suggestions } = require('../lib/db');
 const { addConnection, broadcast, getRecentEvents } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
@@ -9,6 +9,7 @@ const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
+const { runStaticSuggestions } = require('../services/suggestion-rules');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -148,6 +149,35 @@ async function runTakeoff(id, repoUrl) {
     const userId = deployments.findById(id)?.user_id;
     seedFromAnalysis(id, userId, codebaseModel, readiness.score);
 
+    // Stage 2b: Static suggestions (instant, no API call)
+    let suggestionsCount = 0;
+    try {
+      const staticSuggestions = runStaticSuggestions({
+        stack: codebaseModel.stack,
+        gaps: codebaseModel.gaps,
+        features: codebaseModel.features,
+        structure: codebaseModel.structure,
+        fileContents: codebaseModel.fileContents,
+        fileTree: codebaseModel.fileTree,
+        buildPlan,
+      });
+
+      suggestions.deleteByProjectId(id);
+      if (staticSuggestions.length > 0) {
+        suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
+      }
+      suggestionsCount = staticSuggestions.length;
+      deployments.update(id, { suggestions_count: suggestionsCount });
+
+      broadcast(id, {
+        type: 'suggestions-static',
+        count: suggestionsCount,
+        suggestions: staticSuggestions.slice(0, 5),
+      });
+    } catch (err) {
+      console.error(`Static suggestions for ${id} failed (non-fatal):`, err.message);
+    }
+
     // Stage 3: Generate plan steps
     broadcast(id, { type: 'progress', phase: 'planning', message: 'Generating your plan...' });
 
@@ -177,6 +207,7 @@ async function runTakeoff(id, repoUrl) {
         confidence: buildPlan.confidence,
         reason: buildPlan.reason,
       },
+      suggestionsCount,
     });
 
     console.log(JSON.stringify({ event: 'takeoff_complete', projectId: id, repoUrl, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
@@ -292,6 +323,48 @@ router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
   });
 
   res.json({ step });
+}));
+
+// ── Suggestions ──
+
+router.get('/:id/suggestions', asyncHandler(async (req, res) => {
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  const items = suggestions.findByProjectId(req.params.id);
+  const summary = suggestions.summary(req.params.id);
+
+  res.json({ suggestions: items, summary });
+}));
+
+router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => {
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  const { status } = req.body;
+  if (!['open', 'dismissed', 'done'].includes(status)) {
+    throw AppError.badRequest('Status must be "open", "dismissed", or "done"');
+  }
+
+  suggestions.updateStatus(req.params.suggestionId, req.params.id, status);
+
+  const counts = suggestions.countByProjectId(req.params.id);
+  deployments.update(req.params.id, { suggestions_count: counts.total || 0 });
+
+  res.json({ ok: true, status });
+}));
+
+router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
+  const project = deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  suggestions.deleteByProjectId(req.params.id);
+  deployments.update(req.params.id, { suggestions_count: 0 });
+
+  res.json({ ok: true, message: 'Suggestions cleared. Re-analyze to generate new suggestions.' });
 }));
 
 module.exports = router;
