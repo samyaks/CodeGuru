@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Bug, Wrench, Sparkles, Lightbulb, Zap,
@@ -12,7 +12,6 @@ import {
   updateSuggestionStatus,
   type Project,
   type Suggestion,
-  type SuggestionsSummary,
 } from '../services/api';
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -66,6 +65,11 @@ function SuggestionCard({
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-navy-mid border border-sky-border text-sky-muted">
                 {suggestion.category}
               </span>
+              {suggestion.source === 'ai' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                  AI
+                </span>
+              )}
             </div>
             <h3 className="text-sm font-medium text-sky-white">{suggestion.title}</h3>
           </div>
@@ -104,15 +108,15 @@ function SuggestionCard({
         )}
 
         <div className="flex items-center gap-2 pt-2">
-          {suggestion.cursor_prompt && (
+          {suggestion.cursor_prompt ? (
             <button
-              onClick={() => onCopy(suggestion.id, suggestion.cursor_prompt!)}
+              onClick={() => onCopy(suggestion.id, suggestion.cursor_prompt as string)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold/10 hover:bg-gold/20 text-gold border border-gold/20 transition-colors"
             >
               {copiedId === suggestion.id ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
               {copiedId === suggestion.id ? 'Copied!' : 'Copy Cursor Prompt'}
             </button>
-          )}
+          ) : null}
           <button
             onClick={() => onDone(suggestion.id)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/20 transition-colors"
@@ -135,43 +139,81 @@ export default function SuggestionsView() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [summary, setSummary] = useState<SuggestionsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
+    setLoading(true);
     Promise.all([
       fetchProject(id),
       fetchSuggestions(id),
     ]).then(([proj, data]) => {
+      if (cancelled) return;
       setProject(proj);
       setSuggestions(data.suggestions);
-      setSummary(data.summary);
-    }).catch(err => setError(err.message))
-      .finally(() => setLoading(false));
+      const hasAi = data.suggestions.some((s: Suggestion) => s.source === 'ai');
+      if (!hasAi && data.suggestions.length > 0 && proj.status === 'ready') {
+        pollTimeoutRef.current = setTimeout(() => {
+          if (cancelled) return;
+          fetchSuggestions(id).then(fresh => {
+            if (!cancelled) setSuggestions(fresh.suggestions);
+          }).catch(() => {});
+        }, 15000);
+      }
+    }).catch(err => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current); };
   }, [id]);
 
+  useEffect(() => {
+    return () => { if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current); };
+  }, []);
+
   const handleCopy = async (suggestionId: string, prompt: string) => {
-    await navigator.clipboard.writeText(prompt);
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = prompt;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
     setCopiedId(suggestionId);
-    setTimeout(() => setCopiedId(null), 2000);
+    if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+    copyTimeoutRef.current = setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleDismiss = async (suggestionId: string) => {
+    if (!id) return;
+    const prev = suggestions;
+    setSuggestions(s => s.map(x => x.id === suggestionId ? { ...x, status: 'dismissed' as const } : x));
     try {
-      await updateSuggestionStatus(id!, suggestionId, 'dismissed');
-      setSuggestions(prev => prev.map(s => s.id === suggestionId ? { ...s, status: 'dismissed' } : s));
-    } catch { /* ignore */ }
+      await updateSuggestionStatus(id, suggestionId, 'dismissed');
+    } catch {
+      setSuggestions(prev);
+    }
   };
 
   const handleDone = async (suggestionId: string) => {
+    if (!id) return;
+    const prev = suggestions;
+    setSuggestions(s => s.map(x => x.id === suggestionId ? { ...x, status: 'done' as const } : x));
     try {
-      await updateSuggestionStatus(id!, suggestionId, 'done');
-      setSuggestions(prev => prev.map(s => s.id === suggestionId ? { ...s, status: 'done' } : s));
-    } catch { /* ignore */ }
+      await updateSuggestionStatus(id, suggestionId, 'done');
+    } catch {
+      setSuggestions(prev);
+    }
   };
 
   if (loading) {
@@ -229,6 +271,14 @@ export default function SuggestionsView() {
       <Header backTo={`/takeoff/${id}/report`} title={`${project.owner}/${project.repo}`} />
 
       <main className="flex-1 px-6 py-10 max-w-3xl mx-auto w-full space-y-8">
+        {/* AI analysis in-progress banner */}
+        {suggestions.length > 0 && !suggestions.some(s => s.source === 'ai') && project.status === 'ready' && (
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-500/5 border border-purple-500/10 text-xs text-purple-400">
+            <Sparkles size={14} className="animate-pulse flex-shrink-0" />
+            AI is analyzing your codebase for deeper suggestions — they'll appear here shortly.
+          </div>
+        )}
+
         {/* Progress bar */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-sky-muted">
@@ -243,27 +293,31 @@ export default function SuggestionsView() {
           </div>
         </div>
 
-        {/* Filter tabs */}
-        <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
-          <button
-            onClick={() => setActiveFilter('all')}
-            className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === 'all' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
-          >
-            All {summary?.total || 0}
-          </button>
-          {summary?.byType && Object.entries(summary.byType).map(([type, count]) => {
-            if (count === 0) return null;
-            return (
+        {/* Filter tabs — counts derived from local state */}
+        {(() => {
+          const openItems = suggestions.filter(s => s.status === 'open');
+          const typeCounts: Record<string, number> = {};
+          for (const s of openItems) typeCounts[s.type] = (typeCounts[s.type] || 0) + 1;
+          return (
+            <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
               <button
-                key={type}
-                onClick={() => setActiveFilter(type)}
-                className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === type ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                onClick={() => setActiveFilter('all')}
+                className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === 'all' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
               >
-                {TYPE_LABELS[type] || type} {count}
+                All {openItems.length}
               </button>
-            );
-          })}
-        </div>
+              {Object.entries(typeCounts).map(([type, count]) => (
+                <button
+                  key={type}
+                  onClick={() => setActiveFilter(type)}
+                  className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === type ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                >
+                  {TYPE_LABELS[type] || type} {count}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Grouped suggestion cards */}
         {filtered.length === 0 ? (

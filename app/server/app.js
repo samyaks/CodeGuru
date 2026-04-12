@@ -30,7 +30,7 @@ app.use(requestLogger());
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://localhost:3001'];
+  : [process.env.FRONTEND_URL || 'http://localhost:3000', process.env.API_URL || 'http://localhost:3001'];
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -53,7 +53,7 @@ const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
   : null;
 
-const FRONTEND_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000');
 
 if (supabase) {
   console.log(`[Auth] Supabase initialized. REDIRECT_URL=${process.env.SUPABASE_REDIRECT_URL || 'NOT SET'}, FRONTEND_URL=${FRONTEND_URL || '(empty/production)'}`);
@@ -178,8 +178,9 @@ async function start() {
 
   server = app.listen(PORT, () => {
     console.log(`Takeoff server running on port ${PORT}`);
-    console.log(`Health: http://localhost:${PORT}/health`);
-    console.log(`API: http://localhost:${PORT}/api/takeoff`);
+    const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
+    console.log(`Health: ${baseUrl}/health`);
+    console.log(`API: ${baseUrl}/api/takeoff`);
     if (supabase) {
       console.log('Auth: Supabase connected');
     } else {

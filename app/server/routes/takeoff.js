@@ -9,7 +9,8 @@ const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
-const { runStaticSuggestions } = require('../services/suggestion-rules');
+const { runStaticSuggestions, runGapSuggestions } = require('../services/suggestion-rules');
+const { runAISuggestions } = require('../services/suggestion-ai');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -149,8 +150,8 @@ async function runTakeoff(id, repoUrl) {
     const userId = deployments.findById(id)?.user_id;
     seedFromAnalysis(id, userId, codebaseModel, readiness.score);
 
-    // Stage 2b: Static suggestions (instant, no API call)
-    let suggestionsCount = 0;
+    // Stage 2b: Static + Gap suggestions (instant, no API call)
+    let allStaticSuggestions = [];
     try {
       const staticSuggestions = runStaticSuggestions({
         stack: codebaseModel.stack,
@@ -166,13 +167,30 @@ async function runTakeoff(id, repoUrl) {
       if (staticSuggestions.length > 0) {
         suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
       }
-      suggestionsCount = staticSuggestions.length;
+      allStaticSuggestions = [...staticSuggestions];
+
+      const coveredCategories = new Set(staticSuggestions.map(s => s.category));
+      try {
+        const gapSuggestions = runGapSuggestions({
+          gaps: codebaseModel.gaps,
+          readinessCategories: readiness.categories,
+          coveredCategories,
+        });
+        if (gapSuggestions.length > 0) {
+          suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));
+          allStaticSuggestions.push(...gapSuggestions);
+        }
+      } catch (err) {
+        console.warn(`Gap suggestions for ${id} failed (non-fatal):`, err.message);
+      }
+
+      const suggestionsCount = allStaticSuggestions.length;
       deployments.update(id, { suggestions_count: suggestionsCount });
 
       broadcast(id, {
         type: 'suggestions-static',
         count: suggestionsCount,
-        suggestions: staticSuggestions.slice(0, 5),
+        suggestions: allStaticSuggestions.slice(0, 5),
       });
     } catch (err) {
       console.error(`Static suggestions for ${id} failed (non-fatal):`, err.message);
@@ -207,10 +225,32 @@ async function runTakeoff(id, repoUrl) {
         confidence: buildPlan.confidence,
         reason: buildPlan.reason,
       },
-      suggestionsCount,
+      suggestionsCount: allStaticSuggestions.length,
     });
 
     console.log(JSON.stringify({ event: 'takeoff_complete', projectId: id, repoUrl, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
+
+    // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
+    try {
+      const aiSuggestions = await runAISuggestions({
+        projectId: id,
+        stack: codebaseModel.stack,
+        gaps: codebaseModel.gaps,
+        features: codebaseModel.features,
+        fileContents: codebaseModel.fileContents,
+        fileTree: codebaseModel.fileTree,
+        staticSuggestions: allStaticSuggestions,
+        featuresSummary,
+      });
+
+      if (aiSuggestions.length > 0) {
+        suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
+        const counts = suggestions.countByProjectId(id);
+        deployments.update(id, { suggestions_count: counts.total || 0 });
+      }
+    } catch (err) {
+      console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
+    }
 
   } catch (err) {
     console.error(`Takeoff failed for ${id}:`, err);

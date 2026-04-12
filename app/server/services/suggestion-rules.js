@@ -466,4 +466,177 @@ function runStaticSuggestions({ stack, gaps, features, structure, fileContents, 
   return results;
 }
 
-module.exports = { runStaticSuggestions };
+// ---------------------------------------------------------------------------
+// Gap-based suggestions
+// ---------------------------------------------------------------------------
+
+function runGapSuggestions({ gaps, readinessCategories, coveredCategories }) {
+  const results = [];
+  const cat = readinessCategories || {};
+  const covered = coveredCategories || new Set();
+
+  function add(suggestion) {
+    if (covered.has(suggestion.category)) return;
+    results.push(suggestion);
+  }
+
+  if (!gaps.auth?.exists && cat.auth?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'auth',
+      priority: 'high',
+      title: 'Add user authentication',
+      description:
+        'Your app has no authentication. Without it, you can\'t identify users, protect personal data, or control who can do what. Auth is foundational — most features (saving preferences, user-specific data, admin tools) depend on knowing who the user is.',
+      effort: 'large',
+      cursorPrompt:
+        'Add user authentication to this project. Recommended options depending on your stack:\n\n- **Supabase Auth** (if already using Supabase): `const { data, error } = await supabase.auth.signUp({ email, password })`. Add sign-up, login, logout, and a session check middleware.\n- **NextAuth.js** (if using Next.js): Install `next-auth`, create `pages/api/auth/[...nextauth].js`, configure at least one provider (Google, GitHub, or email).\n- **Clerk** (fastest to integrate): Install `@clerk/nextjs` or `@clerk/express`, wrap your app in `<ClerkProvider>`, and use `<SignIn />` / `<SignUp />` components.\n\nMake sure to protect API routes with an auth middleware that checks for a valid session before processing requests.',
+    }));
+  }
+
+  if (!gaps.database?.exists && cat.database?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'database',
+      priority: 'high',
+      title: 'Set up a database',
+      description:
+        'Your app has no database. Without one, all data is lost when the server restarts, and you can\'t support multiple users or persist anything. A database is essential for any app that stores user data, content, or state.',
+      effort: 'large',
+      cursorPrompt:
+        'Set up a database for this project. Recommended options:\n\n- **Supabase (Postgres)**: Create a project at supabase.com, copy the connection string into `.env`, and use `@supabase/supabase-js` to read/write data. Great if you also need auth and realtime.\n- **SQLite + Prisma** (simplest for small apps): `npm install prisma @prisma/client && npx prisma init --datasource-provider sqlite`. Define your models in `prisma/schema.prisma`, then run `npx prisma db push`.\n- **Postgres + Prisma** (production-ready): Same as above but with `--datasource-provider postgresql` and a hosted Postgres URL.\n\nCreate at least one table/model for your core data entity, add CRUD operations, and wire them to your API routes.',
+    }));
+  }
+
+  if (gaps.database?.exists && !gaps.database.hasSchema && cat.database?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'fix',
+      category: 'database',
+      priority: 'medium',
+      title: 'Add database schema or migration files',
+      description:
+        'Your project uses a database but has no schema or migration files checked in. Without these, no one else can recreate your database — they\'d have to reverse-engineer it from the code. Schema files make your database reproducible and version-controlled.',
+      effort: 'medium',
+      cursorPrompt:
+        'Add database schema and migration files to the project. If using Prisma, make sure `prisma/schema.prisma` is committed and run `npx prisma migrate dev --name init` to create migration files. If using raw SQL, create a `migrations/` folder with numbered SQL files (e.g. `001_create_users.sql`). If using Supabase, export your schema with `supabase db dump` and commit the SQL file. The goal is that anyone can run one command to set up an identical database.',
+    }));
+  }
+
+  if (!gaps.deployment?.exists && cat.deployment?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'deployment',
+      priority: 'medium',
+      title: 'Add deployment configuration',
+      description:
+        'Your project has no deployment config. Without it, deploying means manual steps that are easy to mess up. A deploy config file gives you one-click deploys and ensures every environment is set up the same way.',
+      effort: 'medium',
+      cursorPrompt:
+        'Add deployment configuration to this project. Choose the best option for your stack:\n\n- **Dockerfile** (works everywhere): Create a multi-stage `Dockerfile` that installs dependencies, builds the app, and runs it. Add a `.dockerignore` for `node_modules` and `.env`.\n- **railway.json** (Railway): Create `railway.json` with `{ "build": { "builder": "nixpacks" }, "deploy": { "startCommand": "npm start" } }`.\n- **vercel.json** (Vercel, for Next.js/frontend): Create `vercel.json` with build and route settings.\n\nAlso add a `start` script to `package.json` if missing, and document the deploy process in the README.',
+    }));
+  }
+
+  if (gaps.deployment?.exists && !gaps.deployment.hasCI && cat.deployment?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'fix',
+      category: 'deployment',
+      priority: 'low',
+      title: 'Add CI/CD pipeline',
+      description:
+        'Your project has deployment config but no CI/CD pipeline. Without automated checks, broken code can be deployed directly to production. A CI pipeline runs your tests and linting on every push, catching bugs before they go live.',
+      effort: 'medium',
+      cursorPrompt:
+        'Add a GitHub Actions CI workflow. Create `.github/workflows/ci.yml`:\n\n```yaml\nname: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: 20 }\n      - run: npm ci\n      - run: npm run lint --if-present\n      - run: npm test --if-present\n```\n\nThis runs on every push and PR. Add more steps as needed (type checking, build verification, deploy to staging).',
+    }));
+  }
+
+  if (!gaps.permissions?.exists && cat.auth?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'security',
+      priority: 'medium',
+      title: 'Add role-based access control',
+      description:
+        'Your app has no role or permission system. Without RBAC, every authenticated user has the same access level — there\'s no way to have admins, moderators, or restricted users. This becomes a security risk as soon as you need different permission levels.',
+      effort: 'large',
+      cursorPrompt:
+        'Add role-based access control (RBAC) to the app. Steps:\n\n1. Add a `role` column to your users table (e.g. `admin`, `user`, `moderator`) with `user` as the default.\n2. Create an authorization middleware that checks the user\'s role:\n\n```js\nfunction requireRole(...roles) {\n  return (req, res, next) => {\n    if (!req.user) return res.status(401).json({ error: \'Not authenticated\' });\n    if (!roles.includes(req.user.role)) return res.status(403).json({ error: \'Insufficient permissions\' });\n    next();\n  };\n}\n```\n\n3. Protect admin routes: `router.delete(\'/users/:id\', requireRole(\'admin\'), deleteUser)`.\n4. On the frontend, conditionally render admin UI based on the user\'s role.',
+    }));
+  }
+
+  if (!gaps.testing?.exists && cat.testing?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'fix',
+      category: 'testing',
+      priority: 'medium',
+      title: 'Add automated tests',
+      description:
+        'Your project has no test files. Without tests, every code change is a gamble — you won\'t know if something broke until a user reports it. Even a handful of tests for critical flows dramatically reduces the risk of shipping bugs.',
+      effort: 'medium',
+      cursorPrompt:
+        'Set up automated testing with vitest (fast, modern, works with ESM and CJS). Install: `npm install -D vitest`. Add to `package.json` scripts: `"test": "vitest run"`. Create your first tests:\n\n1. `tests/api.test.js` — smoke-test each API endpoint with supertest (`npm install -D supertest`)\n2. `tests/utils.test.js` — unit-test any pure utility functions\n3. Focus on the critical user flows first: can a user sign up, create data, and retrieve it?\n\nRun with `npm test` and add to CI.',
+    }));
+  }
+
+  if (!gaps.errorHandling?.exists && cat.errorHandling?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'fix',
+      category: 'errorHandling',
+      priority: 'medium',
+      title: 'Add global error handling',
+      description:
+        'Your app has no centralized error handling. When something goes wrong, users see cryptic stack traces or the app crashes silently. A global error handler catches all unexpected errors, returns user-friendly messages, and logs the details for debugging.',
+      effort: 'quick',
+      cursorPrompt:
+        'Add global error handling to the Express app. Place this after all route definitions:\n\n```js\napp.use((err, req, res, next) => {\n  console.error(err.stack);\n  res.status(err.status || 500).json({\n    error: process.env.NODE_ENV === \'production\' ? \'Something went wrong\' : err.message,\n  });\n});\n```\n\nAlso add process-level handlers at the top of your entry file:\n\n```js\nprocess.on(\'unhandledRejection\', (err) => console.error(\'Unhandled rejection:\', err));\nprocess.on(\'uncaughtException\', (err) => { console.error(\'Uncaught exception:\', err); process.exit(1); });\n```',
+    }));
+  }
+
+  if (!gaps.envConfig?.exists && cat.envConfig?.status !== 'ready') {
+    add(makeSuggestion({
+      type: 'fix',
+      category: 'envConfig',
+      priority: 'medium',
+      title: 'Create .env.example for environment variables',
+      description:
+        'Your project has no .env.example file. Without it, new developers (or your future self) have to guess which environment variables are needed and what format they should be in. A .env.example documents every required variable with placeholder values.',
+      effort: 'quick',
+      cursorPrompt:
+        'Create a `.env.example` file that documents all required environment variables. Look through the codebase for every `process.env.VARIABLE_NAME` reference, then list them all:\n\n```\n# Server\nPORT=3000\nNODE_ENV=development\n\n# Database\nDATABASE_URL=postgresql://user:password@localhost:5432/mydb\n\n# Auth (replace with real values)\nJWT_SECRET=your-secret-here\n\n# External APIs\nAPI_KEY=your-api-key-here\n```\n\nUse descriptive placeholder values so developers know the expected format. Add a note in README about copying this file to `.env`.',
+    }));
+  }
+
+  if (cat.frontend?.status === 'missing') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'frontend',
+      priority: 'medium',
+      title: 'Add a user interface',
+      description:
+        'Your project has no frontend. Without a UI, users have to interact with your app through raw API calls or the command line. A frontend makes your app accessible, usable, and ready to show to others.',
+      effort: 'large',
+      cursorPrompt:
+        'Scaffold a frontend for this project. Recommended approach:\n\n1. Create a React app with Vite: `npm create vite@latest client -- --template react-ts && cd client && npm install`\n2. Install Tailwind CSS for styling: `npm install -D tailwindcss @tailwindcss/vite` and configure it.\n3. Set up a basic layout with a header, main content area, and navigation.\n4. Create pages for the core user flows (e.g. Home, Dashboard, Settings).\n5. Add an API service layer (`src/services/api.ts`) that calls your backend endpoints.\n6. Add a proxy in `vite.config.ts` to forward `/api` requests to your backend during development.\n\nStart with the most important user-facing page and iterate from there.',
+    }));
+  }
+
+  if (cat.backend?.status === 'missing') {
+    add(makeSuggestion({
+      type: 'feature',
+      category: 'backend',
+      priority: 'medium',
+      title: 'Add a backend API',
+      description:
+        'Your project has no backend server. Without one, there\'s nowhere to run business logic, process data securely, or connect to databases and external services. A backend API is the foundation for any app that needs to store data or perform server-side operations.',
+      effort: 'large',
+      cursorPrompt:
+        'Create an Express backend API. Steps:\n\n1. Initialize: `mkdir server && cd server && npm init -y && npm install express cors dotenv`\n2. Create `server/index.js`:\n\n```js\nconst express = require(\'express\');\nconst cors = require(\'cors\');\nrequire(\'dotenv\').config();\n\nconst app = express();\napp.use(cors());\napp.use(express.json());\n\napp.get(\'/api/health\', (req, res) => res.json({ status: \'ok\' }));\n\nconst PORT = process.env.PORT || 3001;\napp.listen(PORT, () => console.log(`Server running on port ${PORT}`));\n```\n\n3. Add route files in `server/routes/` for each resource.\n4. Add error handling middleware.\n5. Add `"start": "node index.js"` and `"dev": "node --watch index.js"` scripts to package.json.',
+    }));
+  }
+
+  results.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99));
+
+  return results;
+}
+
+module.exports = { runStaticSuggestions, runGapSuggestions };

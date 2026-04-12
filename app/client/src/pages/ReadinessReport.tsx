@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
@@ -48,27 +48,37 @@ export default function ReadinessReport() {
   const [activeTab, setActiveTab] = useState<'summary' | 'overview' | 'details' | 'suggestions'>('overview');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [suggestionsSummary, setSuggestionsSummary] = useState<SuggestionsSummary | null>(null);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const hasUserSwitchedTab = useRef(false);
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     fetchProject(id)
-      .then(setProject)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then(p => { if (!cancelled) setProject(p); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [id]);
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     fetchSuggestions(id)
-      .then(data => { setSuggestions(data.suggestions); setSuggestionsSummary(data.summary); })
-      .catch(() => {});
+      .then(data => {
+        if (cancelled) return;
+        setSuggestions(data.suggestions);
+        setSuggestionsSummary(data.summary);
+      })
+      .catch((err) => { if (!cancelled) setSuggestionsError(err.message); });
+    return () => { cancelled = true; };
   }, [id]);
 
   useEffect(() => {
     if (!loading && project && (project.status === 'analyzing' || project.status === 'pending')) {
       navigate(`/takeoff/${id}`, { replace: true });
     }
-    if (!loading && project?.features_summary) {
+    if (!loading && project?.features_summary && !hasUserSwitchedTab.current) {
       setActiveTab('summary');
     }
   }, [loading, project, id, navigate]);
@@ -168,26 +178,26 @@ export default function ReadinessReport() {
         <div className="flex items-center justify-center gap-2 text-sm">
           {project.features_summary && (
             <button
-              onClick={() => setActiveTab('summary')}
+              onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('summary'); }}
               className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'summary' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
             >
               What It Does
             </button>
           )}
           <button
-            onClick={() => setActiveTab('overview')}
+            onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('overview'); }}
             className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
           >
             Readiness
           </button>
           <button
-            onClick={() => setActiveTab('details')}
+            onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('details'); }}
             className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'details' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
           >
             Codebase Details
           </button>
           <button
-            onClick={() => setActiveTab('suggestions')}
+            onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('suggestions'); }}
             className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${activeTab === 'suggestions' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
           >
             <Lightbulb size={14} />
@@ -203,7 +213,11 @@ export default function ReadinessReport() {
         {activeTab === 'summary' && project.features_summary ? (
           <FeaturesSummary summary={project.features_summary} />
         ) : activeTab === 'suggestions' ? (
-          <SuggestionsPreview suggestions={suggestions} summary={suggestionsSummary} projectId={id!} />
+          suggestionsError ? (
+            <div className="text-center py-12 text-red-600 text-sm">Failed to load suggestions: {suggestionsError}</div>
+          ) : (
+            <SuggestionsPreview suggestions={suggestions} summary={suggestionsSummary} projectId={id ?? ''} />
+          )
         ) : activeTab === 'overview' ? (
           <>
             {/* Category breakdown */}

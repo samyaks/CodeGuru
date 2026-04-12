@@ -263,7 +263,7 @@ function ProjectCard({ project }: { project: Project }) {
           </span>
         ) : (
           <span className="text-sky-muted">
-            {new Date(displayDate).toLocaleDateString()}
+            {displayDate ? new Date(displayDate).toLocaleDateString() : ''}
           </span>
         )}
         <span className="text-sky-muted group-hover:text-gold transition-colors">

@@ -459,7 +459,7 @@ export interface Suggestion {
   description: string;
   evidence: SuggestionEvidence[];
   effort: 'quick' | 'medium' | 'large';
-  cursor_prompt: string;
+  cursor_prompt: string | null;
   affected_files: string[];
   status: 'open' | 'dismissed' | 'done';
   source: 'static' | 'ai';
