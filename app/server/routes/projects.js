@@ -7,7 +7,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { parseJsonFields, checkProjectAccess } = require('../lib/helpers');
 
-const PROJECT_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps'];
+const PROJECT_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
 
 const SUMMARY_FIELDS = [
   'id', 'repo_url', 'owner', 'repo', 'status', 'readiness_score',
