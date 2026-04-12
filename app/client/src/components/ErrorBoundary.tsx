@@ -1,5 +1,4 @@
 import { Component, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -47,12 +46,12 @@ export default class ErrorBoundary extends Component<Props, State> {
               >
                 Try again
               </button>
-              <Link
-                to="/"
+              <a
+                href="/"
                 className="px-5 py-2.5 rounded-lg border border-sky-border text-sm font-medium text-gold hover:text-gold-dim hover:border-gold/30 transition-colors text-center"
               >
                 Go home
-              </Link>
+              </a>
             </div>
           </div>
         </div>
