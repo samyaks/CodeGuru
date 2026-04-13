@@ -230,6 +230,20 @@ export interface Project {
 }
 
 // Takeoff
+export async function startTakeoffUpload(files: File[], projectName: string): Promise<{ projectId: string; slug: string; status: string }> {
+  const formData = new FormData();
+  formData.append('projectName', projectName);
+  for (const file of files) {
+    const relativePath = file.webkitRelativePath || file.name;
+    formData.append('files', file, relativePath);
+  }
+  const res = await authFetch(`${API_BASE}/takeoff/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  return handleApiResponse<{ projectId: string; slug: string; status: string }>(res);
+}
+
 export async function startTakeoff(repoUrl: string): Promise<{ projectId: string; slug: string; status: string }> {
   const res = await authFetch(`${API_BASE}/takeoff`, {
     method: 'POST',

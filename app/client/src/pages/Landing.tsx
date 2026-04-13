@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, ClipboardList, Zap, Search, Lock, Star, ChevronDown, Link2, Rocket } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Search, Lock, Star, ChevronDown, Link2, Rocket, FolderUp } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../hooks/useAuth';
-import { startTakeoff, fetchMyRepos, GitHubRepo } from '../services/api';
+import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -17,7 +17,11 @@ export default function Landing() {
   const [repoUrl, setRepoUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<'picker' | 'url'>('picker');
+  const [mode, setMode] = useState<'picker' | 'url' | 'upload'>(user ? 'picker' : 'url');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadProjectName, setUploadProjectName] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
@@ -81,6 +85,85 @@ export default function Landing() {
     analyze(repo.html_url);
   };
 
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setSelectedFiles(files);
+    const firstPath = files[0].webkitRelativePath || files[0].name;
+    const topDir = firstPath.split('/')[0];
+    if (topDir) setUploadProjectName(topDir);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+
+    try {
+      const items = Array.from(e.dataTransfer.items);
+      const files: File[] = [];
+
+      const entries: FileSystemEntry[] = [];
+      for (const item of items) {
+        const entry = item.webkitGetAsEntry();
+        if (entry) entries.push(entry);
+      }
+
+      async function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+        const all: FileSystemEntry[] = [];
+        let batch: FileSystemEntry[];
+        do {
+          batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+            reader.readEntries(resolve, reject);
+          });
+          all.push(...batch);
+        } while (batch.length > 0);
+        return all;
+      }
+
+      async function readEntry(entry: FileSystemEntry, path: string): Promise<void> {
+        if (entry.isFile) {
+          const file = await new Promise<File>((resolve, reject) => {
+            (entry as FileSystemFileEntry).file(resolve, reject);
+          });
+          const newFile = new File([file], path + file.name, { type: file.type });
+          files.push(newFile);
+        } else if (entry.isDirectory) {
+          const dirReader = (entry as FileSystemDirectoryEntry).createReader();
+          const subEntries = await readAllEntries(dirReader);
+          for (const subEntry of subEntries) {
+            await readEntry(subEntry, path + entry.name + '/');
+          }
+        }
+      }
+
+      for (const entry of entries) {
+        await readEntry(entry, '');
+      }
+
+      if (files.length > 0) {
+        setSelectedFiles(files);
+        const topDir = entries[0]?.name;
+        if (topDir) setUploadProjectName(topDir);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to read dropped files');
+    }
+  };
+
+  const handleUpload = async () => {
+    if (selectedFiles.length === 0) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { projectId } = await startTakeoffUpload(selectedFiles, uploadProjectName || 'My Project');
+      navigate(`/takeoff/${projectId}`);
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+      setLoading(false);
+    }
+  };
+
   function timeAgo(dateStr: string) {
     const diff = Date.now() - new Date(dateStr).getTime();
     const days = Math.floor(diff / 86400000);
@@ -116,30 +199,94 @@ export default function Landing() {
             </h1>
             <p className="text-lg text-sky-muted max-w-lg mx-auto leading-relaxed">
               {user
-                ? 'Select a repo below or paste any GitHub URL to get started.'
-                : 'The missing last mile for AI-built apps \u2014 auth, database, payments, deploy. One click.'}
+                ? 'Select a repo, paste a URL, or upload a folder to get started.'
+                : 'Paste a GitHub URL or upload your project folder to get started.'}
             </p>
           </div>
 
-          {user && (
-            <div className="flex items-center justify-center gap-2 text-sm">
+          <div className="flex items-center justify-center gap-2 text-sm">
+            {user && (
               <button
                 onClick={() => setMode('picker')}
                 className={`px-4 py-1.5 rounded-lg transition-colors text-sm font-medium ${mode === 'picker' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
               >
                 My Repos
               </button>
-              <button
-                onClick={() => setMode('url')}
-                className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'url' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
-              >
-                <Link2 size={14} />
-                Paste URL
-              </button>
-            </div>
-          )}
+            )}
+            <button
+              onClick={() => setMode('url')}
+              className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'url' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+            >
+              <Link2 size={14} />
+              Paste URL
+            </button>
+            <button
+              onClick={() => setMode('upload')}
+              className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'upload' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+            >
+              <FolderUp size={14} />
+              Upload Folder
+            </button>
+          </div>
 
-          {user && mode === 'picker' ? (
+          {mode === 'upload' ? (
+            <div className="max-w-xl mx-auto space-y-4">
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); }}
+                onDrop={handleDrop}
+                onClick={() => folderInputRef.current?.click()}
+                className={`glass rounded-xl p-10 text-center cursor-pointer transition-all ${
+                  dragOver ? 'border-gold/50 bg-gold/[0.05]' : 'hover:border-gold/30'
+                }`}
+              >
+                <FolderUp size={32} className="text-gold mx-auto mb-3" />
+                <p className="text-sm text-sky-white font-medium mb-1">
+                  {selectedFiles.length > 0
+                    ? `${selectedFiles.length} files selected`
+                    : 'Drop a folder here or click to browse'}
+                </p>
+                <p className="text-xs text-sky-muted">
+                  {selectedFiles.length > 0
+                    ? uploadProjectName || 'Ready to analyze'
+                    : 'Select your project folder \u2014 we\'ll analyze it locally'}
+                </p>
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // @ts-expect-error webkitdirectory is not in React types
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  className="hidden"
+                  onChange={handleFolderSelect}
+                />
+              </div>
+              {selectedFiles.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={uploadProjectName}
+                    onChange={(e) => setUploadProjectName(e.target.value)}
+                    placeholder="Project name (optional)"
+                    className="flex-1 px-4 py-3 rounded-xl glass text-sky-white placeholder-sky-muted focus:outline-none focus:ring-2 focus:ring-gold/30 text-sm"
+                  />
+                  <button
+                    onClick={handleUpload}
+                    disabled={loading}
+                    className="px-6 py-3 rounded-xl bg-gold text-midnight font-semibold text-sm hover:bg-gold-dim transition-all btn-glow disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-midnight/30 border-t-midnight rounded-full animate-spin" />
+                        Uploading {selectedFiles.length} files...
+                      </span>
+                    ) : 'Analyze'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : user && mode === 'picker' ? (
             <div ref={dropdownRef} className="relative max-w-xl mx-auto">
               <div
                 className="glass flex items-center gap-2 px-4 py-3 rounded-xl text-sky-white cursor-pointer hover:border-gold/40 transition-colors"
@@ -253,7 +400,7 @@ export default function Landing() {
             </div>
           )}
 
-          {(!user || mode === 'url') && (
+          {mode === 'url' && (
             <div className="text-sm text-sky-muted">
               Try an example:
               {EXAMPLES.map((ex, i) => (

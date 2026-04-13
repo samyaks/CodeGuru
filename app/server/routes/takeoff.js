@@ -4,7 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const { deployments, suggestions } = require('../lib/db');
 const { addConnection, broadcast, getRecentEvents } = require('../lib/sse');
 const github = require('../services/github');
-const { analyzeRepo } = require('../services/analyzer');
+const multer = require('multer');
+const { analyzeRepo, analyzeFromFiles, shouldSkipFile } = require('../services/analyzer');
 const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
@@ -22,11 +23,74 @@ const TAKEOFF_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories',
 
 const router = express.Router();
 
+const MAX_UPLOAD_FILES = 300;
+const MAX_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_TOTAL_SIZE = 50 * 1024 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE, files: MAX_UPLOAD_FILES },
+});
+
+function sanitizePath(filePath) {
+  return filePath
+    .split('/')
+    .filter(seg => seg && seg !== '.' && seg !== '..')
+    .join('/');
+}
+
 const takeoffRateLimit = createRateLimit({
   windowMs: 60000,
   max: 10,
   message: 'Too many requests. Please try again in a minute.',
 });
+
+router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES), asyncHandler(async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    throw AppError.badRequest('No files uploaded');
+  }
+
+  const totalSize = req.files.reduce((sum, f) => sum + f.size, 0);
+  if (totalSize > MAX_TOTAL_SIZE) {
+    throw AppError.badRequest(`Total upload size exceeds ${MAX_TOTAL_SIZE / 1024 / 1024}MB limit`);
+  }
+
+  const projectName = req.body.projectName || 'Uploaded Project';
+  const userId = req.user?.id || null;
+
+  const id = uuidv4();
+  let slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + id.slice(0, 6);
+
+  deployments.create({
+    id,
+    repo_url: `local://${projectName}`,
+    owner: 'local',
+    repo: projectName,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    user_id: userId,
+  });
+
+  try {
+    deployments.update(id, { slug });
+  } catch (_) {
+    slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
+    deployments.update(id, { slug });
+  }
+
+  // Sanitize paths and pre-filter binary files before UTF-8 conversion
+  const fileEntries = req.files
+    .map(f => ({ ...f, safePath: sanitizePath(f.originalname) }))
+    .filter(f => f.safePath && !shouldSkipFile(f.safePath))
+    .map(f => ({
+      path: f.safePath,
+      content: f.buffer.toString('utf-8'),
+    }));
+
+  setImmediate(() => runUploadAnalysis(id, fileEntries, projectName, userId));
+
+  res.status(201).json({ projectId: id, slug, status: 'pending' });
+}));
 
 router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   const { repoUrl } = req.body;
@@ -61,210 +125,230 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
 }));
 
 async function runTakeoff(id, repoUrl) {
+  const label = repoUrl;
   console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, timestamp: new Date().toISOString() }));
   try {
     deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
-    // Stage 1: Full analysis
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
     });
 
-    deployments.update(id, {
-      owner: codebaseModel.meta.owner,
-      repo: codebaseModel.meta.repo,
-      branch: codebaseModel.meta.defaultBranch,
-      framework: codebaseModel.stack.framework,
-      description: codebaseModel.meta.description || null,
-      stack_info: codebaseModel.stack,
-      analysis_data: {
-        meta: {
-          name: codebaseModel.meta.name,
-          description: codebaseModel.meta.description,
-          language: codebaseModel.meta.language,
-          stars: codebaseModel.meta.stars,
-          forks: codebaseModel.meta.forks,
-        },
-        structure: codebaseModel.structure,
-        features: codebaseModel.features,
-        gaps: codebaseModel.gaps,
-        deployInfo: codebaseModel.deployInfo,
-        existingContext: codebaseModel.existingContext,
-        fileTree: codebaseModel.fileTree,
+    const userId = deployments.findById(id)?.user_id;
+    await runPipeline(id, codebaseModel, userId, label);
+  } catch (err) {
+    console.error(`Takeoff failed for ${id}:`, err);
+    deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    broadcast(id, { type: 'error', error: err.message });
+    console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
+  }
+}
+
+async function runUploadAnalysis(id, fileEntries, projectName, userId) {
+  const label = projectName;
+  console.log(JSON.stringify({ event: 'upload_analysis_start', projectId: id, projectName, timestamp: new Date().toISOString() }));
+  try {
+    deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
+    broadcast(id, { type: 'status', status: 'analyzing' });
+
+    const codebaseModel = analyzeFromFiles(fileEntries, projectName, (progress) => {
+      broadcast(id, { type: 'progress', ...progress });
+    });
+
+    await runPipeline(id, codebaseModel, userId, label);
+  } catch (err) {
+    console.error(`Upload analysis failed for ${id}:`, err);
+    deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    broadcast(id, { type: 'error', error: err.message });
+    console.log(JSON.stringify({ event: 'upload_analysis_failed', projectId: id, projectName, error: err.message, timestamp: new Date().toISOString() }));
+  }
+}
+
+async function runPipeline(id, codebaseModel, userId, label) {
+  // Stage 1: Persist analysis data
+  deployments.update(id, {
+    owner: codebaseModel.meta.owner,
+    repo: codebaseModel.meta.repo,
+    branch: codebaseModel.meta.defaultBranch || null,
+    framework: codebaseModel.stack.framework,
+    description: codebaseModel.meta.description || null,
+    stack_info: codebaseModel.stack,
+    analysis_data: {
+      meta: {
+        name: codebaseModel.meta.name,
+        description: codebaseModel.meta.description,
+        language: codebaseModel.meta.language,
+        stars: codebaseModel.meta.stars,
+        forks: codebaseModel.meta.forks,
       },
-    });
-
-    // Stage 1b: Plain-English app summary (non-blocking — failure doesn't stop pipeline)
-    let featuresSummary = null;
-    try {
-      featuresSummary = await describeFeatures(id, codebaseModel);
-      deployments.update(id, { features_summary: featuresSummary });
-    } catch (err) {
-      console.error(`Features description for ${id} failed (non-fatal):`, err.message);
-    }
-
-    // Stage 2: Build plan + Readiness score
-    broadcast(id, { type: 'progress', phase: 'scoring', message: 'Scoring production readiness...' });
-
-    const buildPlan = detectBuildPlan({
-      stack: codebaseModel.stack,
-      fileTree: codebaseModel.fileTree,
-      fileContents: codebaseModel.fileContents,
-      deployInfo: codebaseModel.deployInfo,
-    });
-
-    const readiness = scoreReadiness({
-      gaps: codebaseModel.gaps,
-      stack: codebaseModel.stack,
-      fileTree: codebaseModel.fileTree,
+      structure: codebaseModel.structure,
       features: codebaseModel.features,
+      gaps: codebaseModel.gaps,
       deployInfo: codebaseModel.deployInfo,
+      existingContext: codebaseModel.existingContext,
+      fileTree: codebaseModel.fileTree,
+    },
+  });
+
+  // Stage 1b: Plain-English app summary (non-blocking)
+  let featuresSummary = null;
+  try {
+    featuresSummary = await describeFeatures(id, codebaseModel);
+    deployments.update(id, { features_summary: featuresSummary });
+  } catch (err) {
+    console.error(`Features description for ${id} failed (non-fatal):`, err.message);
+  }
+
+  // Stage 2: Build plan + Readiness score
+  broadcast(id, { type: 'progress', phase: 'scoring', message: 'Scoring production readiness...' });
+
+  const buildPlan = detectBuildPlan({
+    stack: codebaseModel.stack,
+    fileTree: codebaseModel.fileTree,
+    fileContents: codebaseModel.fileContents,
+    deployInfo: codebaseModel.deployInfo,
+  });
+
+  const readiness = scoreReadiness({
+    gaps: codebaseModel.gaps,
+    stack: codebaseModel.stack,
+    fileTree: codebaseModel.fileTree,
+    features: codebaseModel.features,
+    deployInfo: codebaseModel.deployInfo,
+    buildPlan,
+  });
+
+  deployments.update(id, {
+    status: 'scored',
+    deploy_type: buildPlan.type,
+    build_plan: buildPlan,
+    readiness_score: readiness.score,
+    readiness_categories: readiness.categories,
+    recommendation: readiness.recommendation,
+    updated_at: new Date().toISOString(),
+  });
+
+  broadcast(id, {
+    type: 'scored',
+    score: readiness.score,
+    recommendation: readiness.recommendation,
+    categories: readiness.categories,
+    summary: readiness.summary,
+    stack: codebaseModel.stack,
+    buildPlan: {
+      type: buildPlan.type,
+      framework: buildPlan.framework,
+      confidence: buildPlan.confidence,
+    },
+  });
+
+  seedFromAnalysis(id, userId, codebaseModel, readiness.score);
+
+  // Stage 2b: Static + Gap suggestions
+  let allStaticSuggestions = [];
+  try {
+    const staticSuggestions = runStaticSuggestions({
+      stack: codebaseModel.stack,
+      gaps: codebaseModel.gaps,
+      features: codebaseModel.features,
+      structure: codebaseModel.structure,
+      fileContents: codebaseModel.fileContents,
+      fileTree: codebaseModel.fileTree,
       buildPlan,
     });
 
-    deployments.update(id, {
-      status: 'scored',
-      deploy_type: buildPlan.type,
-      build_plan: buildPlan,
-      readiness_score: readiness.score,
-      readiness_categories: readiness.categories,
-      recommendation: readiness.recommendation,
-      updated_at: new Date().toISOString(),
-    });
+    suggestions.deleteByProjectId(id);
+    if (staticSuggestions.length > 0) {
+      suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
+    }
+    allStaticSuggestions = [...staticSuggestions];
 
-    broadcast(id, {
-      type: 'scored',
-      score: readiness.score,
-      recommendation: readiness.recommendation,
-      categories: readiness.categories,
-      summary: readiness.summary,
-      stack: codebaseModel.stack,
-      buildPlan: {
-        type: buildPlan.type,
-        framework: buildPlan.framework,
-        confidence: buildPlan.confidence,
-      },
-    });
-
-    const userId = deployments.findById(id)?.user_id;
-    seedFromAnalysis(id, userId, codebaseModel, readiness.score);
-
-    // Stage 2b: Static + Gap suggestions (instant, no API call)
-    let allStaticSuggestions = [];
+    const gapKeysFromStaticRules = new Set(Object.values(STATIC_RULE_GAP_KEYS));
+    const coveredGapKeys = new Set();
+    for (const s of staticSuggestions) {
+      if (gapKeysFromStaticRules.has(s.category)) coveredGapKeys.add(s.category);
+    }
     try {
-      const staticSuggestions = runStaticSuggestions({
-        stack: codebaseModel.stack,
+      const gapSuggestions = runGapSuggestions({
         gaps: codebaseModel.gaps,
-        features: codebaseModel.features,
-        structure: codebaseModel.structure,
-        fileContents: codebaseModel.fileContents,
-        fileTree: codebaseModel.fileTree,
-        buildPlan,
+        readinessCategories: readiness.categories,
+        coveredGapKeys,
       });
-
-      suggestions.deleteByProjectId(id);
-      if (staticSuggestions.length > 0) {
-        suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
+      if (gapSuggestions.length > 0) {
+        suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));
+        allStaticSuggestions.push(...gapSuggestions);
       }
-      allStaticSuggestions = [...staticSuggestions];
-
-      const gapKeysFromStaticRules = new Set(Object.values(STATIC_RULE_GAP_KEYS));
-      const coveredGapKeys = new Set();
-      for (const s of staticSuggestions) {
-        if (gapKeysFromStaticRules.has(s.category)) coveredGapKeys.add(s.category);
-      }
-      try {
-        const gapSuggestions = runGapSuggestions({
-          gaps: codebaseModel.gaps,
-          readinessCategories: readiness.categories,
-          coveredGapKeys,
-        });
-        if (gapSuggestions.length > 0) {
-          suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));
-          allStaticSuggestions.push(...gapSuggestions);
-        }
-      } catch (err) {
-        console.warn(`Gap suggestions for ${id} failed (non-fatal):`, err.message);
-      }
-
-      const suggestionsCount = allStaticSuggestions.length;
-      deployments.update(id, { suggestions_count: suggestionsCount });
-
-      broadcast(id, {
-        type: 'suggestions-static',
-        count: suggestionsCount,
-        suggestions: allStaticSuggestions.slice(0, 5),
-      });
     } catch (err) {
-      console.error(`Static suggestions for ${id} failed (non-fatal):`, err.message);
+      console.warn(`Gap suggestions for ${id} failed (non-fatal):`, err.message);
     }
 
-    // Stage 3: Generate plan steps
-    broadcast(id, { type: 'progress', phase: 'planning', message: 'Generating your plan...' });
+    const suggestionsCount = allStaticSuggestions.length;
+    deployments.update(id, { suggestions_count: suggestionsCount });
 
-    const planSteps = generatePlan({
-      categories: readiness.categories,
+    broadcast(id, {
+      type: 'suggestions-static',
+      count: suggestionsCount,
+      suggestions: allStaticSuggestions.slice(0, 5),
+    });
+  } catch (err) {
+    console.error(`Static suggestions for ${id} failed (non-fatal):`, err.message);
+  }
+
+  // Stage 3: Generate plan steps
+  broadcast(id, { type: 'progress', phase: 'planning', message: 'Generating your plan...' });
+
+  const planSteps = generatePlan({
+    categories: readiness.categories,
+    stack: codebaseModel.stack,
+    gaps: codebaseModel.gaps,
+  });
+
+  deployments.update(id, {
+    status: 'ready',
+    plan_steps: planSteps,
+    updated_at: new Date().toISOString(),
+  });
+
+  broadcast(id, {
+    type: 'complete',
+    score: readiness.score,
+    recommendation: readiness.recommendation,
+    categories: readiness.categories,
+    summary: readiness.summary,
+    planSteps: planSteps,
+    stack: codebaseModel.stack,
+    buildPlan: {
+      type: buildPlan.type,
+      framework: buildPlan.framework,
+      confidence: buildPlan.confidence,
+      reason: buildPlan.reason,
+    },
+    suggestionsCount: allStaticSuggestions.length,
+  });
+
+  console.log(JSON.stringify({ event: 'pipeline_complete', projectId: id, label, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
+
+  // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
+  try {
+    const aiSuggestions = await runAISuggestions({
+      projectId: id,
       stack: codebaseModel.stack,
       gaps: codebaseModel.gaps,
+      features: codebaseModel.features,
+      fileContents: codebaseModel.fileContents,
+      fileTree: codebaseModel.fileTree,
+      staticSuggestions: allStaticSuggestions,
+      featuresSummary,
     });
 
-    deployments.update(id, {
-      status: 'ready',
-      plan_steps: planSteps,
-      updated_at: new Date().toISOString(),
-    });
-
-    broadcast(id, {
-      type: 'complete',
-      score: readiness.score,
-      recommendation: readiness.recommendation,
-      categories: readiness.categories,
-      summary: readiness.summary,
-      planSteps: planSteps,
-      stack: codebaseModel.stack,
-      buildPlan: {
-        type: buildPlan.type,
-        framework: buildPlan.framework,
-        confidence: buildPlan.confidence,
-        reason: buildPlan.reason,
-      },
-      suggestionsCount: allStaticSuggestions.length,
-    });
-
-    console.log(JSON.stringify({ event: 'takeoff_complete', projectId: id, repoUrl, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
-
-    // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
-    try {
-      const aiSuggestions = await runAISuggestions({
-        projectId: id,
-        stack: codebaseModel.stack,
-        gaps: codebaseModel.gaps,
-        features: codebaseModel.features,
-        fileContents: codebaseModel.fileContents,
-        fileTree: codebaseModel.fileTree,
-        staticSuggestions: allStaticSuggestions,
-        featuresSummary,
-      });
-
-      if (aiSuggestions.length > 0) {
-        suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
-        const counts = suggestions.countByProjectId(id);
-        deployments.update(id, { suggestions_count: counts.total || 0 });
-      }
-    } catch (err) {
-      console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
+    if (aiSuggestions.length > 0) {
+      suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
+      const counts = suggestions.countByProjectId(id);
+      deployments.update(id, { suggestions_count: counts.total || 0 });
     }
-
   } catch (err) {
-    console.error(`Takeoff failed for ${id}:`, err);
-    deployments.update(id, {
-      status: 'failed',
-      error: err.message,
-      updated_at: new Date().toISOString(),
-    });
-    broadcast(id, { type: 'error', error: err.message });
-    console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
+    console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
   }
 }
 

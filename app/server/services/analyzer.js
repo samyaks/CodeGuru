@@ -408,4 +408,70 @@ function safeJson(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
-module.exports = { analyzeRepo };
+function analyzeFromFiles(fileEntries, projectName, onProgress) {
+  const send = onProgress || (() => {});
+
+  send({ phase: 'analyzing', message: 'Analyzing uploaded files...' });
+
+  // Keep unfiltered list for deployment detection (matches analyzeRepo behavior)
+  const unfilteredFiles = fileEntries.map(f => ({ path: f.path, type: 'blob' }));
+
+  const allFiles = unfilteredFiles.filter(f => !shouldSkipFile(f.path));
+
+  send({ phase: 'tree-done', message: `Found ${allFiles.length} files`, fileCount: allFiles.length });
+
+  const sorted = allFiles
+    .map(f => ({ ...f, score: scorePath(f.path) }))
+    .sort((a, b) => b.score - a.score);
+  const toRead = sorted.slice(0, MAX_FILES_TO_READ);
+
+  const fileContents = {};
+  const contentMap = new Map(fileEntries.map(f => [f.path, f.content]));
+  for (const f of toRead) {
+    const content = contentMap.get(f.path);
+    if (content) fileContents[f.path] = content;
+  }
+
+  send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });
+
+  const stack = detectStack(allFiles, fileContents);
+  const structure = analyzeStructure(allFiles);
+  const gaps = detectGaps(allFiles, fileContents, stack);
+  const deployInfo = detectDeploymentFiles(unfilteredFiles);
+  const features = detectFeatures(allFiles, fileContents);
+  const existingContext = detectExistingContext(allFiles);
+
+  if (deployInfo.detected) {
+    gaps.deployment.exists = true;
+    gaps.deployment.platform = deployInfo.hosting[0]?.platform
+      || deployInfo.containers[0]?.platform
+      || null;
+    gaps.deployment.hasCI = deployInfo.cicd.length > 0;
+  }
+
+  send({ phase: 'complete', message: 'Analysis complete' });
+
+  return {
+    meta: {
+      name: projectName || 'Uploaded Project',
+      description: null,
+      language: stack.languages[0] || null,
+      defaultBranch: null,
+      stars: 0,
+      forks: 0,
+      owner: 'local',
+      repo: projectName || 'upload',
+      repoUrl: `local://${projectName || 'upload'}`,
+    },
+    stack,
+    structure,
+    features,
+    gaps,
+    deployInfo,
+    existingContext,
+    fileContents,
+    fileTree: allFiles.map(f => f.path),
+  };
+}
+
+module.exports = { analyzeRepo, analyzeFromFiles, shouldSkipFile };

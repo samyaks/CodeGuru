@@ -61,7 +61,7 @@ ENV PORT=3001
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD node -e "fetch('http://localhost:3001/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+    CMD node -e "fetch((process.env.API_URL || 'http://localhost:' + (process.env.PORT || 3001)) + '/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 WORKDIR /app/app
 CMD ["node", "server/app.js"]
