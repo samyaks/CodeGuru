@@ -230,13 +230,50 @@ export interface Project {
 }
 
 // Takeoff
+
+const SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.output',
+  '__pycache__', '.cache', 'coverage', '.turbo', '.vercel', 'vendor',
+  '.svelte-kit', 'target', 'out', '.expo', '.venv', 'venv',
+]);
+
+const SKIP_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'avif',
+  'woff', 'woff2', 'ttf', 'eot', 'otf',
+  'mp3', 'mp4', 'wav', 'avi', 'mov',
+  'zip', 'tar', 'gz', 'rar', '7z',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx',
+  'lock', 'map',
+]);
+
+function shouldUploadFile(path: string): boolean {
+  const parts = path.split('/');
+  for (const part of parts) {
+    if (SKIP_DIRS.has(part)) return false;
+  }
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  if (SKIP_EXTENSIONS.has(ext)) return false;
+  if (path.endsWith('.min.js') || path.endsWith('.min.css')) return false;
+  return true;
+}
+
 export async function startTakeoffUpload(files: File[], projectName: string): Promise<{ projectId: string; slug: string; status: string }> {
   const formData = new FormData();
   formData.append('projectName', projectName);
+
+  let count = 0;
   for (const file of files) {
     const relativePath = file.webkitRelativePath || file.name;
+    if (!shouldUploadFile(relativePath)) continue;
+    if (file.size > 2 * 1024 * 1024) continue;
     formData.append('files', file, relativePath);
+    count++;
   }
+
+  if (count === 0) {
+    throw new Error('No uploadable source files found in the selected folder');
+  }
+
   const res = await authFetch(`${API_BASE}/takeoff/upload`, {
     method: 'POST',
     body: formData,

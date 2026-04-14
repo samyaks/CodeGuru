@@ -142,6 +142,15 @@ app.use((err, req, res, _next) => {
     return res.status(400).json({ error: 'Invalid JSON in request body', code: 'BAD_REQUEST' });
   }
 
+  if (err.name === 'MulterError') {
+    const messages = {
+      LIMIT_FILE_SIZE: `File too large (max ${(err.storageErrors?.[0]?.limit || 2097152) / 1024 / 1024}MB per file)`,
+      LIMIT_FILE_COUNT: 'Too many files uploaded (max 300)',
+      LIMIT_UNEXPECTED_FILE: 'Unexpected file field',
+    };
+    return res.status(400).json({ error: messages[err.code] || err.message, code: 'BAD_REQUEST' });
+  }
+
   if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
     return res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
   }
