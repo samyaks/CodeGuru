@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import RequireAuth from './components/RequireAuth';
+import { TakeoffAnnotate } from '@takeoff/annotate';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import Analysis from './pages/Analysis';
@@ -34,6 +35,7 @@ export default function App() {
     <ErrorBoundary>
       <AuthProvider>
         <BrowserRouter>
+          <TakeoffAnnotate defaultMode="clean" position="bottom-right">
           <Routes>
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<Landing />} />
@@ -63,6 +65,7 @@ export default function App() {
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </TakeoffAnnotate>
         </BrowserRouter>
       </AuthProvider>
     </ErrorBoundary>
