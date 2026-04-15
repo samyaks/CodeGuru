@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
+import RequireAuth from './components/RequireAuth';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import Analysis from './pages/Analysis';
@@ -36,22 +37,22 @@ export default function App() {
           <Routes>
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<Landing />} />
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
 
             {/* Public story (no auth required) */}
             <Route path="/story/:slug" element={<ShareableStory />} />
 
-            {/* Projects */}
+            {/* Projects — reads are public for user_id:null projects, writes need auth */}
             <Route path="/projects/:id" element={<ProjectView />} />
-            <Route path="/projects/:id/story" element={<BuildStory />} />
+            <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
 
             {/* Takeoff flow */}
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />
             <Route path="/takeoff/:id/report" element={<NavigateToProject />} />
             <Route path="/takeoff/:id/suggestions" element={<NavigateToProject />} />
             <Route path="/takeoff/:id/plan" element={<ProductionPlan />} />
-            <Route path="/takeoff/:id/env-setup" element={<EnvSetup />} />
-            <Route path="/deploy/:id" element={<DeployProgress />} />
+            <Route path="/takeoff/:id/env-setup" element={<RequireAuth><EnvSetup /></RequireAuth>} />
+            <Route path="/deploy/:id" element={<RequireAuth><DeployProgress /></RequireAuth>} />
 
             {/* Legacy CodeGuru routes */}
             <Route path="/analyze/:id" element={<Analysis />} />

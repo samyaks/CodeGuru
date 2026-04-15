@@ -44,7 +44,7 @@ export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
 
   const VALID_TABS: Tab[] = ['overview', 'analysis', 'suggestions', 'settings'];
   const params = new URLSearchParams(location.search);
@@ -102,11 +102,22 @@ export default function ProjectView() {
   }
 
   if (error || !project) {
+    const isForbidden = error?.toLowerCase().includes('forbidden');
     return (
       <div className="min-h-screen flex flex-col">
         <Header backTo="/dashboard" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-red-600">{error || 'Project not found'}</div>
+          <div className="text-center space-y-3">
+            <div className="text-red-600">{isForbidden ? 'This project is private' : error || 'Project not found'}</div>
+            {isForbidden && !user && (
+              <button
+                onClick={() => login('github')}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/10 text-gold border border-gold/20 hover:bg-gold/20 text-sm font-medium transition-colors"
+              >
+                Sign in to view
+              </button>
+            )}
+          </div>
         </main>
       </div>
     );
@@ -452,39 +463,41 @@ export default function ProjectView() {
               </div>
             )}
 
-            {/* Danger zone */}
-            <div className="bg-navy border border-red-500/20 rounded-xl p-5 space-y-4">
-              <h3 className="font-medium text-red-600">Danger Zone</h3>
-              <p className="text-sm text-sky-muted">
-                Permanently delete this project and all associated data.
-              </p>
-              {!confirmDelete ? (
-                <button
-                  onClick={() => setConfirmDelete(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 text-sm font-medium transition-colors"
-                >
-                  <Trash2 size={14} />
-                  Delete Project
-                </button>
-              ) : (
-                <div className="flex items-center gap-3">
+            {/* Danger zone — only show to authenticated users */}
+            {user && (
+              <div className="bg-navy border border-red-500/20 rounded-xl p-5 space-y-4">
+                <h3 className="font-medium text-red-600">Danger Zone</h3>
+                <p className="text-sm text-sky-muted">
+                  Permanently delete this project and all associated data.
+                </p>
+                {!confirmDelete ? (
                   <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 transition-colors disabled:opacity-50"
+                    onClick={() => setConfirmDelete(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 text-sm font-medium transition-colors"
                   >
-                    {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    {deleting ? 'Deleting...' : 'Confirm Delete'}
+                    <Trash2 size={14} />
+                    Delete Project
                   </button>
-                  <button
-                    onClick={() => setConfirmDelete(false)}
-                    className="px-4 py-2 rounded-lg text-sm text-sky-muted hover:text-sky-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 transition-colors disabled:opacity-50"
+                    >
+                      {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {deleting ? 'Deleting...' : 'Confirm Delete'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className="px-4 py-2 rounded-lg text-sm text-sky-muted hover:text-sky-white transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>

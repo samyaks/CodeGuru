@@ -59,7 +59,7 @@ if (supabase) {
   console.log(`[Auth] Supabase initialized. REDIRECT_URL=${process.env.SUPABASE_REDIRECT_URL || 'NOT SET'}, FRONTEND_URL=${FRONTEND_URL || '(empty/production)'}`);
   app.use(createAuthRouter({
     supabase,
-    providers: ['github', 'google'],
+    providers: ['github'],
     afterLogin: `${FRONTEND_URL}/dashboard`,
     afterLogout: `${FRONTEND_URL}/`,
   }));
@@ -92,17 +92,18 @@ app.post('/auth/token', express.json(), async (req, res) => {
 app.use(healthRoutes);
 app.use(collectRoutes);
 app.use('/api/fix', fixPromptRoutes);
-app.use('/api/analyze', analyzeRoutes);
 app.use('/api/story', publicStoryRoutes);
 
-// Takeoff routes — analyze is public, deploy requires auth
+// Routes with optional/required auth depending on Supabase config
 if (supabase) {
+  app.use('/api/analyze', optionalAuth(supabase), analyzeRoutes);
   app.use('/api/takeoff', optionalAuth(supabase), takeoffRoutes);
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
-  app.use('/api/projects', requireAuth(supabase), projectRoutes);
+  app.use('/api/projects', optionalAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
-  app.use('/api/projects/:projectId/analytics', requireAuth(supabase), projectAnalyticsRoutes);
+  app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), projectAnalyticsRoutes);
 } else {
+  app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
@@ -174,6 +175,11 @@ function validateEnv() {
   }
   if (hasUrl && hasKey && !process.env.SUPABASE_REDIRECT_URL) {
     console.warn('⚠️  WARNING: SUPABASE_REDIRECT_URL is not set. OAuth callbacks may fail.');
+  }
+  if (process.env.NODE_ENV === 'production' && !hasUrl) {
+    console.error('🚨 FATAL: Running in production without SUPABASE_URL. All routes are unprotected.');
+    console.error('   Set SUPABASE_URL and SUPABASE_ANON_KEY, or set NODE_ENV=development for local work.');
+    process.exit(1);
   }
 }
 
