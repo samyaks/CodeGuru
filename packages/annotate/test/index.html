@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Takeoff Annotate — Script Tag Test</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0c0c14; color: #dcdce6; font-family: 'DM Sans', sans-serif; padding: 32px 40px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-icon { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #6366f1, #8b5cf6); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 13px; font-family: 'DM Mono', monospace; }
+    .logo-text { font-size: 16px; font-weight: 700; }
+    .badge { font-size: 9px; color: #4a4a60; background: rgba(99,102,241,.12); padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+    nav { display: flex; gap: 20px; align-items: center; }
+    nav a { font-size: 12px; color: #4a4a60; text-decoration: none; font-weight: 400; }
+    nav a.active { color: #dcdce6; font-weight: 600; }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #ec4899, #f43f5e); }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+    .stat-card { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.05); border-radius: 10px; padding: 16px 18px; }
+    .stat-label { font-size: 10px; color: #4a4a60; margin-bottom: 4px; font-weight: 500; }
+    .stat-value { font-size: 22px; font-weight: 700; font-family: 'DM Mono', monospace; }
+    .stat-delta { font-size: 10px; margin-top: 3px; font-weight: 500; }
+    .stat-delta.up { color: #22c55e; }
+    .stat-delta.down { color: #f43f5e; }
+    .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
+    .card { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.05); border-radius: 10px; padding: 18px 22px; }
+    .card-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+    .chart-bars { display: flex; align-items: flex-end; gap: 6px; height: 110px; }
+    .chart-bar { flex: 1; border-radius: 3px 3px 0 0; background: rgba(99,102,241,.18); }
+    .chart-bar.active { background: linear-gradient(to top, #6366f1, #8b5cf6); }
+    .chart-months { display: flex; justify-content: space-between; margin-top: 6px; }
+    .chart-months span { font-size: 8px; color: #3a3a4e; flex: 1; text-align: center; }
+    .signup-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.03); }
+    .signup-name { font-size: 11px; font-weight: 600; color: #b8b8c8; }
+    .signup-email { font-size: 9px; color: #4a4a60; }
+    .signup-plan { font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+    .plan-enterprise { background: rgba(244,63,94,.1); color: #f43f5e; }
+    .plan-pro { background: rgba(99,102,241,.1); color: #818cf8; }
+    .plan-starter { background: rgba(255,255,255,.04); color: #5a5a6e; }
+    .actions { margin-top: 20px; display: flex; gap: 10px; }
+    .btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; border-radius: 8px; padding: 10px 20px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-secondary { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); border-radius: 8px; padding: 10px 20px; color: #8a8a9c; font-size: 12px; font-weight: 500; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">P</div>
+      <span class="logo-text">PulseBoard</span>
+      <span class="badge">PROTOTYPE</span>
+    </div>
+    <nav>
+      <a href="#" class="active">Dashboard</a>
+      <a href="#">Customers</a>
+      <a href="#">Analytics</a>
+      <a href="#">Settings</a>
+      <div class="avatar"></div>
+    </nav>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Active Users</div>
+      <div class="stat-value">2,847</div>
+      <div class="stat-delta up">+12% vs last month</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Revenue</div>
+      <div class="stat-value">$48.2k</div>
+      <div class="stat-delta up">+8.3% vs last month</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Churn Rate</div>
+      <div class="stat-value">3.2%</div>
+      <div class="stat-delta down">-0.4% vs last month</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">NPS Score</div>
+      <div class="stat-value">72</div>
+      <div class="stat-delta up">+5 vs last month</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Revenue Trend</div>
+      <div class="chart-bars">
+        <div class="chart-bar" style="height:38%"></div>
+        <div class="chart-bar" style="height:52%"></div>
+        <div class="chart-bar" style="height:43%"></div>
+        <div class="chart-bar" style="height:62%"></div>
+        <div class="chart-bar" style="height:75%"></div>
+        <div class="chart-bar" style="height:58%"></div>
+        <div class="chart-bar" style="height:80%"></div>
+        <div class="chart-bar" style="height:68%"></div>
+        <div class="chart-bar" style="height:88%"></div>
+        <div class="chart-bar" style="height:83%"></div>
+        <div class="chart-bar" style="height:93%"></div>
+        <div class="chart-bar active" style="height:86%"></div>
+      </div>
+      <div class="chart-months">
+        <span>J</span><span>F</span><span>M</span><span>A</span><span>M</span><span>J</span>
+        <span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Recent Signups</div>
+      <div class="signup-row">
+        <div><div class="signup-name">Sarah Chen</div><div class="signup-email">sarah@acme.co</div></div>
+        <span class="signup-plan plan-pro">Pro</span>
+      </div>
+      <div class="signup-row">
+        <div><div class="signup-name">Marcus Webb</div><div class="signup-email">marcus@studio.io</div></div>
+        <span class="signup-plan plan-starter">Starter</span>
+      </div>
+      <div class="signup-row">
+        <div><div class="signup-name">Aisha Patel</div><div class="signup-email">aisha@newco.com</div></div>
+        <span class="signup-plan plan-pro">Pro</span>
+      </div>
+      <div class="signup-row">
+        <div><div class="signup-name">Jake Foster</div><div class="signup-email">jake@build.dev</div></div>
+        <span class="signup-plan plan-enterprise">Enterprise</span>
+      </div>
+      <div class="signup-row">
+        <div><div class="signup-name">Lena Müller</div><div class="signup-email">lena@craft.de</div></div>
+        <span class="signup-plan plan-starter">Starter</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary">Export Report</button>
+    <button class="btn-secondary">Invite Team</button>
+  </div>
+
+  <script src="../dist/annotate.min.js" data-mode="clean" data-position="bottom-right"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+# Cursor rules for packages/annotate
+
+## Project context
+You are building `packages/annotate/` inside the CodeGuru monorepo.
+Read CONTEXT.md in this directory for the full architecture and build plan.
+
+## Code style
+- TypeScript strict mode
+- All styles inline via style={{}} — no CSS files, no CSS modules, no Tailwind
+- React functional components with hooks only — no class components
+- Named exports for all components, default export for the main wrapper
+- Core engine (core/) must have ZERO React imports — pure TypeScript only
+- Small, focused files — one component per file, one concern per module
+
+## When generating code
+- Follow the architecture in CONTEXT.md exactly
+- Match the visual prototype (takeoff-annotate-v3.jsx) for all styling
+- Use the exact colors, font sizes, and animations from the prototype
+- All state changes must trigger URL hash updates via writeSessionToURL()
+- Every click handler must check the current mode before acting
+- Pin positions are absolute (x, y in pixels from surface top-left)
+- Session encoding uses the minified key map from CONTEXT.md
+
+## Component patterns
+- Use React.createContext for shared state (mode, session, userName)
+- useCallback for all event handlers passed as props
+- useRef for the surface element (for coordinate calculation)
+- useState with initializer functions for localStorage reads
+
+## Don't
+- Don't add any external dependencies beyond React and React DOM
+- Don't use CSS-in-JS libraries (styled-components, emotion, etc.)
+- Don't use localStorage for session state — URL hash is the source of truth
+- Don't use localStorage for anything except the user's name
+- Don't build Takeoff cloud features — URL state only for v1
+- Don't add light theme — dark only for v1
+- Don't use position: fixed for anything except the FloatingPill
+- Don't add tests yet — manual testing only for v1
+- Don't modify anything outside packages/annotate/
