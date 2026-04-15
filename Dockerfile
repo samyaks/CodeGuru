@@ -24,8 +24,8 @@ COPY app/ app/
 # Build the annotate package first (client depends on it)
 RUN cd packages/annotate && npm run build:lib
 
-# Install client dependencies and build — echo ensures layer is never cached
-RUN cd app/client && npm install && echo "build:$(date +%s)" && npm run build
+# Build client — workspace deps already installed by root npm ci
+RUN cd app/client && echo "build:$(date +%s)" && npm run build
 
 # Stage 2: Production image — server + built client
 FROM node:20-slim AS production
