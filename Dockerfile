@@ -62,8 +62,11 @@ ENV PORT=3001
 
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD node -e "fetch((process.env.API_URL || 'http://localhost:' + (process.env.PORT || 3001)) + '/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+# No Docker HEALTHCHECK: Railway (and Fly) probe /health themselves via the
+# platform config (railway.toml / fly.toml). A container-local HEALTHCHECK
+# that fetches process.env.API_URL races against platform routing during
+# rolling deploys and can mark a freshly-booted replica "unhealthy" even
+# when the app is fine.
 
 WORKDIR /app/app
 # Run migrations before starting the server (idempotent — skips already applied)

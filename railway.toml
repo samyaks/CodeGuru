@@ -4,6 +4,9 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+# 60s gives migrate.js cold-start + app boot plenty of headroom on Supabase's
+# session pooler. /health itself is a liveness-only probe (no DB call) so
+# this mostly covers the time between container start and app.listen().
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
