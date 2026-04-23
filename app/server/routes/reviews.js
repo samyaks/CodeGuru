@@ -36,23 +36,27 @@ router.post('/', reviewRateLimit, asyncHandler(async (req, res) => {
 
 async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch, userId }) {
   const id = uuidv4();
-  reviews.create({
+  await reviews.create({
     id, type, repo_url: repoUrl, owner, repo,
     pr_number: prNumber, branch: branch || null,
     status: 'pending', created_at: new Date().toISOString(),
     user_id: userId || null,
   });
 
-  setImmediate(() => startReview(id));
+  setImmediate(() => {
+    startReview(id).catch((err) => {
+      console.error(`startReview ${id} unhandled:`, err);
+    });
+  });
   res.status(201).json({ reviewId: id, status: 'pending', message: 'Review created' });
 }
 
 async function startReview(reviewId) {
   try {
-    reviews.updateStatus(reviewId, 'in_progress');
+    await reviews.updateStatus(reviewId, 'in_progress');
     broadcast(reviewId, { type: 'review-started', reviewId });
 
-    const review = reviews.findById(reviewId);
+    const review = await reviews.findById(reviewId);
     if (!review) return;
 
     const result = review.type === 'pr'
@@ -60,17 +64,17 @@ async function startReview(reviewId) {
       : await runRepoReview(reviewId, review);
 
     const { report, fileContents } = result;
-    const files = reviewFiles.findByReviewId(reviewId);
+    const files = await reviewFiles.findByReviewId(reviewId);
     const severities = reviewer.extractFileSeverities(report);
     const comments = reviewer.extractFileComments(report);
 
     for (const file of files) {
       const fileComments = comments.get(file.file_path) || [];
       const fileSeverity = severities.get(file.file_path) || (fileComments.length ? 'info' : 'ok');
-      reviewFiles.updateAiComments(file.id, fileComments, fileSeverity);
+      await reviewFiles.updateAiComments(file.id, fileComments, fileSeverity);
     }
 
-    reviews.updateStatus(reviewId, 'completed', { ai_report: report });
+    await reviews.updateStatus(reviewId, 'completed', { ai_report: report });
     broadcast(reviewId, { type: 'review-completed', reviewId, report });
 
     setImmediate(async () => {
@@ -82,7 +86,11 @@ async function startReview(reviewId) {
     });
   } catch (err) {
     console.error(`Review ${reviewId} failed:`, err);
-    reviews.updateStatus(reviewId, 'failed', { error: err.message });
+    try {
+      await reviews.updateStatus(reviewId, 'failed', { error: err.message });
+    } catch (updateErr) {
+      console.error(`Failed to mark review ${reviewId} as failed:`, updateErr.message);
+    }
     broadcast(reviewId, { type: 'review-error', error: err.message });
   }
 }
@@ -98,9 +106,9 @@ async function runPRReview(reviewId, review) {
   broadcast(reviewId, { type: 'progress', phase: 'fetched', message: `Fetched ${prFiles.length} changed files`, fileCount: prFiles.length });
 
   for (const f of prFiles) {
-    reviewFiles.create({
+    await reviewFiles.create({
       id: uuidv4(), review_id: reviewId, file_path: f.filename,
-      diff: f.patch || null, ai_comments: '[]', severity: null,
+      diff: f.patch || null, ai_comments: [], severity: null,
     });
   }
 
@@ -151,9 +159,9 @@ async function runRepoReview(reviewId, review) {
   );
 
   for (const f of fileContents) {
-    reviewFiles.create({
+    await reviewFiles.create({
       id: uuidv4(), review_id: reviewId, file_path: f.path,
-      diff: null, ai_comments: '[]', severity: null,
+      diff: null, ai_comments: [], severity: null,
     });
   }
 
@@ -167,20 +175,21 @@ async function runRepoReview(reviewId, review) {
 
 router.get('/', asyncHandler(async (req, res) => {
   const { limit, offset } = validatePagination(req.query);
-  res.json(reviews.list({ limit, offset, userId: req.user?.id || null }));
+  const list = await reviews.list({ limit, offset, userId: req.user?.id || null });
+  res.json(list);
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const review = reviews.findById(req.params.id);
+  const review = await reviews.findById(req.params.id);
   if (!review) throw AppError.notFound('Review not found');
-  const files = reviewFiles.findByReviewId(req.params.id);
+  const files = await reviewFiles.findByReviewId(req.params.id);
   res.json({ ...review, files });
 }));
 
 router.get('/:id/fix-prompts', asyncHandler(async (req, res) => {
-  const review = reviews.findById(req.params.id);
+  const review = await reviews.findById(req.params.id);
   if (!review) throw AppError.notFound('Review not found');
-  const prompts = fixPrompts.findByReviewId(req.params.id);
+  const prompts = await fixPrompts.findByReviewId(req.params.id);
   res.json(prompts.map((p) => ({
     id: p.id, short_id: p.short_id, file_path: p.file_path,
     line_start: p.line_start, line_end: p.line_end,
@@ -190,7 +199,7 @@ router.get('/:id/fix-prompts', asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
-  const review = reviews.findById(req.params.id);
+  const review = await reviews.findById(req.params.id);
   if (!review) throw AppError.notFound('Review not found');
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 }));

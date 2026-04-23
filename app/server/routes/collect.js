@@ -60,7 +60,7 @@ router.post('/api/collect', collectJsonParser, projectRateLimit, asyncHandler(as
     throw AppError.badRequest(`Maximum ${MAX_EVENTS_PER_BATCH} events per batch`);
   }
 
-  const deployment = deployments.findById(projectId);
+  const deployment = await deployments.findById(projectId);
   if (!deployment) {
     throw AppError.badRequest('Unknown projectId');
   }
@@ -77,7 +77,7 @@ router.post('/api/collect', collectJsonParser, projectRateLimit, asyncHandler(as
     created_at: clampTimestamp(e.timestamp),
   }));
 
-  projectEvents.createBatch(rows);
+  await projectEvents.createBatch(rows);
 
   res.json({ ok: true, accepted: rows.length });
 }));

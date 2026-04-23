@@ -1,5 +1,6 @@
 const { broadcast } = require('../lib/sse');
 const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
+const { createMessageTracked, streamMessageTracked } = require('../lib/anthropic-tracked');
 const MAX_TOKENS = 4096;
 
 const SYSTEM_PROMPT = `You are an expert software architect analyzing a codebase to generate .context.md files. These files serve as the source of truth between human developers and AI coding tools.
@@ -67,19 +68,25 @@ async function generateContextFiles(analysisId, codebaseModel) {
 
 async function generateAppContext(analysisId, model) {
   const fileTree = model.fileTree.slice(0, 100).join('\n');
-  const keyFiles = Object.entries(model.fileContents)
-    .slice(0, 10)
+  const keyEntries = Object.entries(model.fileContents).slice(0, 10);
+  const keyFiles = keyEntries
     .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 1500)}\n\`\`\``)
     .join('\n\n');
+  const filesUsed = keyEntries.map(([path]) => path);
 
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: MAX_TOKENS,
-    stream: true,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: `Generate the root .context.md file for this project.
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'app-context',
+    targetPath: '.context.md',
+    filesUsed,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Generate the root .context.md file for this project.
 
 ## Project Info
 Name: ${model.meta.name}
@@ -105,39 +112,44 @@ Testing: ${model.gaps.testing.exists ? 'exists' : 'MISSING'}
 Error Handling: ${model.gaps.errorHandling.exists ? 'exists' : 'MISSING'}
 
 Generate a comprehensive .context.md that captures the project's purpose, tech stack, current state, and what still needs to be built.`,
-    }],
-  });
-
-  let fullText = '';
-  for await (const event of response) {
-    if (event.type === 'content_block_delta' && event.delta?.text) {
-      fullText += event.delta.text;
+      }],
+    },
+    onText: (_chunk, partial) => {
       broadcast(analysisId, {
         type: 'context-stream',
         path: '.context.md',
-        partial: fullText,
+        partial,
       });
-    }
-  }
+    },
+  });
 
   return fullText;
 }
 
 async function generateFeatureContext(analysisId, model, dirPath, appContext) {
-  const relevantFiles = Object.entries(model.fileContents)
-    .filter(([path]) => path.startsWith(dirPath))
+  const relevantEntries = Object.entries(model.fileContents)
+    .filter(([path]) => path.startsWith(dirPath));
+  const relevantFiles = relevantEntries
     .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 1000)}\n\`\`\``)
     .join('\n\n');
 
   if (!relevantFiles) return null;
 
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: MAX_TOKENS,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: `Generate a .context.md file for the "${dirPath}" directory.
+  const filesUsed = relevantEntries.map(([path]) => path);
+
+  const response = await createMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'feature-context',
+    targetPath: dirPath,
+    filesUsed,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Generate a .context.md file for the "${dirPath}" directory.
 
 ## App Context (from root .context.md)
 ${truncate(appContext, 1500)}
@@ -150,21 +162,27 @@ Framework: ${model.stack.framework || 'Unknown'}
 Runtime: ${model.stack.runtime || 'Unknown'}
 
 Generate a focused .context.md for this specific module. Include purpose, constraints, decisions, and dependencies.`,
-    }],
+      }],
+    },
   });
 
   return response.content?.[0]?.text || '';
 }
 
 async function generateGapContext(analysisId, model, gap, appContext) {
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: MAX_TOKENS,
-    stream: true,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: `This codebase is MISSING: ${gap.name}
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'gap-context',
+    targetPath: gap.path,
+    filesUsed: null,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `This codebase is MISSING: ${gap.name}
 
 Generate a PRESCRIPTIVE .context.md that specifies what should be built.
 
@@ -190,20 +208,16 @@ The .context.md should tell an AI tool exactly what to build:
 - Specific files that need to be created or modified
 
 This is a PRESCRIPTIVE spec, not documentation of existing code.`,
-    }],
-  });
-
-  let fullText = '';
-  for await (const event of response) {
-    if (event.type === 'content_block_delta' && event.delta?.text) {
-      fullText += event.delta.text;
+      }],
+    },
+    onText: (_chunk, partial) => {
       broadcast(analysisId, {
         type: 'context-stream',
         path: gap.path,
-        partial: fullText,
+        partial,
       });
-    }
-  }
+    },
+  });
 
   return fullText;
 }

@@ -1,7 +1,37 @@
 const github = require('./github');
 const { detectDeploymentFiles } = require('./deployment');
+const { analyses, analysisFiles, analysisEvents } = require('../lib/db');
+const { estimateTokens, extractSkeleton, inferLanguage, computeDepth } = require('../lib/capture-utils');
 
-const MAX_FILES_TO_READ = 150;
+const MAX_FILES_TO_READ = parseInt(process.env.MAX_FILES_TO_READ, 10) || 150;
+const CAPTURE_FULL_TIER_LIMIT = parseInt(process.env.CAPTURE_FULL_TIER_LIMIT, 10) || 50;
+const CAPTURE_SKELETON_TIER_LIMIT = parseInt(process.env.CAPTURE_SKELETON_TIER_LIMIT, 10) || 300;
+const CAPTURE_MAX_FILE_BYTES = parseInt(process.env.CAPTURE_MAX_FILE_BYTES, 10) || 256000;
+
+function camelRollups(r) {
+  if (!r) return {};
+  return {
+    ingestedFileCount: r.ingested_file_count ?? 0,
+    ingestedBytes: r.ingested_bytes ?? 0,
+    ingestedTokens: r.ingested_tokens ?? 0,
+  };
+}
+
+function decideTier(sizeBytes, rankIdx1Based) {
+  if (sizeBytes > CAPTURE_MAX_FILE_BYTES) return 'chunked';
+  if (rankIdx1Based <= CAPTURE_FULL_TIER_LIMIT) return 'full';
+  if (rankIdx1Based <= CAPTURE_SKELETON_TIER_LIMIT) return 'skeleton';
+  return null;
+}
+
+async function safeDb(fn, label) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[analyzer:capture] ${label} failed:`, err?.message || err);
+    return null;
+  }
+}
 
 const PRIORITY_FILES = [
   /^package\.json$/,
@@ -95,7 +125,7 @@ function scorePath(filePath) {
   return 1;
 }
 
-async function analyzeRepo(repoUrl, onProgress) {
+async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
   const { owner, repo } = github.parseRepoUrl(repoUrl);
   const send = onProgress || (() => {});
 
@@ -113,12 +143,61 @@ async function analyzeRepo(repoUrl, onProgress) {
     tree = await github.fetchRepoTree(owner, repo, fallback);
   }
 
+  const treeTruncated = !!tree._truncated;
+
   const allFiles = tree.filter((f) => f.type === 'blob' && !shouldSkipFile(f.path));
   send({ phase: 'tree-done', message: `Found ${allFiles.length} files`, fileCount: allFiles.length });
 
   const sorted = allFiles
     .map((f) => ({ ...f, score: scorePath(f.path) }))
     .sort((a, b) => b.score - a.score);
+
+  const fileCount = allFiles.length;
+  const treeTotalBytes = allFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+  const treeEstimatedTokens = Math.ceil(treeTotalBytes / 4);
+
+  if (analysisId) {
+    await safeDb(() => analyses.setTreeStats(analysisId, {
+      file_count: fileCount,
+      tree_total_bytes: treeTotalBytes,
+      tree_estimated_tokens: treeEstimatedTokens,
+      tree_truncated: treeTruncated,
+    }), 'analyses.setTreeStats');
+
+    await safeDb(() => analysisFiles.bulkInsertTreeRows(
+      analysisId,
+      sorted.map((f) => ({
+        path: f.path,
+        sha: f.sha,
+        size_bytes: f.size || 0,
+        language: inferLanguage(f.path),
+        score: f.score,
+        depth: computeDepth(f.path),
+      })),
+    ), 'analysisFiles.bulkInsertTreeRows');
+
+    await safeDb(() => analysisEvents.create({
+      analysis_id: analysisId,
+      event_type: 'tree.fetched',
+      source: 'github.tree',
+      bytes: treeTotalBytes,
+      tokens: treeEstimatedTokens,
+      metadata: { fileCount, truncated: treeTruncated, branch },
+    }), 'analysisEvents.create tree.fetched');
+  }
+
+  send({
+    phase: 'estimate',
+    fileCount,
+    estimatedCorpusTokens: treeEstimatedTokens,
+    treeTruncated,
+    message: `Estimated ${treeEstimatedTokens.toLocaleString()} tokens across ${fileCount} files`,
+  });
+
+  // Rank positions come from the sorted list so we can assign capture tiers
+  // by priority.
+  const rankByPath = new Map();
+  sorted.forEach((f, i) => rankByPath.set(f.path, i + 1));
 
   const toRead = sorted.slice(0, MAX_FILES_TO_READ);
   send({ phase: 'reading', message: `Reading ${toRead.length} key files...` });
@@ -133,12 +212,69 @@ async function analyzeRepo(repoUrl, onProgress) {
           .catch(() => ({ path: f.path, content: null, size: 0 }))
       )
     );
-    for (const r of results) {
-      if (r.content) fileContents[r.path] = r.content;
+
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      const originalFile = batch[j];
+      if (r && r.content != null) {
+        fileContents[r.path] = r.content;
+
+        if (analysisId) {
+          const rank = rankByPath.get(r.path) || (i + j + 1);
+          const sizeForTier = r.size || r.content.length;
+          const tier = decideTier(sizeForTier, rank);
+          if (tier) {
+            const contentTokens = estimateTokens(r.content);
+            const skeleton = extractSkeleton(r.content);
+            const skeletonTokens = estimateTokens(skeleton);
+            const bytes = r.size || r.content.length;
+
+            await safeDb(() => analysisFiles.updateTier(analysisId, r.path, {
+              tier,
+              content: tier === 'full' ? r.content : null,
+              skeleton,
+              content_tokens: contentTokens,
+              skeleton_tokens: skeletonTokens,
+              fetched_at: new Date().toISOString(),
+            }), `analysisFiles.updateTier ${r.path}`);
+
+            await safeDb(() => analyses.incrementIngested(analysisId, {
+              files: 1,
+              bytes,
+              tokens: contentTokens,
+            }), 'analyses.incrementIngested');
+
+            await safeDb(() => analysisEvents.create({
+              analysis_id: analysisId,
+              event_type: 'content.fetched',
+              source: 'github.contents',
+              path: r.path,
+              bytes,
+              tokens: contentTokens,
+              metadata: { tier },
+            }), 'analysisEvents.create content.fetched');
+          }
+        }
+      } else if (analysisId) {
+        const p = (r && r.path) || originalFile.path;
+        await safeDb(() => analysisFiles.updateTier(analysisId, p, {
+          skip_reason: 'fetch_failed',
+        }), `analysisFiles.updateTier skip ${p}`);
+        await safeDb(() => analysisEvents.create({
+          analysis_id: analysisId,
+          event_type: 'content.skipped',
+          source: 'github.contents',
+          path: p,
+          metadata: { reason: 'fetch_failed' },
+        }), 'analysisEvents.create content.skipped');
+      }
     }
+
+    const rollups = analysisId ? await safeDb(() => analyses.getRollups(analysisId), 'analyses.getRollups') : null;
     send({
       phase: 'reading',
       message: `Read ${Math.min(i + batchSize, toRead.length)}/${toRead.length} files...`,
+      ...camelRollups(rollups),
     });
   }
 
@@ -408,7 +544,7 @@ function safeJson(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
 
-function analyzeFromFiles(fileEntries, projectName, onProgress) {
+async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId = null) {
   const send = onProgress || (() => {});
 
   send({ phase: 'analyzing', message: 'Analyzing uploaded files...' });
@@ -416,20 +552,129 @@ function analyzeFromFiles(fileEntries, projectName, onProgress) {
   // Keep unfiltered list for deployment detection (matches analyzeRepo behavior)
   const unfilteredFiles = fileEntries.map(f => ({ path: f.path, type: 'blob' }));
 
-  const allFiles = unfilteredFiles.filter(f => !shouldSkipFile(f.path));
+  const contentMap = new Map(fileEntries.map(f => [f.path, f.content]));
+
+  const allFiles = unfilteredFiles
+    .filter(f => !shouldSkipFile(f.path))
+    .map((f) => {
+      const content = contentMap.get(f.path);
+      return { ...f, size: content ? content.length : 0 };
+    });
 
   send({ phase: 'tree-done', message: `Found ${allFiles.length} files`, fileCount: allFiles.length });
 
   const sorted = allFiles
     .map(f => ({ ...f, score: scorePath(f.path) }))
     .sort((a, b) => b.score - a.score);
+
+  const fileCount = allFiles.length;
+  const treeTotalBytes = allFiles.reduce((acc, f) => acc + (f.size || 0), 0);
+  const treeEstimatedTokens = Math.ceil(treeTotalBytes / 4);
+  const treeTruncated = false;
+
+  if (analysisId) {
+    await safeDb(() => analyses.setTreeStats(analysisId, {
+      file_count: fileCount,
+      tree_total_bytes: treeTotalBytes,
+      tree_estimated_tokens: treeEstimatedTokens,
+      tree_truncated: treeTruncated,
+    }), 'analyses.setTreeStats');
+
+    await safeDb(() => analysisFiles.bulkInsertTreeRows(
+      analysisId,
+      sorted.map((f) => ({
+        path: f.path,
+        sha: null,
+        size_bytes: f.size || 0,
+        language: inferLanguage(f.path),
+        score: f.score,
+        depth: computeDepth(f.path),
+      })),
+    ), 'analysisFiles.bulkInsertTreeRows');
+
+    await safeDb(() => analysisEvents.create({
+      analysis_id: analysisId,
+      event_type: 'tree.fetched',
+      source: 'internal.upload',
+      bytes: treeTotalBytes,
+      tokens: treeEstimatedTokens,
+      metadata: { fileCount, truncated: treeTruncated },
+    }), 'analysisEvents.create tree.fetched');
+  }
+
+  send({
+    phase: 'estimate',
+    fileCount,
+    estimatedCorpusTokens: treeEstimatedTokens,
+    treeTruncated,
+    message: `Estimated ${treeEstimatedTokens.toLocaleString()} tokens across ${fileCount} files`,
+  });
+
   const toRead = sorted.slice(0, MAX_FILES_TO_READ);
 
   const fileContents = {};
-  const contentMap = new Map(fileEntries.map(f => [f.path, f.content]));
-  for (const f of toRead) {
+  for (let i = 0; i < toRead.length; i++) {
+    const f = toRead[i];
     const content = contentMap.get(f.path);
-    if (content) fileContents[f.path] = content;
+    if (content != null) {
+      fileContents[f.path] = content;
+
+      if (analysisId) {
+        const rank = i + 1;
+        const sizeForTier = content.length;
+        const tier = decideTier(sizeForTier, rank);
+        if (tier) {
+          const contentTokens = estimateTokens(content);
+          const skeleton = extractSkeleton(content);
+          const skeletonTokens = estimateTokens(skeleton);
+
+          await safeDb(() => analysisFiles.updateTier(analysisId, f.path, {
+            tier,
+            content: tier === 'full' ? content : null,
+            skeleton,
+            content_tokens: contentTokens,
+            skeleton_tokens: skeletonTokens,
+            fetched_at: new Date().toISOString(),
+          }), `analysisFiles.updateTier ${f.path}`);
+
+          await safeDb(() => analyses.incrementIngested(analysisId, {
+            files: 1,
+            bytes: content.length,
+            tokens: contentTokens,
+          }), 'analyses.incrementIngested');
+
+          await safeDb(() => analysisEvents.create({
+            analysis_id: analysisId,
+            event_type: 'content.fetched',
+            source: 'internal.upload',
+            path: f.path,
+            bytes: content.length,
+            tokens: contentTokens,
+            metadata: { tier },
+          }), 'analysisEvents.create content.fetched');
+        }
+      }
+    } else if (analysisId) {
+      await safeDb(() => analysisFiles.updateTier(analysisId, f.path, {
+        skip_reason: 'fetch_failed',
+      }), `analysisFiles.updateTier skip ${f.path}`);
+      await safeDb(() => analysisEvents.create({
+        analysis_id: analysisId,
+        event_type: 'content.skipped',
+        source: 'internal.upload',
+        path: f.path,
+        metadata: { reason: 'fetch_failed' },
+      }), 'analysisEvents.create content.skipped');
+    }
+  }
+
+  if (analysisId) {
+    const rollups = await safeDb(() => analyses.getRollups(analysisId), 'analyses.getRollups');
+    send({
+      phase: 'reading',
+      message: `Read ${Object.keys(fileContents).length}/${toRead.length} files...`,
+      ...camelRollups(rollups),
+    });
   }
 
   send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });

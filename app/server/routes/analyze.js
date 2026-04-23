@@ -1,6 +1,6 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { analyses } = require('../lib/db');
+const { analyses, analysisFiles, analysisLlmCalls } = require('../lib/db');
 const { addConnection, broadcast } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
@@ -24,7 +24,7 @@ router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
   const { owner, repo } = validation;
 
   const id = uuidv4();
-  analyses.create({
+  await analyses.create({
     id,
     repo_url: repoUrl,
     owner,
@@ -34,21 +34,25 @@ router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
     user_id: req.user?.id || null,
   });
 
-  setImmediate(() => runAnalysis(id, repoUrl));
+  setImmediate(() => {
+    runAnalysis(id, repoUrl).catch((err) => {
+      console.error(`runAnalysis ${id} unhandled:`, err);
+    });
+  });
 
   res.status(201).json({ projectId: id, status: 'pending' });
 }));
 
 async function runAnalysis(id, repoUrl) {
   try {
-    analyses.update(id, { status: 'analyzing' });
+    await analyses.update(id, { status: 'analyzing' });
     broadcast(id, { type: 'analysis-started', id });
 
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    });
+    }, id);
 
-    analyses.update(id, {
+    await analyses.update(id, {
       owner: codebaseModel.meta.owner,
       repo: codebaseModel.meta.repo,
       status: 'generating',
@@ -66,7 +70,7 @@ async function runAnalysis(id, repoUrl) {
       console.error(`Features description for ${id} failed (non-fatal):`, err.message);
     }
 
-    analyses.update(id, {
+    await analyses.update(id, {
       status: 'completed',
       context_files: contextFiles,
       completion_pct: completionPct,
@@ -85,32 +89,25 @@ async function runAnalysis(id, repoUrl) {
     console.log(`Analysis ${id} completed: ${completionPct}% complete, ${contextFiles.length} context files, features: ${!!featuresSummary}`);
   } catch (err) {
     console.error(`Analysis ${id} failed:`, err);
-    analyses.update(id, { status: 'failed' });
+    try {
+      await analyses.update(id, { status: 'failed' });
+    } catch (updateErr) {
+      console.error(`Failed to mark analysis ${id} as failed:`, updateErr.message);
+    }
     broadcast(id, { type: 'analysis-error', error: err.message });
   }
 }
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const analysis = analyses.findById(req.params.id);
+  const analysis = await analyses.findById(req.params.id);
   if (!analysis) throw AppError.notFound('Analysis not found');
 
-  const result = { ...analysis };
-  if (result.analysis) {
-    try { result.analysis = JSON.parse(result.analysis); } catch (e) {
-      console.warn(`Failed to parse analysis JSON for ${req.params.id}:`, e.message);
-    }
-  }
-  if (result.context_files) {
-    try { result.context_files = JSON.parse(result.context_files); } catch (e) {
-      console.warn(`Failed to parse context_files JSON for ${req.params.id}:`, e.message);
-    }
-  }
-  res.json(result);
+  res.json(analysis);
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
   const { limit, offset } = validatePagination(req.query);
-  const list = analyses.list({ limit, offset, userId: req.user?.id || null });
+  const list = await analyses.list({ limit, offset, userId: req.user?.id || null });
   res.json(list.map((a) => ({
     id: a.id,
     repo_url: a.repo_url,
@@ -124,9 +121,41 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
-  const analysis = analyses.findById(req.params.id);
+  const analysis = await analyses.findById(req.params.id);
   if (!analysis) throw AppError.notFound('Analysis not found');
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
+}));
+
+router.get('/:id/capture', asyncHandler(async (req, res) => {
+  const analysis = await analyses.findById(req.params.id);
+  if (!analysis) throw AppError.notFound('Analysis not found');
+
+  const raw = (await analyses.getRollups(req.params.id)) || {};
+  const rollups = {
+    fileCount: raw.file_count ?? 0,
+    treeTotalBytes: raw.tree_total_bytes ?? 0,
+    treeEstimatedTokens: raw.tree_estimated_tokens ?? 0,
+    treeTruncated: !!raw.tree_truncated,
+    ingestedFileCount: raw.ingested_file_count ?? 0,
+    ingestedBytes: raw.ingested_bytes ?? 0,
+    ingestedTokens: raw.ingested_tokens ?? 0,
+    llmCallCount: raw.llm_call_count ?? 0,
+    llmInputTokens: raw.llm_input_tokens ?? 0,
+    llmOutputTokens: raw.llm_output_tokens ?? 0,
+    llmCostUsd: raw.llm_cost_usd ?? 0,
+  };
+
+  const tierCounts = await analysisFiles.countByTier(req.params.id);
+  const phaseRows = await analysisLlmCalls.aggregateByPhase(req.params.id);
+  const phaseAggregates = phaseRows.map((r) => ({
+    phase: r.phase,
+    callCount: r.call_count,
+    inputTokens: r.input_tokens,
+    outputTokens: r.output_tokens,
+    costUsd: r.cost_usd,
+  }));
+
+  res.json({ rollups, tierCounts, phaseAggregates });
 }));
 
 module.exports = router;

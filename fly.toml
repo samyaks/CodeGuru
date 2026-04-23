@@ -1,5 +1,6 @@
 app = "codeguru"
 primary_region = "sjc"
+# Data lives in Supabase Postgres (DATABASE_URL); no local volume needed.
 
 [build]
   dockerfile = "Dockerfile"
@@ -17,7 +18,3 @@ primary_region = "sjc"
     path = "/health"
     interval = "30s"
     timeout = "5s"
-
-[mounts]
-  source = "codeguru_data"
-  destination = "/app/app/server/data"

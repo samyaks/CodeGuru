@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, suggestions } = require('../lib/db');
+const { deployments, suggestions, analyses } = require('../lib/db');
 const { addConnection, broadcast, getRecentEvents } = require('../lib/sse');
 const github = require('../services/github');
 const multer = require('multer');
@@ -17,9 +17,7 @@ const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { seedFromAnalysis } = require('../lib/auto-entries');
-const { parseJsonFields, checkProjectAccess } = require('../lib/helpers');
-
-const TAKEOFF_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
+const { checkProjectAccess } = require('../lib/helpers');
 
 const router = express.Router();
 
@@ -61,7 +59,7 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
   const id = uuidv4();
   let slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + id.slice(0, 6);
 
-  deployments.create({
+  await deployments.create({
     id,
     repo_url: `local://${projectName}`,
     owner: 'local',
@@ -72,10 +70,11 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
   });
 
   try {
-    deployments.update(id, { slug });
-  } catch (_) {
+    await deployments.update(id, { slug });
+  } catch (err) {
+    if (err && err.code !== '23505') throw err;
     slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
-    deployments.update(id, { slug });
+    await deployments.update(id, { slug });
   }
 
   // Sanitize paths and pre-filter binary files before UTF-8 conversion
@@ -87,7 +86,11 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
       content: f.buffer.toString('utf-8'),
     }));
 
-  setImmediate(() => runUploadAnalysis(id, fileEntries, projectName, userId));
+  setImmediate(() => {
+    runUploadAnalysis(id, fileEntries, projectName, userId).catch((err) => {
+      console.error(`runUploadAnalysis ${id} unhandled:`, err);
+    });
+  });
 
   res.status(201).json({ projectId: id, slug, status: 'pending' });
 }));
@@ -101,7 +104,7 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   const { owner, repo } = validation;
 
   const id = uuidv4();
-  deployments.create({
+  await deployments.create({
     id,
     repo_url: repoUrl,
     owner,
@@ -113,13 +116,18 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
 
   let slug = `${owner}-${repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
   try {
-    deployments.update(id, { slug });
-  } catch (_) {
+    await deployments.update(id, { slug });
+  } catch (err) {
+    if (err && err.code !== '23505') throw err;
     slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
-    deployments.update(id, { slug });
+    await deployments.update(id, { slug });
   }
 
-  setImmediate(() => runTakeoff(id, repoUrl));
+  setImmediate(() => {
+    runTakeoff(id, repoUrl).catch((err) => {
+      console.error(`runTakeoff ${id} unhandled:`, err);
+    });
+  });
 
   res.status(201).json({ projectId: id, slug, status: 'pending' });
 }));
@@ -128,18 +136,50 @@ async function runTakeoff(id, repoUrl) {
   const label = repoUrl;
   console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, timestamp: new Date().toISOString() }));
   try {
-    deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
+    // Ensure a parent `analyses` row exists so the data-capture FKs resolve.
+    // Takeoff reuses the deployments.id for the analyses.id; the capture
+    // tables (analysis_files, analysis_file_chunks, analysis_llm_calls,
+    // analysis_events) all FK to analyses(id) ON DELETE CASCADE.
+    try {
+      if (!(await analyses.findById(id))) {
+        const deployment = await deployments.findById(id);
+        await analyses.create({
+          id,
+          repo_url: repoUrl,
+          owner: deployment?.owner || 'unknown',
+          repo: deployment?.repo || 'unknown',
+          status: 'analyzing',
+          created_at: new Date().toISOString(),
+          user_id: deployment?.user_id || null,
+        });
+      }
+    } catch (err) {
+      console.warn(`analyses.create for takeoff ${id} failed (non-fatal):`, err.message);
+    }
+
+    await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    });
+    }, id);
 
-    const userId = deployments.findById(id)?.user_id;
+    const currentDeployment = await deployments.findById(id);
+    const userId = currentDeployment?.user_id;
     await runPipeline(id, codebaseModel, userId, label);
+
+    try {
+      await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
+    } catch (err) {
+      console.warn(`analyses.update completed for takeoff ${id} failed (non-fatal):`, err.message);
+    }
   } catch (err) {
     console.error(`Takeoff failed for ${id}:`, err);
-    deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    try {
+      await deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    } catch (updateErr) {
+      console.error(`Failed to mark deployment ${id} as failed:`, updateErr.message);
+    }
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
   }
@@ -149,17 +189,46 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
   const label = projectName;
   console.log(JSON.stringify({ event: 'upload_analysis_start', projectId: id, projectName, timestamp: new Date().toISOString() }));
   try {
-    deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
+    // Ensure a parent `analyses` row exists so data-capture FKs resolve for
+    // the upload flow too. Uses the same id that Takeoff already threads
+    // through analyzeFromFiles and the capture tables.
+    try {
+      if (!(await analyses.findById(id))) {
+        await analyses.create({
+          id,
+          repo_url: `local://${projectName}`,
+          owner: 'local',
+          repo: projectName,
+          status: 'analyzing',
+          created_at: new Date().toISOString(),
+          user_id: userId || null,
+        });
+      }
+    } catch (err) {
+      console.warn(`analyses.create for upload ${id} failed (non-fatal):`, err.message);
+    }
+
+    await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
-    const codebaseModel = analyzeFromFiles(fileEntries, projectName, (progress) => {
+    const codebaseModel = await analyzeFromFiles(fileEntries, projectName, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    });
+    }, id);
 
     await runPipeline(id, codebaseModel, userId, label);
+
+    try {
+      await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
+    } catch (err) {
+      console.warn(`analyses.update completed for upload ${id} failed (non-fatal):`, err.message);
+    }
   } catch (err) {
     console.error(`Upload analysis failed for ${id}:`, err);
-    deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    try {
+      await deployments.update(id, { status: 'failed', error: err.message, updated_at: new Date().toISOString() });
+    } catch (updateErr) {
+      console.error(`Failed to mark deployment ${id} as failed:`, updateErr.message);
+    }
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'upload_analysis_failed', projectId: id, projectName, error: err.message, timestamp: new Date().toISOString() }));
   }
@@ -167,7 +236,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
 
 async function runPipeline(id, codebaseModel, userId, label) {
   // Stage 1: Persist analysis data
-  deployments.update(id, {
+  await deployments.update(id, {
     owner: codebaseModel.meta.owner,
     repo: codebaseModel.meta.repo,
     branch: codebaseModel.meta.defaultBranch || null,
@@ -195,7 +264,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   let featuresSummary = null;
   try {
     featuresSummary = await describeFeatures(id, codebaseModel);
-    deployments.update(id, { features_summary: featuresSummary });
+    await deployments.update(id, { features_summary: featuresSummary });
   } catch (err) {
     console.error(`Features description for ${id} failed (non-fatal):`, err.message);
   }
@@ -219,7 +288,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     buildPlan,
   });
 
-  deployments.update(id, {
+  await deployments.update(id, {
     status: 'scored',
     deploy_type: buildPlan.type,
     build_plan: buildPlan,
@@ -243,7 +312,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     },
   });
 
-  seedFromAnalysis(id, userId, codebaseModel, readiness.score);
+  await seedFromAnalysis(id, userId, codebaseModel, readiness.score);
 
   // Stage 2b: Static + Gap suggestions
   let allStaticSuggestions = [];
@@ -258,9 +327,9 @@ async function runPipeline(id, codebaseModel, userId, label) {
       buildPlan,
     });
 
-    suggestions.deleteByProjectId(id);
+    await suggestions.deleteByProjectId(id);
     if (staticSuggestions.length > 0) {
-      suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
+      await suggestions.createBatch(staticSuggestions.map(s => ({ ...s, project_id: id })));
     }
     allStaticSuggestions = [...staticSuggestions];
 
@@ -276,7 +345,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
         coveredGapKeys,
       });
       if (gapSuggestions.length > 0) {
-        suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));
+        await suggestions.createBatch(gapSuggestions.map(s => ({ ...s, project_id: id })));
         allStaticSuggestions.push(...gapSuggestions);
       }
     } catch (err) {
@@ -284,7 +353,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     }
 
     const suggestionsCount = allStaticSuggestions.length;
-    deployments.update(id, { suggestions_count: suggestionsCount });
+    await deployments.update(id, { suggestions_count: suggestionsCount });
 
     broadcast(id, {
       type: 'suggestions-static',
@@ -304,7 +373,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     gaps: codebaseModel.gaps,
   });
 
-  deployments.update(id, {
+  await deployments.update(id, {
     status: 'ready',
     plan_steps: planSteps,
     updated_at: new Date().toISOString(),
@@ -343,9 +412,9 @@ async function runPipeline(id, codebaseModel, userId, label) {
     });
 
     if (aiSuggestions.length > 0) {
-      suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
-      const counts = suggestions.countByProjectId(id);
-      deployments.update(id, { suggestions_count: counts.total || 0 });
+      await suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
+      const counts = await suggestions.countByProjectId(id);
+      await deployments.update(id, { suggestions_count: counts.total || 0 });
     }
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
@@ -353,16 +422,16 @@ async function runPipeline(id, codebaseModel, userId, label) {
 }
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  res.json(parseJsonFields(project, TAKEOFF_JSON_FIELDS));
+  res.json(project);
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -375,15 +444,14 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
   }
 
   if (project.status === 'ready' || project.status === 'live') {
-    const parsed = parseJsonFields(project, TAKEOFF_JSON_FIELDS);
     broadcast(req.params.id, {
       type: 'complete',
-      score: parsed.readiness_score,
-      recommendation: parsed.recommendation,
-      categories: parsed.readiness_categories,
-      planSteps: parsed.plan_steps,
-      stack: parsed.stack_info,
-      buildPlan: parsed.build_plan,
+      score: project.readiness_score,
+      recommendation: project.recommendation,
+      categories: project.readiness_categories,
+      planSteps: project.plan_steps,
+      stack: project.stack_info,
+      buildPlan: project.build_plan,
     });
   }
 
@@ -395,20 +463,19 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
 router.get('/:id/env-vars', asyncHandler(async (req, res) => {
   if (!req.user) throw AppError.unauthorized('Login required');
 
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  let vars = {};
-  try { vars = JSON.parse(project.env_vars || '{}'); } catch {}
+  const vars = project.env_vars && typeof project.env_vars === 'object' ? project.env_vars : {};
   res.json({ vars });
 }));
 
 router.post('/:id/env-vars', asyncHandler(async (req, res) => {
   if (!req.user) throw AppError.unauthorized('Login required');
 
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -416,8 +483,8 @@ router.post('/:id/env-vars', asyncHandler(async (req, res) => {
   const { vars } = req.body;
   if (!vars || typeof vars !== 'object') throw AppError.badRequest('vars must be an object');
 
-  deployments.update(req.params.id, {
-    env_vars: JSON.stringify(vars),
+  await deployments.update(req.params.id, {
+    env_vars: vars,
     updated_at: new Date().toISOString(),
   });
 
@@ -425,15 +492,12 @@ router.post('/:id/env-vars', asyncHandler(async (req, res) => {
 }));
 
 router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  let steps = project.plan_steps;
-  if (typeof steps === 'string') {
-    try { steps = JSON.parse(steps); } catch { throw AppError.internal('Invalid plan data'); }
-  }
+  const steps = project.plan_steps;
   if (!Array.isArray(steps)) throw AppError.badRequest('No plan found');
 
   const step = steps.find((s) => s.id === req.params.stepId);
@@ -445,7 +509,7 @@ router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
   }
 
   step.status = status;
-  deployments.update(req.params.id, {
+  await deployments.update(req.params.id, {
     plan_steps: steps,
     updated_at: new Date().toISOString(),
   });
@@ -456,18 +520,18 @@ router.patch('/:id/plan/:stepId', asyncHandler(async (req, res) => {
 // ── Suggestions ──
 
 router.get('/:id/suggestions', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
   checkProjectAccess(project, req);
 
-  const items = suggestions.findByProjectId(req.params.id);
-  const summary = suggestions.summary(req.params.id);
+  const items = await suggestions.findByProjectId(req.params.id);
+  const summary = await suggestions.summary(req.params.id);
 
   res.json({ suggestions: items, summary });
 }));
 
 router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
   checkProjectAccess(project, req);
 
@@ -476,21 +540,21 @@ router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => 
     throw AppError.badRequest('Status must be "open", "dismissed", or "done"');
   }
 
-  suggestions.updateStatus(req.params.suggestionId, req.params.id, status);
+  await suggestions.updateStatus(req.params.suggestionId, req.params.id, status);
 
-  const counts = suggestions.countByProjectId(req.params.id);
-  deployments.update(req.params.id, { suggestions_count: counts.total || 0 });
+  const counts = await suggestions.countByProjectId(req.params.id);
+  await deployments.update(req.params.id, { suggestions_count: counts.total || 0 });
 
   res.json({ ok: true, status });
 }));
 
 router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
   checkProjectAccess(project, req);
 
-  suggestions.deleteByProjectId(req.params.id);
-  deployments.update(req.params.id, { suggestions_count: 0 });
+  await suggestions.deleteByProjectId(req.params.id);
+  await deployments.update(req.params.id, { suggestions_count: 0 });
 
   res.json({ ok: true, message: 'Suggestions cleared. Re-analyze to generate new suggestions.' });
 }));

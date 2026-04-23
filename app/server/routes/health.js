@@ -3,11 +3,11 @@ const { getDb } = require('../lib/db');
 
 const router = express.Router();
 
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
   let dbStatus = 'ok';
   let dbError;
   try {
-    getDb().prepare('SELECT 1 AS ok').get();
+    await getDb().query('SELECT 1 AS ok');
   } catch (err) {
     dbStatus = 'error';
     dbError = err.message;

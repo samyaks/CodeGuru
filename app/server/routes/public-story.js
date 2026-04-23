@@ -4,29 +4,16 @@ const { createRateLimit } = require('../lib/rate-limit');
 const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
-const { parseJsonFields, safeParseJson } = require('../lib/helpers');
-
 const router = express.Router();
 
-const STORY_JSON_FIELDS = ['stack_info', 'readiness_categories', 'plan_steps'];
-
-function parseMetadata(entry) {
-  const parsed = { ...entry };
-  if (parsed.metadata && typeof parsed.metadata === 'string') {
-    try { parsed.metadata = JSON.parse(parsed.metadata); } catch {}
-  }
-  return parsed;
-}
-
 function sanitizeEntry(entry) {
-  const parsed = parseMetadata(entry);
   return {
-    id: parsed.id,
-    entry_type: parsed.entry_type,
-    title: parsed.title,
-    content: parsed.content,
-    metadata: parsed.metadata,
-    created_at: parsed.created_at,
+    id: entry.id,
+    entry_type: entry.entry_type,
+    title: entry.title,
+    content: entry.content,
+    metadata: entry.metadata,
+    created_at: entry.created_at,
   };
 }
 
@@ -43,37 +30,36 @@ const summaryLimit = createRateLimit({
 });
 
 router.get('/:slug', readLimit, asyncHandler(async (req, res) => {
-  const project = deployments.findBySlug(req.params.slug);
+  const project = await deployments.findBySlug(req.params.slug);
   if (!project) throw AppError.notFound('Story not found');
 
-  const parsed = parseJsonFields(project, STORY_JSON_FIELDS);
-  const entries = buildEntries.findPublicByProjectId(project.id);
+  const entries = await buildEntries.findPublicByProjectId(project.id);
 
   res.json({
     project: {
-      owner: parsed.owner,
-      repo: parsed.repo,
-      framework: parsed.framework || null,
-      description: parsed.description || null,
-      readiness_score: parsed.readiness_score || null,
-      live_url: parsed.live_url || null,
-      status: parsed.status,
-      slug: parsed.slug,
+      owner: project.owner,
+      repo: project.repo,
+      framework: project.framework || null,
+      description: project.description || null,
+      readiness_score: project.readiness_score || null,
+      live_url: project.live_url || null,
+      status: project.status,
+      slug: project.slug,
     },
     entries: entries.map(sanitizeEntry),
-    social_summary: parsed.social_summary || null,
+    social_summary: project.social_summary || null,
   });
 }));
 
 router.get('/:slug/summary', summaryLimit, asyncHandler(async (req, res) => {
-  const project = deployments.findBySlug(req.params.slug);
+  const project = await deployments.findBySlug(req.params.slug);
   if (!project) throw AppError.notFound('Story not found');
 
   if (project.social_summary) {
     return res.json({ summary: project.social_summary });
   }
 
-  const entries = buildEntries.findPublicByProjectId(project.id);
+  const entries = await buildEntries.findPublicByProjectId(project.id);
   if (entries.length === 0) {
     throw AppError.badRequest('No public build entries to summarize');
   }
@@ -103,7 +89,7 @@ router.get('/:slug/summary', summaryLimit, asyncHandler(async (req, res) => {
 
   const summary = message.content[0].text;
 
-  deployments.update(project.id, { social_summary: summary });
+  await deployments.update(project.id, { social_summary: summary });
 
   res.json({ summary });
 }));

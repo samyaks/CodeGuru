@@ -1,5 +1,6 @@
 const { broadcast } = require('../lib/sse');
 const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
+const { streamMessageTracked } = require('../lib/anthropic-tracked');
 
 const SYSTEM_PROMPT = `You explain software projects to people who have NEVER written code.
 
@@ -63,14 +64,21 @@ async function describeFeatures(analysisId, codebaseModel) {
     .map((f) => `- ${f.name} (${f.fileCount} files${f.hasUI ? ', has user interface' : ''}${f.hasAPI ? ', has server logic' : ''})`)
     .join('\n');
 
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 4096,
-    stream: true,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: `Read this codebase and explain what it does. The person reading your explanation has never written code.
+  const filesUsed = keyFileEntries.map(([path]) => path);
+
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'features-describer',
+    targetPath: null,
+    filesUsed,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: 4096,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: `Read this codebase and explain what it does. The person reading your explanation has never written code.
 
 ## Project
 Name: ${codebaseModel.meta.name}
@@ -90,19 +98,15 @@ ${fileTree}
 ${keyFiles}
 
 Now explain this project to someone who has never seen code before. What is it? What does it do? How would they use it? What's not finished?`,
-    }],
-  });
-
-  let fullText = '';
-  for await (const event of response) {
-    if (event.type === 'content_block_delta' && event.delta?.text) {
-      fullText += event.delta.text;
+      }],
+    },
+    onText: (_chunk, partial) => {
       broadcast(analysisId, {
         type: 'features-stream',
-        partial: fullText,
+        partial,
       });
-    }
-  }
+    },
+  });
 
   broadcast(analysisId, {
     type: 'progress',

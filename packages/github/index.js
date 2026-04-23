@@ -70,7 +70,14 @@ async function fetchPRFiles(owner, repo, prNumber) {
 async function fetchRepoTree(owner, repo, branch = 'main') {
   const res = await githubFetch(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
   const data = await res.json();
-  return data.tree || [];
+  const tree = data.tree || [];
+  if (data.truncated) {
+    tree._truncated = true;
+    console.warn(`GitHub tree for ${owner}/${repo}@${branch} is truncated — results may be incomplete.`);
+  } else {
+    tree._truncated = false;
+  }
+  return tree;
 }
 
 async function fetchFileContent(owner, repo, filePath, ref) {

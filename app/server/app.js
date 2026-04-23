@@ -187,7 +187,7 @@ let server;
 
 async function start() {
   getDb();
-  console.log('Database initialized');
+  console.log('Database pool initialized (lazy connect on first query)');
 
   validateEnv();
 
@@ -204,22 +204,33 @@ async function start() {
   });
 }
 
-function shutdown() {
+async function shutdown() {
   console.log('Shutting down gracefully...');
+  const forceExit = setTimeout(() => {
+    console.error('Graceful shutdown timed out after 10s — forcing exit.');
+    process.exit(1);
+  }, 10_000);
+  forceExit.unref();
+
+  const closePool = async () => {
+    try { await closeDb(); } catch (err) { console.error('closeDb failed:', err.message); }
+  };
   if (server) {
-    server.close(() => {
-      closeDb();
+    server.close(async () => {
+      await closePool();
       console.log('Server closed');
+      clearTimeout(forceExit);
       process.exit(0);
     });
   } else {
-    closeDb();
+    await closePool();
+    clearTimeout(forceExit);
     process.exit(0);
   }
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => { shutdown().catch((err) => { console.error('shutdown failed:', err); process.exit(1); }); });
+process.on('SIGTERM', () => { shutdown().catch((err) => { console.error('shutdown failed:', err); process.exit(1); }); });
 
 process.on('unhandledRejection', (reason) => {
   console.error('[UnhandledRejection]', reason);

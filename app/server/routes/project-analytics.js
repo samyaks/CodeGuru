@@ -25,8 +25,8 @@ function sinceDate(period) {
   return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function loadProject(req) {
-  const project = deployments.findById(req.params.projectId);
+async function loadProject(req) {
+  const project = await deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
   checkProjectAccess(project, req);
   return project;
@@ -34,18 +34,23 @@ function loadProject(req) {
 
 // GET / — Overview stats
 router.get('/', readLimit, asyncHandler(async (req, res) => {
-  const project = loadProject(req);
+  const project = await loadProject(req);
   const projectId = project.id;
 
   const today = sinceDate('today');
   const week = sinceDate('week');
   const month = sinceDate('month');
 
-  const { visitors, pageviews } = projectEvents.overviewStats(projectId, { today, week, month });
+  const { visitors, pageviews } = await projectEvents.overviewStats(projectId, { today, week, month });
 
-  const topPages = projectEvents.aggregateByPath(projectId, { since: month }).slice(0, 10);
-  const topReferrers = projectEvents.aggregateByReferrer(projectId, { since: month }).slice(0, 10);
-  const topEvents = projectEvents.aggregateByEvent(projectId, { since: month }).slice(0, 10);
+  const [pathRows, referrerRows, eventRows] = await Promise.all([
+    projectEvents.aggregateByPath(projectId, { since: month }),
+    projectEvents.aggregateByReferrer(projectId, { since: month }),
+    projectEvents.aggregateByEvent(projectId, { since: month }),
+  ]);
+  const topPages = pathRows.slice(0, 10);
+  const topReferrers = referrerRows.slice(0, 10);
+  const topEvents = eventRows.slice(0, 10);
 
   const hasData = visitors.month > 0 || pageviews.month > 0;
 
@@ -54,7 +59,7 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
 
 // GET /events — Raw event list (paginated)
 router.get('/events', readLimit, asyncHandler(async (req, res) => {
-  loadProject(req);
+  await loadProject(req);
   const projectId = req.params.projectId;
 
   const { event, since, limit } = req.query;
@@ -63,16 +68,16 @@ router.get('/events', readLimit, asyncHandler(async (req, res) => {
   if (since) opts.since = since;
   opts.limit = Math.min(parseInt(limit, 10) || 100, 500);
 
-  const events = projectEvents.findByProjectId(projectId, opts);
+  const events = await projectEvents.findByProjectId(projectId, opts);
   res.json(events);
 }));
 
 // GET /setup — Setup instructions and status
 router.get('/setup', readLimit, asyncHandler(async (req, res) => {
-  loadProject(req);
+  await loadProject(req);
   const projectId = req.params.projectId;
 
-  const eventCount = projectEvents.countByProject(projectId, {});
+  const eventCount = await projectEvents.countByProject(projectId, {});
   const domain = req.protocol + '://' + req.get('host');
 
   res.json({

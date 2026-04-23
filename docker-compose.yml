@@ -7,10 +7,4 @@ services:
       - app/.env
     environment:
       - NODE_ENV=production
-    volumes:
-      # Persist SQLite data across container restarts
-      - codeguru-data:/app/app/server/data
     restart: unless-stopped
-
-volumes:
-  codeguru-data:

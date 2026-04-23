@@ -103,7 +103,7 @@ async function generateFixPrompts(reviewId, review, report, fileContents) {
       expires_at: expiresAt.toISOString(),
     };
 
-    fixPrompts.create(prompt);
+    await fixPrompts.create(prompt);
     prompts.push(prompt);
   }
 
@@ -215,7 +215,7 @@ function redactSecrets(text) {
 async function generateShortId() {
   for (let attempt = 0; attempt < 10; attempt++) {
     const id = crypto.randomBytes(6).toString('base64url').slice(0, 8);
-    if (!fixPrompts.shortIdExists(id)) return id;
+    if (!(await fixPrompts.shortIdExists(id))) return id;
   }
   return crypto.randomBytes(8).toString('base64url').slice(0, 12);
 }

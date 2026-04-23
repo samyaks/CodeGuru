@@ -5,7 +5,9 @@
   "scripts": {
     "server": "node server/app.js",
     "client": "npm start --prefix client",
-    "dev": "concurrently \"npm run server\" \"npm run client\""
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "migrate": "node server/lib/migrate.js",
+    "migrate:force": "FORCE_MIGRATE=1 node server/lib/migrate.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -14,12 +16,12 @@
     "@codeguru/railway": "^1.0.0",
     "@codeguru/sse": "^1.0.0",
     "@supabase/supabase-js": "^2.49.0",
-    "better-sqlite3": "^12.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "multer": "^2.1.1",
+    "pg": "^8.13.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

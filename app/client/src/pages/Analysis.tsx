@@ -57,7 +57,7 @@ export default function Analysis() {
         setSteps((prev) => {
           const next = [...prev];
           const phaseMap: Record<string, number> = {
-            meta: 0, tree: 0, 'tree-done': 0,
+            meta: 0, tree: 0, 'tree-done': 0, estimate: 0,
             reading: 1,
             analyzing: 2, complete: 2,
             generating: 3, 'context-start': 3, 'context-app': 3,

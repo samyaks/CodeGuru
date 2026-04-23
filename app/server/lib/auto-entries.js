@@ -1,9 +1,9 @@
 const { v4: uuidv4 } = require('uuid');
 const { buildEntries } = require('./db');
 
-function createAutoEntry(projectId, userId, { entryType, title, content, metadata = null, isPublic = true }) {
+async function createAutoEntry(projectId, userId, { entryType, title, content, metadata = null, isPublic = true }) {
   try {
-    buildEntries.create({
+    await buildEntries.create({
       id: uuidv4(),
       project_id: projectId,
       user_id: userId || 'system',
@@ -11,7 +11,7 @@ function createAutoEntry(projectId, userId, { entryType, title, content, metadat
       title,
       content,
       metadata: metadata,
-      is_public: isPublic ? 1 : 0,
+      is_public: !!isPublic,
       created_at: new Date().toISOString(),
       sort_order: 0,
     });
@@ -20,11 +20,11 @@ function createAutoEntry(projectId, userId, { entryType, title, content, metadat
   }
 }
 
-function seedFromAnalysis(projectId, userId, codebaseModel, readinessScore) {
+async function seedFromAnalysis(projectId, userId, codebaseModel, readinessScore) {
   const stack = codebaseModel.stack;
   const stackParts = [stack.framework, stack.runtime, stack.styling, stack.database].filter(Boolean);
 
-  createAutoEntry(projectId, userId, {
+  await createAutoEntry(projectId, userId, {
     entryType: 'milestone',
     title: 'Project analyzed',
     content: `Analyzed ${codebaseModel.meta.name || 'repository'}. Detected stack: ${stackParts.join(', ') || 'unknown'}. Production readiness score: ${readinessScore}%.`,
@@ -38,7 +38,7 @@ function seedFromAnalysis(projectId, userId, codebaseModel, readinessScore) {
     .map(([k]) => k);
 
   if (missingGaps.length > 0) {
-    createAutoEntry(projectId, userId, {
+    await createAutoEntry(projectId, userId, {
       entryType: 'note',
       title: 'Areas to build',
       content: `The analysis identified ${missingGaps.length} areas that need work: ${missingGaps.join(', ')}. A step-by-step plan has been generated.`,
@@ -48,16 +48,16 @@ function seedFromAnalysis(projectId, userId, codebaseModel, readinessScore) {
   }
 }
 
-function logDeployEvent(projectId, userId, { status, liveUrl, error }) {
+async function logDeployEvent(projectId, userId, { status, liveUrl, error }) {
   if (status === 'deploying') {
-    createAutoEntry(projectId, userId, {
+    await createAutoEntry(projectId, userId, {
       entryType: 'deploy_event',
       title: 'Deployment started',
       content: 'Started deploying to production via Railway.',
       isPublic: true,
     });
   } else if (status === 'live' && liveUrl) {
-    createAutoEntry(projectId, userId, {
+    await createAutoEntry(projectId, userId, {
       entryType: 'milestone',
       title: 'Deployed to production!',
       content: `App is now live at ${liveUrl}`,
@@ -65,7 +65,7 @@ function logDeployEvent(projectId, userId, { status, liveUrl, error }) {
       isPublic: true,
     });
   } else if (status === 'failed') {
-    createAutoEntry(projectId, userId, {
+    await createAutoEntry(projectId, userId, {
       entryType: 'deploy_event',
       title: 'Deployment failed',
       content: `Deploy failed: ${error || 'Unknown error'}`,

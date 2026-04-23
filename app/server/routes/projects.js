@@ -5,9 +5,7 @@ const railway = require('@codeguru/railway');
 const github = require('../services/github');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
-const { parseJsonFields, checkProjectAccess } = require('../lib/helpers');
-
-const PROJECT_JSON_FIELDS = ['stack_info', 'build_plan', 'readiness_categories', 'plan_steps', 'analysis_data'];
+const { checkProjectAccess } = require('../lib/helpers');
 
 const SUMMARY_FIELDS = [
   'id', 'repo_url', 'owner', 'repo', 'status', 'readiness_score',
@@ -41,26 +39,22 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
     return res.json([]);
   }
 
-  const projects = deployments.findByUserId(req.user.id);
-  const parsed = projects.map((p) => projectSummary(parseJsonFields(p, PROJECT_JSON_FIELDS)));
-  res.json(parsed);
+  const projects = await deployments.findByUserId(req.user.id);
+  res.json(projects.map(projectSummary));
 }));
 
 router.get('/:id', readLimit, asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  const parsed = parseJsonFields(project, PROJECT_JSON_FIELDS);
-  const entries = buildEntries.findByProjectId(req.params.id);
-  parsed.entries = entries;
-
-  res.json(parsed);
+  const entries = await buildEntries.findByProjectId(req.params.id);
+  res.json({ ...project, entries });
 }));
 
 router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -82,7 +76,7 @@ router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -96,7 +90,7 @@ router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
     return res.status(401).json({ error: 'Login required to delete a project', code: 'UNAUTHORIZED' });
   }
 
-  const project = deployments.findById(req.params.id);
+  const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -109,7 +103,7 @@ router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
     }
   }
 
-  deployments.delete(req.params.id);
+  await deployments.delete(req.params.id);
 
   res.json({ deleted: true });
 }));

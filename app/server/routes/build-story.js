@@ -11,14 +11,6 @@ const VALID_ENTRY_TYPES = ['prompt', 'note', 'decision', 'milestone', 'deploy_ev
 
 const router = express.Router({ mergeParams: true });
 
-function parseMetadata(entry) {
-  const parsed = { ...entry };
-  if (parsed.metadata && typeof parsed.metadata === 'string') {
-    try { parsed.metadata = JSON.parse(parsed.metadata); } catch {}
-  }
-  return parsed;
-}
-
 const readLimit = createRateLimit({
   windowMs: 60000,
   max: 30,
@@ -39,13 +31,13 @@ const generateLimit = createRateLimit({
 
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   const { projectId } = req.params;
-  const project = deployments.findById(projectId);
+  const project = await deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  const entries = buildEntries.findByProjectId(projectId);
-  res.json(entries.map(parseMetadata));
+  const entries = await buildEntries.findByProjectId(projectId);
+  res.json(entries);
 }));
 
 router.post('/', writeLimit, asyncHandler(async (req, res) => {
@@ -54,7 +46,7 @@ router.post('/', writeLimit, asyncHandler(async (req, res) => {
   }
 
   const { projectId } = req.params;
-  const project = deployments.findById(projectId);
+  const project = await deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
@@ -79,8 +71,8 @@ router.post('/', writeLimit, asyncHandler(async (req, res) => {
     created_at: new Date().toISOString(),
   };
 
-  buildEntries.create(entry);
-  res.status(201).json(parseMetadata(entry));
+  await buildEntries.create(entry);
+  res.status(201).json(entry);
 }));
 
 router.patch('/:entryId', writeLimit, asyncHandler(async (req, res) => {
@@ -89,7 +81,7 @@ router.patch('/:entryId', writeLimit, asyncHandler(async (req, res) => {
   }
 
   const { projectId, entryId } = req.params;
-  const entry = buildEntries.findById(entryId);
+  const entry = await buildEntries.findById(entryId);
   if (!entry) throw AppError.notFound('Entry not found');
 
   if (entry.project_id !== projectId) {
@@ -111,12 +103,12 @@ router.patch('/:entryId', writeLimit, asyncHandler(async (req, res) => {
     }
     updates.entry_type = entry_type;
   }
-  if (is_public !== undefined) updates.is_public = is_public ? 1 : 0;
+  if (is_public !== undefined) updates.is_public = !!is_public;
 
-  buildEntries.update(entryId, updates);
+  await buildEntries.update(entryId, updates);
 
-  const updated = buildEntries.findById(entryId);
-  res.json(parseMetadata(updated));
+  const updated = await buildEntries.findById(entryId);
+  res.json(updated);
 }));
 
 router.delete('/:entryId', writeLimit, asyncHandler(async (req, res) => {
@@ -125,7 +117,7 @@ router.delete('/:entryId', writeLimit, asyncHandler(async (req, res) => {
   }
 
   const { projectId, entryId } = req.params;
-  const entry = buildEntries.findById(entryId);
+  const entry = await buildEntries.findById(entryId);
   if (!entry) throw AppError.notFound('Entry not found');
 
   if (entry.project_id !== projectId) {
@@ -135,7 +127,7 @@ router.delete('/:entryId', writeLimit, asyncHandler(async (req, res) => {
     throw AppError.forbidden('Forbidden');
   }
 
-  buildEntries.delete(entryId);
+  await buildEntries.delete(entryId);
   res.json({ deleted: true });
 }));
 
@@ -145,26 +137,20 @@ router.post('/generate-context', generateLimit, asyncHandler(async (req, res) =>
   }
 
   const { projectId } = req.params;
-  const project = deployments.findById(projectId);
+  const project = await deployments.findById(projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
 
-  const entries = buildEntries.findByProjectId(projectId);
+  const entries = await buildEntries.findByProjectId(projectId);
   if (entries.length === 0) {
     throw AppError.badRequest('No build entries found. Add some entries before generating context.');
   }
 
-  let stackInfo = project.stack_info;
-  if (stackInfo && typeof stackInfo === 'string') {
-    try { stackInfo = JSON.parse(stackInfo); } catch {}
-  }
+  const stackInfo = project.stack_info;
 
   const entrySummary = entries.map((e) => {
-    let meta = e.metadata;
-    if (meta && typeof meta === 'string') {
-      try { meta = JSON.parse(meta); } catch {}
-    }
+    const meta = e.metadata;
     return `[${e.entry_type}] ${e.title ? e.title + ': ' : ''}${e.content}${meta ? ' | metadata: ' + JSON.stringify(meta) : ''} (${e.created_at})`;
   }).join('\n');
 

@@ -57,9 +57,6 @@ COPY app/package.json app/package.json
 # Copy built client from builder stage
 COPY --from=builder /app/app/client/dist app/client/dist
 
-# Create data directory for SQLite (mount a volume here for persistence)
-RUN mkdir -p app/server/data
-
 ENV NODE_ENV=production
 ENV PORT=3001
 
@@ -69,4 +66,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD node -e "fetch((process.env.API_URL || 'http://localhost:' + (process.env.PORT || 3001)) + '/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 WORKDIR /app/app
-CMD ["node", "server/app.js"]
+# Run migrations before starting the server (idempotent — skips already applied)
+CMD ["sh", "-c", "node server/lib/migrate.js && node server/app.js"]

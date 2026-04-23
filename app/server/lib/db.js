@@ -1,317 +1,304 @@
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const crypto = require('crypto');
-const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'takeoff.db');
+// ── Connection & pool ─────────────────────────────────────────────
 
-let db;
+let pool;
 
 function getDb() {
-  if (db) return db;
-
-  const fs = require('fs');
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS reviews (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL CHECK(type IN ('pr', 'repo')),
-      repo_url TEXT NOT NULL,
-      owner TEXT NOT NULL,
-      repo TEXT NOT NULL,
-      pr_number INTEGER,
-      branch TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'completed', 'failed')),
-      ai_report TEXT,
-      human_notes TEXT,
-      error TEXT,
-      created_at TEXT NOT NULL,
-      completed_at TEXT,
-      user_id TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS review_files (
-      id TEXT PRIMARY KEY,
-      review_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      diff TEXT,
-      ai_comments TEXT,
-      human_comments TEXT,
-      severity TEXT CHECK(severity IN ('critical', 'warning', 'info', 'ok')),
-      FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS fix_prompts (
-      id TEXT PRIMARY KEY,
-      short_id TEXT NOT NULL UNIQUE,
-      review_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      line_start INTEGER,
-      line_end INTEGER,
-      issue_category TEXT,
-      issue_title TEXT NOT NULL,
-      issue_description TEXT NOT NULL,
-      severity TEXT,
-      code_snippet TEXT,
-      reference_file_path TEXT,
-      reference_snippet TEXT,
-      related_files TEXT,
-      full_prompt TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS fix_prompt_events (
-      id TEXT PRIMARY KEY,
-      fix_prompt_id TEXT NOT NULL,
-      event_type TEXT NOT NULL CHECK(event_type IN ('page_view', 'copy_prompt', 'deeplink_click', 'feedback_up', 'feedback_down')),
-      deeplink_target TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (fix_prompt_id) REFERENCES fix_prompts(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS analyses (
-      id TEXT PRIMARY KEY,
-      repo_url TEXT NOT NULL,
-      owner TEXT NOT NULL,
-      repo TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      analysis TEXT,
-      context_files TEXT,
-      completion_pct INTEGER,
-      created_at TEXT NOT NULL,
-      completed_at TEXT,
-      user_id TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS deployments (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      repo_url TEXT NOT NULL,
-      owner TEXT NOT NULL,
-      repo TEXT NOT NULL,
-      branch TEXT DEFAULT 'main',
-      framework TEXT,
-      deploy_type TEXT,
-      stack_info TEXT,
-      build_plan TEXT,
-      readiness_score INTEGER,
-      readiness_categories TEXT,
-      plan_steps TEXT,
-      recommendation TEXT,
-      railway_project_id TEXT,
-      railway_service_id TEXT,
-      railway_environment_id TEXT,
-      railway_deployment_id TEXT,
-      railway_domain TEXT,
-      status TEXT NOT NULL DEFAULT 'pending'
-        CHECK(status IN ('pending','analyzing','scored','planning','ready',
-                         'deploying','building','live','failed','stopped')),
-      live_url TEXT,
-      error TEXT,
-      build_logs TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT,
-      deployed_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS build_entries (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      entry_type TEXT NOT NULL
-        CHECK(entry_type IN ('prompt','note','decision','milestone','deploy_event','file')),
-      title TEXT,
-      content TEXT NOT NULL,
-      metadata TEXT,
-      is_public INTEGER DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT,
-      sort_order INTEGER DEFAULT 0,
-      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS project_services (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      service_type TEXT NOT NULL CHECK(service_type IN ('supabase', 'railway', 'vercel', 'github')),
-      external_id TEXT,
-      config TEXT DEFAULT '{}',
-      synced_at TEXT,
-      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS project_events (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      event TEXT NOT NULL,
-      path TEXT,
-      referrer TEXT,
-      device TEXT,
-      session_id TEXT,
-      metadata TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_project_events_project ON project_events(project_id);
-    CREATE INDEX IF NOT EXISTS idx_project_events_event ON project_events(event);
-    CREATE INDEX IF NOT EXISTS idx_project_events_created ON project_events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_project_events_session ON project_events(project_id, session_id);
-
-    CREATE TABLE IF NOT EXISTS suggestions (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('bug', 'fix', 'feature', 'idea', 'perf')),
-      category TEXT NOT NULL,
-      priority TEXT NOT NULL CHECK(priority IN ('critical', 'high', 'medium', 'low')),
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      evidence TEXT,
-      effort TEXT,
-      context_file TEXT,
-      cursor_prompt TEXT,
-      affected_files TEXT,
-      related_docs TEXT,
-      status TEXT DEFAULT 'open' CHECK(status IN ('open', 'dismissed', 'done')),
-      source TEXT NOT NULL CHECK(source IN ('static', 'ai')),
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_suggestions_project ON suggestions(project_id);
-    CREATE INDEX IF NOT EXISTS idx_suggestions_priority ON suggestions(project_id, priority);
-  `);
-
-  // Migrate existing databases
-  try { db.exec('ALTER TABLE reviews ADD COLUMN user_id TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE analyses ADD COLUMN user_id TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE analyses ADD COLUMN features_summary TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN readiness_score INTEGER'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN readiness_categories TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN plan_steps TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN recommendation TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN description TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN analysis_data TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN features_summary TEXT'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN slug TEXT'); } catch (_) {}
-  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_deployments_slug ON deployments(slug)'); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN social_summary TEXT'); } catch (_) {}
-  try { db.exec(`ALTER TABLE deployments ADD COLUMN env_vars TEXT DEFAULT '{}'`); } catch (_) {}
-  try { db.exec('ALTER TABLE deployments ADD COLUMN suggestions_count INTEGER DEFAULT 0'); } catch (_) {}
-
-  return db;
+  if (pool) return pool;
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is not set — cannot connect to Postgres');
+  }
+  pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false },
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+  pool.on('error', (err) => {
+    console.error('Unexpected pg pool error:', err);
+  });
+  return pool;
 }
 
-function safeParseArr(str) {
-  if (!str) return [];
-  try { return JSON.parse(str); } catch { return []; }
+async function closeDb() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
 }
+
+async function withTransaction(fn) {
+  const client = await getDb().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// ── JSONB / boolean helpers ────────────────────────────────────────
+//
+// Defensive: pg serializes JS objects/arrays into JSONB natively. But some
+// callers still pre-stringify (legacy from the SQLite era). If we get a
+// string, try to parse; if that fails, wrap under { raw } so the insert
+// doesn't blow up on invalid JSONB literals. Remove the shim once every
+// caller has been cleaned up.
+
+// Serializes values for JSONB columns. Must return either `null` or a JSON-text
+// string. We cannot return a JS array unchanged — pg-node would encode it as a
+// Postgres array literal (`{a,b}`) which Postgres cannot parse as JSONB. We
+// also can't return plain JS objects unchanged for consistency, so everything
+// that isn't null/undefined gets serialized here.
+function toJsonb(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string') {
+    try {
+      JSON.parse(value);
+      return value;
+    } catch (_e) {
+      console.warn('[db] toJsonb: received non-JSON string, wrapping in { raw } shim');
+      return JSON.stringify({ raw: value });
+    }
+  }
+  return JSON.stringify(value);
+}
+
+function toBool(value) {
+  if (value === undefined || value === null) return null;
+  return !!value;
+}
+
+// Columns that are JSONB in the live schema. Used by dynamic update builders
+// so we coerce only those fields through toJsonb. Everything else is passed
+// through untouched.
+// NOTE: features_summary was JSONB historically but is TEXT as of migration
+// 004_schema_fixes.sql — the app writes free-form markdown, not JSON. Do NOT
+// add it back to these sets or toJsonb will wrap the string in { raw: "..." }.
+const DEPLOYMENTS_JSONB = new Set([
+  'stack_info', 'build_plan', 'readiness_categories', 'plan_steps',
+  'analysis_data', 'env_vars',
+]);
+const ANALYSES_JSONB = new Set(['analysis', 'context_files']);
+const BUILD_ENTRIES_JSONB = new Set(['metadata']);
+
+// ── Dynamic UPDATE helper ─────────────────────────────────────────
+
+function buildUpdate(table, id, fields, { allowed, jsonb, boolCols } = {}) {
+  const sets = [];
+  const params = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (allowed && !allowed.has(key)) {
+      console.warn(`[db] buildUpdate(${table}): ignoring unknown column "${key}"`);
+      continue;
+    }
+    let v = value;
+    if (jsonb && jsonb.has(key)) v = toJsonb(value);
+    else if (boolCols && boolCols.has(key)) v = toBool(value);
+    params.push(v);
+    sets.push(`${key} = $${params.length}`);
+  }
+  if (sets.length === 0) return null;
+  params.push(id);
+  return {
+    sql: `UPDATE ${table} SET ${sets.join(', ')} WHERE id = $${params.length}`,
+    params,
+  };
+}
+
+// ── Reviews ───────────────────────────────────────────────────────
 
 const reviews = {
-  create(review) {
-    const d = getDb();
-    d.prepare(`INSERT INTO reviews (id, type, repo_url, owner, repo, pr_number, branch, status, created_at, user_id)
-      VALUES (@id, @type, @repo_url, @owner, @repo, @pr_number, @branch, @status, @created_at, @user_id)`).run({
-      ...review,
-      user_id: review.user_id || null,
-    });
+  async create(review) {
+    const params = [
+      review.id,
+      review.type,
+      review.repo_url,
+      review.owner,
+      review.repo,
+      review.pr_number ?? null,
+      review.branch ?? null,
+      review.status,
+      review.created_at,
+      review.user_id || null,
+    ];
+    await getDb().query(
+      `INSERT INTO reviews (id, type, repo_url, owner, repo, pr_number, branch, status, created_at, user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      params
+    );
     return review;
   },
-  findById(id) {
-    return getDb().prepare('SELECT * FROM reviews WHERE id = ?').get(id);
+  async findById(id) {
+    const { rows } = await getDb().query('SELECT * FROM reviews WHERE id = $1', [id]);
+    return rows[0] || null;
   },
-  list({ limit = 20, offset = 0, userId = null } = {}) {
+  async list({ limit = 20, offset = 0, userId = null } = {}) {
     if (userId) {
-      return getDb().prepare('SELECT * FROM reviews WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(userId, limit, offset);
+      const { rows } = await getDb().query(
+        'SELECT * FROM reviews WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+        [userId, limit, offset]
+      );
+      return rows;
     }
-    return getDb().prepare('SELECT * FROM reviews ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset);
+    const { rows } = await getDb().query(
+      'SELECT * FROM reviews ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    return rows;
   },
-  updateStatus(id, status, extra = {}) {
-    const d = getDb();
-    const sets = ['status = @status'];
-    const params = { id, status };
+  async updateStatus(id, status, extra = {}) {
+    const sets = [];
+    const params = [];
+    params.push(status);
+    sets.push(`status = $${params.length}`);
     if (extra.ai_report !== undefined) {
-      sets.push('ai_report = @ai_report');
-      params.ai_report = typeof extra.ai_report === 'string' ? extra.ai_report : JSON.stringify(extra.ai_report);
+      params.push(toJsonb(extra.ai_report));
+      sets.push(`ai_report = $${params.length}`);
     }
     if (extra.error !== undefined) {
-      sets.push('error = @error');
-      params.error = extra.error;
+      params.push(extra.error);
+      sets.push(`error = $${params.length}`);
     }
     if (status === 'completed') {
-      sets.push('completed_at = @completed_at');
-      params.completed_at = new Date().toISOString();
+      params.push(new Date().toISOString());
+      sets.push(`completed_at = $${params.length}`);
     }
-    d.prepare(`UPDATE reviews SET ${sets.join(', ')} WHERE id = @id`).run(params);
-  },
-  updateHumanNotes(id, notes) {
-    getDb().prepare('UPDATE reviews SET human_notes = ? WHERE id = ?').run(
-      typeof notes === 'string' ? notes : JSON.stringify(notes), id
+    params.push(id);
+    await getDb().query(
+      `UPDATE reviews SET ${sets.join(', ')} WHERE id = $${params.length}`,
+      params
     );
   },
+  async updateHumanNotes(id, notes) {
+    // human_notes remains TEXT in the schema
+    const value = typeof notes === 'string' ? notes : JSON.stringify(notes);
+    await getDb().query('UPDATE reviews SET human_notes = $1 WHERE id = $2', [value, id]);
+  },
 };
+
+// ── Review Files ──────────────────────────────────────────────────
 
 const reviewFiles = {
-  create(file) {
-    getDb().prepare(`INSERT INTO review_files (id, review_id, file_path, diff, ai_comments, severity)
-      VALUES (@id, @review_id, @file_path, @diff, @ai_comments, @severity)`).run({
-      ...file,
-      ai_comments: typeof file.ai_comments === 'string' ? file.ai_comments : JSON.stringify(file.ai_comments),
-    });
+  async create(file) {
+    await getDb().query(
+      `INSERT INTO review_files (id, review_id, file_path, diff, ai_comments, severity)
+        VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        file.id,
+        file.review_id,
+        file.file_path,
+        file.diff ?? null,
+        toJsonb(file.ai_comments),
+        file.severity ?? null,
+      ]
+    );
     return file;
   },
-  findByReviewId(reviewId) {
-    return getDb().prepare('SELECT * FROM review_files WHERE review_id = ? ORDER BY file_path').all(reviewId);
+  async findByReviewId(reviewId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM review_files WHERE review_id = $1 ORDER BY file_path',
+      [reviewId]
+    );
+    return rows;
   },
-  updateHumanComments(id, comments) {
-    getDb().prepare('UPDATE review_files SET human_comments = ? WHERE id = ?').run(
-      typeof comments === 'string' ? comments : JSON.stringify(comments), id
+  async updateHumanComments(id, comments) {
+    await getDb().query(
+      'UPDATE review_files SET human_comments = $1 WHERE id = $2',
+      [toJsonb(comments), id]
     );
   },
-  updateAiComments(id, comments, severity) {
-    getDb().prepare('UPDATE review_files SET ai_comments = ?, severity = ? WHERE id = ?').run(
-      typeof comments === 'string' ? comments : JSON.stringify(comments), severity || null, id
+  async updateAiComments(id, comments, severity) {
+    await getDb().query(
+      'UPDATE review_files SET ai_comments = $1, severity = $2 WHERE id = $3',
+      [toJsonb(comments), severity || null, id]
     );
   },
 };
+
+// ── Fix Prompts ───────────────────────────────────────────────────
 
 const fixPrompts = {
-  create(prompt) {
-    getDb().prepare(`INSERT INTO fix_prompts (id, short_id, review_id, file_path, line_start, line_end,
-      issue_category, issue_title, issue_description, severity, code_snippet,
-      reference_file_path, reference_snippet, related_files, full_prompt, created_at, expires_at)
-      VALUES (@id, @short_id, @review_id, @file_path, @line_start, @line_end,
-      @issue_category, @issue_title, @issue_description, @severity, @code_snippet,
-      @reference_file_path, @reference_snippet, @related_files, @full_prompt, @created_at, @expires_at)`).run({
-      ...prompt,
-      related_files: typeof prompt.related_files === 'string' ? prompt.related_files : JSON.stringify(prompt.related_files || []),
-    });
+  async create(prompt) {
+    await getDb().query(
+      `INSERT INTO fix_prompts (id, short_id, review_id, file_path, line_start, line_end,
+        issue_category, issue_title, issue_description, severity, code_snippet,
+        reference_file_path, reference_snippet, related_files, full_prompt, created_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      [
+        prompt.id,
+        prompt.short_id,
+        prompt.review_id,
+        prompt.file_path,
+        prompt.line_start ?? null,
+        prompt.line_end ?? null,
+        prompt.issue_category ?? null,
+        prompt.issue_title,
+        prompt.issue_description,
+        prompt.severity ?? null,
+        prompt.code_snippet ?? null,
+        prompt.reference_file_path ?? null,
+        prompt.reference_snippet ?? null,
+        toJsonb(prompt.related_files ?? []),
+        prompt.full_prompt,
+        prompt.created_at,
+        prompt.expires_at,
+      ]
+    );
     return prompt;
   },
-  findByShortId(shortId) {
-    return getDb().prepare('SELECT * FROM fix_prompts WHERE short_id = ? AND expires_at > ?').get(shortId, new Date().toISOString());
+  async findByShortId(shortId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM fix_prompts WHERE short_id = $1 AND expires_at > $2',
+      [shortId, new Date().toISOString()]
+    );
+    return rows[0] || null;
   },
-  findByReviewId(reviewId) {
-    return getDb().prepare('SELECT * FROM fix_prompts WHERE review_id = ? ORDER BY file_path, line_start').all(reviewId);
+  async findByReviewId(reviewId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM fix_prompts WHERE review_id = $1 ORDER BY file_path, line_start',
+      [reviewId]
+    );
+    return rows;
   },
-  shortIdExists(shortId) {
-    return !!getDb().prepare('SELECT 1 FROM fix_prompts WHERE short_id = ?').get(shortId);
+  async shortIdExists(shortId) {
+    const { rows } = await getDb().query(
+      'SELECT 1 FROM fix_prompts WHERE short_id = $1',
+      [shortId]
+    );
+    return rows.length > 0;
   },
 };
 
+// ── Fix Prompt Events ─────────────────────────────────────────────
+
 const fixPromptEvents = {
-  create(event) {
-    getDb().prepare(`INSERT INTO fix_prompt_events (id, fix_prompt_id, event_type, deeplink_target, created_at)
-      VALUES (@id, @fix_prompt_id, @event_type, @deeplink_target, @created_at)`).run(event);
+  async create(event) {
+    await getDb().query(
+      `INSERT INTO fix_prompt_events (id, fix_prompt_id, event_type, deeplink_target, created_at)
+        VALUES ($1, $2, $3, $4, $5)`,
+      [
+        event.id,
+        event.fix_prompt_id,
+        event.event_type,
+        event.deeplink_target ?? null,
+        event.created_at,
+      ]
+    );
     return event;
   },
 };
 
-// ── Deployments ──
+// ── Deployments ───────────────────────────────────────────────────
 
 const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'status', 'owner', 'repo', 'branch', 'framework', 'deploy_type', 'stack_info',
@@ -324,233 +311,314 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
 ]);
 
 const deployments = {
-  create(deployment) {
-    getDb().prepare(`INSERT INTO deployments (id, user_id, repo_url, owner, repo, branch, status, created_at)
-      VALUES (@id, @user_id, @repo_url, @owner, @repo, @branch, @status, @created_at)`).run({
+  async create(deployment) {
+    const d = {
       branch: 'main',
       user_id: null,
       ...deployment,
-    });
+    };
+    await getDb().query(
+      `INSERT INTO deployments (id, user_id, repo_url, owner, repo, branch, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [d.id, d.user_id, d.repo_url, d.owner, d.repo, d.branch, d.status, d.created_at]
+    );
     return deployment;
   },
-  findById(id) {
-    return getDb().prepare('SELECT * FROM deployments WHERE id = ?').get(id);
+  async findById(id) {
+    const { rows } = await getDb().query('SELECT * FROM deployments WHERE id = $1', [id]);
+    return rows[0] || null;
   },
-  findBySlug(slug) {
-    return getDb().prepare('SELECT * FROM deployments WHERE slug = ?').get(slug);
+  async findBySlug(slug) {
+    const { rows } = await getDb().query('SELECT * FROM deployments WHERE slug = $1', [slug]);
+    return rows[0] || null;
   },
-  findByUserId(userId, { limit = 20, offset = 0 } = {}) {
-    return getDb().prepare(
-      'SELECT * FROM deployments WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-    ).all(userId, limit, offset);
+  async findByUserId(userId, { limit = 20, offset = 0 } = {}) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      [userId, limit, offset]
+    );
+    return rows;
   },
-  update(id, fields) {
-    const d = getDb();
-    const sets = [];
-    const params = { id };
-    for (const [key, value] of Object.entries(fields)) {
-      if (!DEPLOYMENTS_ALLOWED_COLUMNS.has(key)) continue;
-      sets.push(`${key} = @${key}`);
-      params[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
-    }
-    if (sets.length > 0) {
-      d.prepare(`UPDATE deployments SET ${sets.join(', ')} WHERE id = @id`).run(params);
-    }
+  async update(id, fields) {
+    const built = buildUpdate('deployments', id, fields, {
+      allowed: DEPLOYMENTS_ALLOWED_COLUMNS,
+      jsonb: DEPLOYMENTS_JSONB,
+    });
+    if (!built) return;
+    await getDb().query(built.sql, built.params);
   },
-  delete(id) {
-    getDb().prepare('DELETE FROM deployments WHERE id = ?').run(id);
+  async delete(id) {
+    await getDb().query('DELETE FROM deployments WHERE id = $1', [id]);
   },
-  countUserDeployments(userId) {
-    const row = getDb().prepare(
-      "SELECT COUNT(*) as count FROM deployments WHERE user_id = ? AND status IN ('live', 'building', 'deploying')"
-    ).get(userId);
-    return row.count;
+  async countUserDeployments(userId) {
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*)::int AS count FROM deployments
+        WHERE user_id = $1 AND status IN ('live', 'building', 'deploying')`,
+      [userId]
+    );
+    return rows[0] ? rows[0].count : 0;
   },
-  countUserActiveBuilds(userId) {
-    const row = getDb().prepare(
-      "SELECT COUNT(*) as count FROM deployments WHERE user_id = ? AND status IN ('building', 'deploying')"
-    ).get(userId);
-    return row.count;
+  async countUserActiveBuilds(userId) {
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*)::int AS count FROM deployments
+        WHERE user_id = $1 AND status IN ('building', 'deploying')`,
+      [userId]
+    );
+    return rows[0] ? rows[0].count : 0;
   },
 };
 
-// ── Build Entries (BuildStory) ──
+// ── Build Entries ─────────────────────────────────────────────────
+
+const BUILD_ENTRIES_ALLOWED = new Set([
+  'title', 'content', 'metadata', 'is_public', 'updated_at', 'sort_order', 'entry_type',
+]);
+const BUILD_ENTRIES_BOOL = new Set(['is_public']);
 
 const buildEntries = {
-  create(entry) {
+  async create(entry) {
     const prepared = {
-      is_public: 0,
+      is_public: false,
       sort_order: 0,
       ...entry,
-      metadata: entry.metadata && typeof entry.metadata === 'object'
-        ? JSON.stringify(entry.metadata) : (entry.metadata || null),
     };
-    getDb().prepare(`INSERT INTO build_entries
-      (id, project_id, user_id, entry_type, title, content, metadata, is_public, created_at, sort_order)
-      VALUES (@id, @project_id, @user_id, @entry_type, @title, @content, @metadata, @is_public, @created_at, @sort_order)`).run(prepared);
+    await getDb().query(
+      `INSERT INTO build_entries
+        (id, project_id, user_id, entry_type, title, content, metadata, is_public, created_at, sort_order)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        prepared.id,
+        prepared.project_id,
+        prepared.user_id,
+        prepared.entry_type,
+        prepared.title ?? null,
+        prepared.content,
+        toJsonb(prepared.metadata),
+        toBool(prepared.is_public),
+        prepared.created_at,
+        prepared.sort_order ?? 0,
+      ]
+    );
     return entry;
   },
-  findByProjectId(projectId, { limit = 100, offset = 0 } = {}) {
-    return getDb().prepare(
-      'SELECT * FROM build_entries WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC LIMIT ? OFFSET ?'
-    ).all(projectId, limit, offset);
+  async findByProjectId(projectId, { limit = 100, offset = 0 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM build_entries WHERE project_id = $1
+        ORDER BY sort_order ASC, created_at ASC LIMIT $2 OFFSET $3`,
+      [projectId, limit, offset]
+    );
+    return rows;
   },
-  findPublicByProjectId(projectId) {
-    return getDb().prepare(
-      'SELECT * FROM build_entries WHERE project_id = ? AND is_public = 1 ORDER BY sort_order ASC, created_at ASC'
-    ).all(projectId);
+  async findPublicByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM build_entries WHERE project_id = $1 AND is_public = TRUE
+        ORDER BY sort_order ASC, created_at ASC`,
+      [projectId]
+    );
+    return rows;
   },
-  findById(id) {
-    return getDb().prepare('SELECT * FROM build_entries WHERE id = ?').get(id);
+  async findById(id) {
+    const { rows } = await getDb().query('SELECT * FROM build_entries WHERE id = $1', [id]);
+    return rows[0] || null;
   },
-  update(id, fields) {
-    const d = getDb();
-    const allowed = new Set(['title', 'content', 'metadata', 'is_public', 'updated_at', 'sort_order', 'entry_type']);
-    const sets = [];
-    const params = { id };
-    for (const [key, value] of Object.entries(fields)) {
-      if (!allowed.has(key)) continue;
-      sets.push(`${key} = @${key}`);
-      params[key] = typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
-    }
-    if (sets.length > 0) {
-      d.prepare(`UPDATE build_entries SET ${sets.join(', ')} WHERE id = @id`).run(params);
-    }
+  async update(id, fields) {
+    const built = buildUpdate('build_entries', id, fields, {
+      allowed: BUILD_ENTRIES_ALLOWED,
+      jsonb: BUILD_ENTRIES_JSONB,
+      boolCols: BUILD_ENTRIES_BOOL,
+    });
+    if (!built) return;
+    await getDb().query(built.sql, built.params);
   },
-  delete(id) {
-    getDb().prepare('DELETE FROM build_entries WHERE id = ?').run(id);
+  async delete(id) {
+    await getDb().query('DELETE FROM build_entries WHERE id = $1', [id]);
   },
 };
 
-// ── Project Services ──
+// ── Project Services ──────────────────────────────────────────────
 
 const projectServices = {
-  create(data) {
-    const d = getDb();
+  async create(data) {
     const id = crypto.randomUUID();
-    d.prepare(
-      'INSERT INTO project_services (id, project_id, service_type, external_id, config) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, data.project_id, data.service_type, data.external_id || null, JSON.stringify(data.config || {}));
+    await getDb().query(
+      `INSERT INTO project_services (id, project_id, service_type, external_id, config)
+        VALUES ($1, $2, $3, $4, $5)`,
+      [
+        id,
+        data.project_id,
+        data.service_type,
+        data.external_id || null,
+        toJsonb(data.config || {}),
+      ]
+    );
     return { id, ...data };
   },
-  findByProject(projectId) {
-    return getDb().prepare('SELECT * FROM project_services WHERE project_id = ?').all(projectId);
+  async findByProject(projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_services WHERE project_id = $1',
+      [projectId]
+    );
+    return rows;
   },
-  update(id, data) {
+  async update(id, data) {
     const sets = [];
-    const vals = [];
-    if (data.external_id !== undefined) { sets.push('external_id = ?'); vals.push(data.external_id); }
-    if (data.config !== undefined) { sets.push('config = ?'); vals.push(JSON.stringify(data.config)); }
-    if (data.synced_at !== undefined) { sets.push('synced_at = ?'); vals.push(data.synced_at); }
+    const params = [];
+    if (data.external_id !== undefined) {
+      params.push(data.external_id);
+      sets.push(`external_id = $${params.length}`);
+    }
+    if (data.config !== undefined) {
+      params.push(toJsonb(data.config));
+      sets.push(`config = $${params.length}`);
+    }
+    if (data.synced_at !== undefined) {
+      params.push(data.synced_at);
+      sets.push(`synced_at = $${params.length}`);
+    }
     if (sets.length === 0) return;
-    vals.push(id);
-    getDb().prepare(`UPDATE project_services SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    params.push(id);
+    await getDb().query(
+      `UPDATE project_services SET ${sets.join(', ')} WHERE id = $${params.length}`,
+      params
+    );
   },
-  delete(id) {
-    getDb().prepare('DELETE FROM project_services WHERE id = ?').run(id);
+  async delete(id) {
+    await getDb().query('DELETE FROM project_services WHERE id = $1', [id]);
   },
 };
 
-// ── Project Events (Analytics) ──
+// ── Project Events (Analytics) ────────────────────────────────────
 
 const projectEvents = {
-  create(event) {
-    getDb().prepare(`INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
-      VALUES (@id, @project_id, @event, @path, @referrer, @device, @session_id, @metadata, @created_at)`).run({
-      ...event,
-      metadata: event.metadata && typeof event.metadata === 'object'
-        ? JSON.stringify(event.metadata) : (event.metadata || null),
-    });
+  async create(event) {
+    await getDb().query(
+      `INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        event.id,
+        event.project_id,
+        event.event,
+        event.path ?? null,
+        event.referrer ?? null,
+        event.device ?? null,
+        event.session_id ?? null,
+        toJsonb(event.metadata),
+        event.created_at,
+      ]
+    );
     return event;
   },
 
-  createBatch(events) {
-    const d = getDb();
-    const stmt = d.prepare(`INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
-      VALUES (@id, @project_id, @event, @path, @referrer, @device, @session_id, @metadata, @created_at)`);
-    const tx = d.transaction((rows) => {
-      for (const row of rows) {
-        stmt.run({
-          ...row,
-          metadata: row.metadata && typeof row.metadata === 'object'
-            ? JSON.stringify(row.metadata) : (row.metadata || null),
-        });
+  async createBatch(events) {
+    if (!events || events.length === 0) return;
+    await withTransaction(async (client) => {
+      for (const row of events) {
+        await client.query(
+          `INSERT INTO project_events (id, project_id, event, path, referrer, device, session_id, metadata, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            row.id,
+            row.project_id,
+            row.event,
+            row.path ?? null,
+            row.referrer ?? null,
+            row.device ?? null,
+            row.session_id ?? null,
+            toJsonb(row.metadata),
+            row.created_at,
+          ]
+        );
       }
     });
-    tx(events);
   },
 
-  findByProjectId(projectId, { event, since, limit = 100 } = {}) {
-    const conditions = ['project_id = ?'];
+  async findByProjectId(projectId, { event, since, limit = 100 } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (event) { conditions.push('event = ?'); params.push(event); }
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
+    if (event) { params.push(event); conditions.push(`event = $${params.length}`); }
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
     params.push(limit);
-    return getDb().prepare(
-      `SELECT * FROM project_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`
-    ).all(...params);
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_events WHERE ${conditions.join(' AND ')}
+        ORDER BY created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    return rows;
   },
 
-  countByProject(projectId, { event, since } = {}) {
-    const conditions = ['project_id = ?'];
+  async countByProject(projectId, { event, since } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (event) { conditions.push('event = ?'); params.push(event); }
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
-    const row = getDb().prepare(
-      `SELECT COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')}`
-    ).get(...params);
-    return row.count;
+    if (event) { params.push(event); conditions.push(`event = $${params.length}`); }
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*)::int AS count FROM project_events WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return rows[0] ? rows[0].count : 0;
   },
 
-  aggregateByPath(projectId, { since } = {}) {
-    const conditions = ['project_id = ?'];
+  async aggregateByPath(projectId, { since } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
-    return getDb().prepare(
-      `SELECT path, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY path ORDER BY count DESC`
-    ).all(...params);
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
+    const { rows } = await getDb().query(
+      `SELECT path, COUNT(*)::int AS count FROM project_events WHERE ${conditions.join(' AND ')}
+        GROUP BY path ORDER BY count DESC`,
+      params
+    );
+    return rows;
   },
 
-  aggregateByReferrer(projectId, { since } = {}) {
-    const conditions = ['project_id = ?'];
+  async aggregateByReferrer(projectId, { since } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
-    return getDb().prepare(
-      `SELECT referrer, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY referrer ORDER BY count DESC`
-    ).all(...params);
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
+    const { rows } = await getDb().query(
+      `SELECT referrer, COUNT(*)::int AS count FROM project_events WHERE ${conditions.join(' AND ')}
+        GROUP BY referrer ORDER BY count DESC`,
+      params
+    );
+    return rows;
   },
 
-  aggregateByEvent(projectId, { since } = {}) {
-    const conditions = ['project_id = ?'];
+  async aggregateByEvent(projectId, { since } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
-    return getDb().prepare(
-      `SELECT event, COUNT(*) as count FROM project_events WHERE ${conditions.join(' AND ')} GROUP BY event ORDER BY count DESC`
-    ).all(...params);
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
+    const { rows } = await getDb().query(
+      `SELECT event, COUNT(*)::int AS count FROM project_events WHERE ${conditions.join(' AND ')}
+        GROUP BY event ORDER BY count DESC`,
+      params
+    );
+    return rows;
   },
 
-  uniqueSessions(projectId, { since } = {}) {
-    const conditions = ['project_id = ?'];
+  async uniqueSessions(projectId, { since } = {}) {
+    const conditions = ['project_id = $1'];
     const params = [projectId];
-    if (since) { conditions.push('created_at >= ?'); params.push(since); }
-    const row = getDb().prepare(
-      `SELECT COUNT(DISTINCT session_id) as count FROM project_events WHERE ${conditions.join(' AND ')}`
-    ).get(...params);
-    return row.count;
+    if (since) { params.push(since); conditions.push(`created_at >= $${params.length}`); }
+    const { rows } = await getDb().query(
+      `SELECT COUNT(DISTINCT session_id)::int AS count FROM project_events WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return rows[0] ? rows[0].count : 0;
   },
 
-  overviewStats(projectId, { today, week, month }) {
-    const row = getDb().prepare(`
-      SELECT
-        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_today,
-        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_week,
-        COUNT(DISTINCT CASE WHEN created_at >= ? THEN session_id END) AS visitors_month,
-        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_today,
-        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_week,
-        SUM(CASE WHEN event = 'pageview' AND created_at >= ? THEN 1 ELSE 0 END) AS pageviews_month
+  async overviewStats(projectId, { today, week, month }) {
+    const { rows } = await getDb().query(
+      `SELECT
+        COUNT(DISTINCT CASE WHEN created_at >= $1 THEN session_id END)::int AS visitors_today,
+        COUNT(DISTINCT CASE WHEN created_at >= $2 THEN session_id END)::int AS visitors_week,
+        COUNT(DISTINCT CASE WHEN created_at >= $3 THEN session_id END)::int AS visitors_month,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= $4 THEN 1 ELSE 0 END)::int AS pageviews_today,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= $5 THEN 1 ELSE 0 END)::int AS pageviews_week,
+        SUM(CASE WHEN event = 'pageview' AND created_at >= $6 THEN 1 ELSE 0 END)::int AS pageviews_month
       FROM project_events
-      WHERE project_id = ?
-    `).get(today, week, month, today, week, month, projectId);
+      WHERE project_id = $7`,
+      [today, week, month, today, week, month, projectId]
+    );
+    const row = rows[0] || {};
     return {
       visitors: {
         today: row.visitors_today || 0,
@@ -566,116 +634,461 @@ const projectEvents = {
   },
 };
 
-// ── Suggestions ──
+// ── Suggestions ───────────────────────────────────────────────────
 
 const suggestions = {
-  createBatch(items) {
-    const d = getDb();
-    const stmt = d.prepare(`INSERT OR IGNORE INTO suggestions 
-      (id, project_id, type, category, priority, title, description, evidence, effort, cursor_prompt, affected_files, source, status, created_at)
-      VALUES (@id, @project_id, @type, @category, @priority, @title, @description, @evidence, @effort, @cursor_prompt, @affected_files, @source, @status, @created_at)`);
-    const tx = d.transaction((rows) => {
-      for (const row of rows) {
+  async createBatch(items) {
+    if (!items || items.length === 0) return;
+    await withTransaction(async (client) => {
+      for (const row of items) {
         const scopedId = row.project_id
           ? crypto.createHash('sha256').update(row.project_id + ':' + row.id).digest('hex').slice(0, 16)
           : row.id;
-        stmt.run({
-          ...row,
-          id: scopedId,
-          evidence: JSON.stringify(row.evidence || []),
-          affected_files: JSON.stringify(row.affected_files || []),
-          status: row.status || 'open',
-          created_at: row.created_at || new Date().toISOString(),
-        });
+        await client.query(
+          `INSERT INTO suggestions
+            (id, project_id, type, category, priority, title, description, evidence, effort,
+             cursor_prompt, affected_files, source, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (id) DO NOTHING`,
+          [
+            scopedId,
+            row.project_id,
+            row.type,
+            row.category,
+            row.priority,
+            row.title,
+            row.description,
+            toJsonb(row.evidence ?? []),
+            row.effort ?? null,
+            row.cursor_prompt ?? null,
+            toJsonb(row.affected_files ?? []),
+            row.source,
+            row.status || 'open',
+            row.created_at || new Date().toISOString(),
+          ]
+        );
       }
     });
-    tx(items);
   },
-  findByProjectId(projectId) {
-    const rows = getDb().prepare(
-      'SELECT * FROM suggestions WHERE project_id = ? ORDER BY CASE priority WHEN \'critical\' THEN 0 WHEN \'high\' THEN 1 WHEN \'medium\' THEN 2 WHEN \'low\' THEN 3 END, created_at DESC'
-    ).all(projectId);
-    return rows.map(r => ({
-      ...r,
-      evidence: safeParseArr(r.evidence),
-      affected_files: safeParseArr(r.affected_files),
-    }));
+  async findByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions WHERE project_id = $1
+        ORDER BY CASE priority
+          WHEN 'critical' THEN 0
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 3
+        END, created_at DESC`,
+      [projectId]
+    );
+    return rows;
   },
-  updateStatus(id, projectId, status) {
-    getDb().prepare('UPDATE suggestions SET status = ? WHERE id = ? AND project_id = ?').run(status, id, projectId);
+  async updateStatus(id, projectId, status) {
+    await getDb().query(
+      'UPDATE suggestions SET status = $1 WHERE id = $2 AND project_id = $3',
+      [status, id, projectId]
+    );
   },
-  deleteByProjectId(projectId) {
-    getDb().prepare('DELETE FROM suggestions WHERE project_id = ?').run(projectId);
+  async deleteByProjectId(projectId) {
+    await getDb().query('DELETE FROM suggestions WHERE project_id = $1', [projectId]);
   },
-  countByProjectId(projectId) {
-    const row = getDb().prepare(
-      `SELECT COUNT(*) as total,
-        COALESCE(SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END), 0) as critical,
-        COALESCE(SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END), 0) as high,
-        COALESCE(SUM(CASE WHEN priority = 'medium' THEN 1 ELSE 0 END), 0) as medium,
-        COALESCE(SUM(CASE WHEN priority = 'low' THEN 1 ELSE 0 END), 0) as low
-      FROM suggestions WHERE project_id = ? AND status = 'open'`
-    ).get(projectId);
-    return row;
+  async countByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*)::int AS total,
+        COALESCE(SUM(CASE WHEN priority = 'critical' THEN 1 ELSE 0 END), 0)::int AS critical,
+        COALESCE(SUM(CASE WHEN priority = 'high'     THEN 1 ELSE 0 END), 0)::int AS high,
+        COALESCE(SUM(CASE WHEN priority = 'medium'   THEN 1 ELSE 0 END), 0)::int AS medium,
+        COALESCE(SUM(CASE WHEN priority = 'low'      THEN 1 ELSE 0 END), 0)::int AS low
+        FROM suggestions WHERE project_id = $1 AND status = 'open'`,
+      [projectId]
+    );
+    return rows[0] || { total: 0, critical: 0, high: 0, medium: 0, low: 0 };
   },
-  summary(projectId) {
-    const rows = getDb().prepare(
-      'SELECT type, COUNT(*) as count FROM suggestions WHERE project_id = ? AND status = \'open\' GROUP BY type'
-    ).all(projectId);
+  async summary(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT type, COUNT(*)::int AS count FROM suggestions
+        WHERE project_id = $1 AND status = 'open' GROUP BY type`,
+      [projectId]
+    );
     const byType = {};
     for (const r of rows) byType[r.type] = r.count;
-    const counts = this.countByProjectId(projectId);
-    return { total: counts.total, byType, byPriority: { critical: counts.critical, high: counts.high, medium: counts.medium, low: counts.low } };
+    const counts = await this.countByProjectId(projectId);
+    return {
+      total: counts.total,
+      byType,
+      byPriority: {
+        critical: counts.critical,
+        high: counts.high,
+        medium: counts.medium,
+        low: counts.low,
+      },
+    };
   },
 };
 
-// ── Analyses ──
+// ── Analyses ──────────────────────────────────────────────────────
 
 const ANALYSES_ALLOWED_COLUMNS = new Set([
   'status', 'owner', 'repo', 'analysis', 'context_files', 'completion_pct', 'completed_at', 'user_id', 'features_summary',
+  'file_count', 'tree_total_bytes', 'tree_estimated_tokens', 'tree_truncated',
+  'ingested_file_count', 'ingested_bytes', 'ingested_tokens',
+  'llm_call_count', 'llm_input_tokens', 'llm_output_tokens', 'llm_cost_usd',
 ]);
+const ANALYSES_BOOL = new Set(['tree_truncated']);
 
 const analyses = {
-  create(analysis) {
-    getDb().prepare(`INSERT INTO analyses (id, repo_url, owner, repo, status, created_at, user_id)
-      VALUES (@id, @repo_url, @owner, @repo, @status, @created_at, @user_id)`).run({
-      ...analysis,
-      user_id: analysis.user_id || null,
-    });
+  async create(analysis) {
+    await getDb().query(
+      `INSERT INTO analyses (id, repo_url, owner, repo, status, created_at, user_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        analysis.id,
+        analysis.repo_url,
+        analysis.owner,
+        analysis.repo,
+        analysis.status,
+        analysis.created_at,
+        analysis.user_id || null,
+      ]
+    );
     return analysis;
   },
-  findById(id) {
-    return getDb().prepare('SELECT * FROM analyses WHERE id = ?').get(id);
+  async findById(id) {
+    const { rows } = await getDb().query('SELECT * FROM analyses WHERE id = $1', [id]);
+    return rows[0] || null;
   },
-  list({ limit = 20, offset = 0, userId = null } = {}) {
+  async list({ limit = 20, offset = 0, userId = null } = {}) {
     if (userId) {
-      return getDb().prepare('SELECT * FROM analyses WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(userId, limit, offset);
+      const { rows } = await getDb().query(
+        'SELECT * FROM analyses WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+        [userId, limit, offset]
+      );
+      return rows;
     }
-    return getDb().prepare('SELECT * FROM analyses ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset);
+    const { rows } = await getDb().query(
+      'SELECT * FROM analyses ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    return rows;
   },
-  update(id, fields) {
-    const d = getDb();
-    const sets = [];
-    const params = { id };
-    for (const [key, value] of Object.entries(fields)) {
-      if (!ANALYSES_ALLOWED_COLUMNS.has(key)) {
-        console.warn(`analyses.update: ignoring unknown column "${key}"`);
-        continue;
-      }
-      sets.push(`${key} = @${key}`);
-      params[key] = typeof value === 'object' ? JSON.stringify(value) : value;
-    }
-    if (sets.length > 0) {
-      d.prepare(`UPDATE analyses SET ${sets.join(', ')} WHERE id = @id`).run(params);
-    }
+  async update(id, fields) {
+    const built = buildUpdate('analyses', id, fields, {
+      allowed: ANALYSES_ALLOWED_COLUMNS,
+      jsonb: ANALYSES_JSONB,
+      boolCols: ANALYSES_BOOL,
+    });
+    if (!built) return;
+    await getDb().query(built.sql, built.params);
+  },
+  async setTreeStats(id, { file_count, tree_total_bytes, tree_estimated_tokens, tree_truncated }) {
+    await getDb().query(
+      `UPDATE analyses SET file_count = $1, tree_total_bytes = $2, tree_estimated_tokens = $3, tree_truncated = $4
+        WHERE id = $5`,
+      [
+        file_count == null ? null : file_count,
+        tree_total_bytes == null ? null : tree_total_bytes,
+        tree_estimated_tokens == null ? null : tree_estimated_tokens,
+        tree_truncated == null ? false : !!tree_truncated,
+        id,
+      ]
+    );
+  },
+  async incrementIngested(id, { files = 0, bytes = 0, tokens = 0 } = {}) {
+    await getDb().query(
+      `UPDATE analyses
+        SET ingested_file_count = COALESCE(ingested_file_count, 0) + $1,
+            ingested_bytes      = COALESCE(ingested_bytes, 0)      + $2,
+            ingested_tokens     = COALESCE(ingested_tokens, 0)     + $3
+        WHERE id = $4`,
+      [files || 0, bytes || 0, tokens || 0, id]
+    );
+  },
+  async incrementLlm(id, { calls = 1, input_tokens = 0, output_tokens = 0, cost_usd = 0 } = {}) {
+    await getDb().query(
+      `UPDATE analyses
+        SET llm_call_count    = COALESCE(llm_call_count, 0)    + $1,
+            llm_input_tokens  = COALESCE(llm_input_tokens, 0)  + $2,
+            llm_output_tokens = COALESCE(llm_output_tokens, 0) + $3,
+            llm_cost_usd      = COALESCE(llm_cost_usd, 0)      + $4
+        WHERE id = $5`,
+      [calls || 0, input_tokens || 0, output_tokens || 0, cost_usd || 0, id]
+    );
+  },
+  async getRollups(id) {
+    const { rows } = await getDb().query(
+      `SELECT file_count, tree_total_bytes, tree_estimated_tokens, tree_truncated,
+              ingested_file_count, ingested_bytes, ingested_tokens,
+              llm_call_count, llm_input_tokens, llm_output_tokens, llm_cost_usd
+        FROM analyses WHERE id = $1`,
+      [id]
+    );
+    return rows[0] || null;
   },
 };
 
-function closeDb() {
-  if (db) {
-    db.close();
-    db = null;
-  }
-}
+// ── Analysis Files ────────────────────────────────────────────────
 
-module.exports = { getDb, closeDb, reviews, reviewFiles, fixPrompts, fixPromptEvents, analyses, deployments, buildEntries, projectServices, projectEvents, suggestions };
+const analysisFiles = {
+  async upsert(row) {
+    const id = crypto.randomUUID();
+    const params = [
+      id,
+      row.analysis_id,
+      row.path,
+      row.sha ?? null,
+      row.size_bytes ?? 0,
+      row.language ?? null,
+      row.score ?? null,
+      row.depth ?? null,
+      row.tier ?? 'tree',
+      row.content ?? null,
+      row.skeleton ?? null,
+      row.content_tokens ?? null,
+      row.skeleton_tokens ?? null,
+      row.fetched_at ?? null,
+      row.skip_reason ?? null,
+    ];
+    // RETURNING * returns the existing row's id on conflict — critical fix
+    // for the "wrong id" bug flagged in prior review.
+    const { rows } = await getDb().query(
+      `INSERT INTO analysis_files
+        (id, analysis_id, path, sha, size_bytes, language, score, depth, tier,
+         content, skeleton, content_tokens, skeleton_tokens, fetched_at, skip_reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (analysis_id, path) DO UPDATE SET
+          tier            = COALESCE(EXCLUDED.tier,            analysis_files.tier),
+          content         = COALESCE(EXCLUDED.content,         analysis_files.content),
+          skeleton        = COALESCE(EXCLUDED.skeleton,        analysis_files.skeleton),
+          content_tokens  = COALESCE(EXCLUDED.content_tokens,  analysis_files.content_tokens),
+          skeleton_tokens = COALESCE(EXCLUDED.skeleton_tokens, analysis_files.skeleton_tokens),
+          fetched_at      = COALESCE(EXCLUDED.fetched_at,      analysis_files.fetched_at),
+          skip_reason     = COALESCE(EXCLUDED.skip_reason,     analysis_files.skip_reason),
+          sha             = COALESCE(EXCLUDED.sha,             analysis_files.sha),
+          size_bytes      = COALESCE(EXCLUDED.size_bytes,      analysis_files.size_bytes),
+          language        = COALESCE(EXCLUDED.language,        analysis_files.language),
+          score           = COALESCE(EXCLUDED.score,           analysis_files.score),
+          depth           = COALESCE(EXCLUDED.depth,           analysis_files.depth)
+        RETURNING *`,
+      params
+    );
+    return rows[0];
+  },
+
+  async bulkInsertTreeRows(analysisId, rows) {
+    if (!rows || rows.length === 0) return;
+    const BATCH = 500;
+    await withTransaction(async (client) => {
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const chunk = rows.slice(i, i + BATCH);
+        const values = [];
+        const placeholders = chunk.map((r, idx) => {
+          const base = idx * 8;
+          values.push(
+            crypto.randomUUID(),
+            analysisId,
+            r.path,
+            r.sha ?? null,
+            r.size_bytes ?? 0,
+            r.language ?? null,
+            r.score ?? null,
+            r.depth ?? null
+          );
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+        });
+        await client.query(
+          `INSERT INTO analysis_files
+            (id, analysis_id, path, sha, size_bytes, language, score, depth)
+            VALUES ${placeholders.join(', ')}
+            ON CONFLICT (analysis_id, path) DO NOTHING`,
+          values
+        );
+      }
+    });
+  },
+
+  async updateTier(analysisId, filePath, fields) {
+    const allowed = ['tier', 'content', 'skeleton', 'content_tokens', 'skeleton_tokens', 'fetched_at', 'skip_reason'];
+    const sets = [];
+    const params = [];
+    for (const k of allowed) {
+      if (fields[k] !== undefined) {
+        params.push(fields[k]);
+        sets.push(`${k} = $${params.length}`);
+      }
+    }
+    if (sets.length === 0) return;
+    params.push(analysisId);
+    const analysisIdIdx = params.length;
+    params.push(filePath);
+    const pathIdx = params.length;
+    await getDb().query(
+      `UPDATE analysis_files SET ${sets.join(', ')}
+        WHERE analysis_id = $${analysisIdIdx} AND path = $${pathIdx}`,
+      params
+    );
+  },
+
+  async listByAnalysis(analysisId, { tier, minScore, limit, offset } = {}) {
+    const conditions = ['analysis_id = $1'];
+    const params = [analysisId];
+    if (tier) { params.push(tier); conditions.push(`tier = $${params.length}`); }
+    if (minScore != null) { params.push(minScore); conditions.push(`score >= $${params.length}`); }
+    let sql = `SELECT * FROM analysis_files WHERE ${conditions.join(' AND ')}
+      ORDER BY score DESC NULLS LAST, path ASC`;
+    if (limit != null) { params.push(limit); sql += ` LIMIT $${params.length}`; }
+    if (offset != null) { params.push(offset); sql += ` OFFSET $${params.length}`; }
+    const { rows } = await getDb().query(sql, params);
+    return rows;
+  },
+
+  async countByTier(analysisId) {
+    const { rows } = await getDb().query(
+      `SELECT tier, COUNT(*)::int AS count FROM analysis_files
+        WHERE analysis_id = $1 GROUP BY tier`,
+      [analysisId]
+    );
+    const out = { tree: 0, skeleton: 0, full: 0, chunked: 0 };
+    for (const r of rows) {
+      if (r.tier in out) out[r.tier] = r.count;
+    }
+    return out;
+  },
+
+  async getByPath(analysisId, filePath) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM analysis_files WHERE analysis_id = $1 AND path = $2',
+      [analysisId, filePath]
+    );
+    return rows[0] || null;
+  },
+};
+
+// ── Analysis File Chunks ──────────────────────────────────────────
+
+const analysisFileChunks = {
+  async createBatch(fileId, chunks) {
+    if (!chunks || chunks.length === 0) return;
+    const BATCH = 500;
+    await withTransaction(async (client) => {
+      for (let i = 0; i < chunks.length; i += BATCH) {
+        const slice = chunks.slice(i, i + BATCH);
+        const values = [];
+        const placeholders = slice.map((c, idx) => {
+          const base = idx * 5;
+          values.push(
+            crypto.randomUUID(),
+            fileId,
+            c.ordinal,
+            c.content,
+            c.tokens ?? 0
+          );
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+        });
+        await client.query(
+          `INSERT INTO analysis_file_chunks (id, file_id, ordinal, content, tokens)
+            VALUES ${placeholders.join(', ')}
+            ON CONFLICT (file_id, ordinal) DO NOTHING`,
+          values
+        );
+      }
+    });
+  },
+  async listByFile(fileId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM analysis_file_chunks WHERE file_id = $1 ORDER BY ordinal ASC',
+      [fileId]
+    );
+    return rows;
+  },
+};
+
+// ── Analysis LLM Calls ────────────────────────────────────────────
+
+const analysisLlmCalls = {
+  async create(call) {
+    const id = crypto.randomUUID();
+    const created_at = new Date().toISOString();
+    const { rows } = await getDb().query(
+      `INSERT INTO analysis_llm_calls
+        (id, analysis_id, phase, model, input_tokens, output_tokens, cost_usd,
+         duration_ms, target_path, files_used, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id, created_at`,
+      [
+        id,
+        call.analysis_id,
+        call.phase,
+        call.model,
+        call.input_tokens ?? 0,
+        call.output_tokens ?? 0,
+        call.cost_usd ?? 0,
+        call.duration_ms ?? null,
+        call.target_path ?? null,
+        call.files_used == null ? null : toJsonb(call.files_used),
+        created_at,
+      ]
+    );
+    return { id: rows[0].id, created_at: rows[0].created_at, ...call };
+  },
+  async listByAnalysis(analysisId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM analysis_llm_calls WHERE analysis_id = $1 ORDER BY created_at ASC',
+      [analysisId]
+    );
+    return rows;
+  },
+  async aggregateByPhase(analysisId) {
+    const { rows } = await getDb().query(
+      `SELECT phase,
+        COUNT(*)::int                           AS call_count,
+        COALESCE(SUM(input_tokens), 0)::int     AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::int    AS output_tokens,
+        COALESCE(SUM(cost_usd), 0)::double precision AS cost_usd
+        FROM analysis_llm_calls
+        WHERE analysis_id = $1
+        GROUP BY phase`,
+      [analysisId]
+    );
+    return rows;
+  },
+};
+
+// ── Analysis Events ───────────────────────────────────────────────
+
+const analysisEvents = {
+  async create(event) {
+    const id = crypto.randomUUID();
+    const created_at = new Date().toISOString();
+    await getDb().query(
+      `INSERT INTO analysis_events
+        (id, analysis_id, event_type, source, path, bytes, tokens, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        event.analysis_id,
+        event.event_type,
+        event.source ?? null,
+        event.path ?? null,
+        event.bytes ?? null,
+        event.tokens ?? null,
+        event.metadata == null ? null : toJsonb(event.metadata),
+        created_at,
+      ]
+    );
+    return { id, created_at, ...event };
+  },
+  async listByAnalysis(analysisId, { limit = 200 } = {}) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM analysis_events WHERE analysis_id = $1 ORDER BY created_at ASC LIMIT $2',
+      [analysisId, limit]
+    );
+    return rows;
+  },
+};
+
+module.exports = {
+  getDb, closeDb,
+  reviews, reviewFiles, fixPrompts, fixPromptEvents,
+  analyses, deployments, buildEntries, projectServices, projectEvents,
+  suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
+};

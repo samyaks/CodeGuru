@@ -18,7 +18,7 @@ const deployRateLimit = createRateLimit({
 router.post('/:projectId', deployRateLimit, asyncHandler(async (req, res) => {
   if (!req.user) throw AppError.unauthorized('Login required to deploy');
 
-  const project = deployments.findById(req.params.projectId);
+  const project = await deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   if (project.user_id && project.user_id !== req.user.id) {
@@ -29,12 +29,12 @@ router.post('/:projectId', deployRateLimit, asyncHandler(async (req, res) => {
     throw new AppError('Deploy service not configured. RAILWAY_API_TOKEN is required.', 503, 'SERVICE_UNAVAILABLE');
   }
 
-  const activeBuilds = deployments.countUserActiveBuilds(req.user.id);
+  const activeBuilds = await deployments.countUserActiveBuilds(req.user.id);
   if (activeBuilds > 0) {
     throw AppError.badRequest('You already have a deploy in progress. Please wait for it to finish.');
   }
 
-  const activeCount = deployments.countUserDeployments(req.user.id);
+  const activeCount = await deployments.countUserDeployments(req.user.id);
   if (activeCount >= 3) {
     throw AppError.badRequest('Deploy limit reached. Free accounts can have up to 3 active deployments.');
   }
@@ -44,9 +44,13 @@ router.post('/:projectId', deployRateLimit, asyncHandler(async (req, res) => {
     updated_at: new Date().toISOString(),
   };
   if (!project.user_id) updateFields.user_id = req.user.id;
-  deployments.update(req.params.projectId, updateFields);
+  await deployments.update(req.params.projectId, updateFields);
 
-  setImmediate(() => runDeploy(req.params.projectId, project, req.user.id));
+  setImmediate(() => {
+    runDeploy(req.params.projectId, project, req.user.id).catch((err) => {
+      console.error(`runDeploy ${req.params.projectId} unhandled:`, err);
+    });
+  });
 
   res.json({ status: 'deploying', projectId: req.params.projectId });
 }));
@@ -57,12 +61,11 @@ async function runDeploy(projectId, project, userId) {
 
   try {
     broadcast(deployStreamId, { type: 'status', status: 'deploying', message: 'Starting deployment...' });
-    logDeployEvent(projectId, userId, { status: 'deploying' });
+    await logDeployEvent(projectId, userId, { status: 'deploying' });
 
     const projectName = `takeoff-${project.repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
 
-    let envVars = {};
-    try { envVars = JSON.parse(project.env_vars || '{}'); } catch {}
+    const envVars = project.env_vars && typeof project.env_vars === 'object' ? project.env_vars : {};
 
     const result = await railway.deployFromRepo(`${project.owner}/${project.repo}`, {
       projectName,
@@ -74,7 +77,7 @@ async function runDeploy(projectId, project, userId) {
     });
 
     if (result.status === 'SUCCESS') {
-      deployments.update(projectId, {
+      await deployments.update(projectId, {
         status: 'live',
         live_url: result.url,
         railway_project_id: result.projectId,
@@ -93,7 +96,7 @@ async function runDeploy(projectId, project, userId) {
         status: 'live',
       });
 
-      logDeployEvent(projectId, userId, { status: 'live', liveUrl: result.url });
+      await logDeployEvent(projectId, userId, { status: 'live', liveUrl: result.url });
       console.log(JSON.stringify({ event: 'deploy_success', projectId, repo: project.repo, userId, url: result.url, timestamp: new Date().toISOString() }));
 
       setImmediate(async () => {
@@ -122,7 +125,7 @@ async function runDeploy(projectId, project, userId) {
         buildLogs = logs.map((l) => l.message).join('\n');
       } catch {}
 
-      deployments.update(projectId, {
+      await deployments.update(projectId, {
         status: 'failed',
         error: `Deploy finished with status: ${result.status}`,
         build_logs: buildLogs,
@@ -138,25 +141,29 @@ async function runDeploy(projectId, project, userId) {
         buildLogs,
       });
 
-      logDeployEvent(projectId, userId, { status: 'failed', error: `Deploy finished with status: ${result.status}` });
+      await logDeployEvent(projectId, userId, { status: 'failed', error: `Deploy finished with status: ${result.status}` });
       console.log(JSON.stringify({ event: 'deploy_failed', projectId, repo: project.repo, userId, error: `Deploy finished with status: ${result.status}`, timestamp: new Date().toISOString() }));
     }
   } catch (err) {
     console.error(`Deploy failed for ${projectId}:`, err);
-    deployments.update(projectId, {
-      status: 'failed',
-      error: err.message,
-      updated_at: new Date().toISOString(),
-    });
+    try {
+      await deployments.update(projectId, {
+        status: 'failed',
+        error: err.message,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (updateErr) {
+      console.error(`Failed to mark deployment ${projectId} as failed:`, updateErr.message);
+    }
     broadcast(deployStreamId, { type: 'failed', error: err.message });
-    logDeployEvent(projectId, userId, { status: 'failed', error: err.message });
+    await logDeployEvent(projectId, userId, { status: 'failed', error: err.message });
     console.log(JSON.stringify({ event: 'deploy_failed', projectId, repo: project.repo, userId, error: err.message, timestamp: new Date().toISOString() }));
 
-    const failedProject = deployments.findById(projectId);
+    const failedProject = await deployments.findById(projectId);
     if (failedProject && failedProject.railway_project_id) {
       try {
         await railway.deleteProject(failedProject.railway_project_id);
-        deployments.update(projectId, { railway_project_id: null, railway_service_id: null });
+        await deployments.update(projectId, { railway_project_id: null, railway_service_id: null });
       } catch (cleanupErr) {
         console.error(`Failed to cleanup Railway resources for ${projectId}:`, cleanupErr.message);
       }
@@ -165,7 +172,7 @@ async function runDeploy(projectId, project, userId) {
 }
 
 router.get('/:projectId/stream', asyncHandler(async (req, res) => {
-  const project = deployments.findById(req.params.projectId);
+  const project = await deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   const streamId = `deploy-${req.params.projectId}`;
@@ -191,7 +198,7 @@ router.get('/:projectId/stream', asyncHandler(async (req, res) => {
 router.post('/:projectId/redeploy', deployRateLimit, asyncHandler(async (req, res) => {
   if (!req.user) throw AppError.unauthorized('Login required to redeploy');
 
-  const project = deployments.findById(req.params.projectId);
+  const project = await deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
 
   if (project.user_id && project.user_id !== req.user.id) {
@@ -202,14 +209,14 @@ router.post('/:projectId/redeploy', deployRateLimit, asyncHandler(async (req, re
     throw AppError.badRequest('No previous deployment to redeploy. Deploy first.');
   }
 
-  deployments.update(req.params.projectId, {
+  await deployments.update(req.params.projectId, {
     status: 'building',
     updated_at: new Date().toISOString(),
   });
 
   const redeployResult = await railway.redeployDeployment(project.railway_deployment_id);
 
-  deployments.update(req.params.projectId, {
+  await deployments.update(req.params.projectId, {
     railway_deployment_id: redeployResult.id,
     updated_at: new Date().toISOString(),
   });
