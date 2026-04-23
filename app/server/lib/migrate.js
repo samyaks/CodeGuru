@@ -13,15 +13,19 @@ async function main() {
   const connectionString = process.env.DATABASE_URL_DIRECT;
   if (!connectionString) {
     console.error('ERROR: DATABASE_URL_DIRECT is required for migrations.');
-    console.error('Migrations use pg_advisory_lock which requires a session-pooling or direct connection.');
-    console.error('Set DATABASE_URL_DIRECT to the Supabase direct connection URL (db.<ref>.supabase.co:5432).');
+    console.error('Migrations use pg_advisory_lock which requires a session-scoped connection.');
+    console.error('Set DATABASE_URL_DIRECT to either the Supabase direct URL (db.<ref>.supabase.co:5432)');
+    console.error('or the session pooler URL (aws-0-<region>.pooler.supabase.com:5432).');
     process.exit(1);
   }
 
-  // Belt-and-suspenders: a pgbouncer pooler URL silently breaks advisory locks.
-  if (/pooler\.supabase\.com/.test(connectionString)) {
-    console.error('ERROR: DATABASE_URL_DIRECT appears to be a pgbouncer pooler URL.');
-    console.error('Use the direct connection URL (db.<ref>.supabase.co:5432) for migrations.');
+  // The transaction pooler (port 6543) makes every statement its own session,
+  // which breaks pg_advisory_lock. The session pooler (port 5432) is fine:
+  // session mode + the advisory lock lives for the life of the connection.
+  if (/pooler\.supabase\.com:6543/.test(connectionString)) {
+    console.error('ERROR: DATABASE_URL_DIRECT points at the Supabase transaction pooler (port 6543).');
+    console.error('Migrations need a session-scoped connection. Use the session pooler (port 5432)');
+    console.error('or the direct connection (db.<ref>.supabase.co:5432) instead.');
     process.exit(1);
   }
 
