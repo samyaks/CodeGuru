@@ -498,7 +498,7 @@ export default function ProductMap() {
               onClick={() => setView(v.key)}
               className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 transition-all duration-150"
               style={{
-                background: view === v.key ? `${v.color}12` : '#0f172a',
+                background: view === v.key ? `${v.color}12` : '#ffffff',
                 border: `1px solid ${
                   view === v.key ? `${v.color}40` : '#e2e8f0'
                 }`,
@@ -611,7 +611,7 @@ export default function ProductMap() {
                           style={{
                             background: isSelected
                               ? 'rgba(99, 102, 241, 0.04)'
-                              : '#0f172a',
+                              : '#ffffff',
                             border: `1px solid ${
                               isSelected ? 'rgba(99, 102, 241, 0.12)' : '#e2e8f0'
                             }`,

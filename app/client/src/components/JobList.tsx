@@ -39,7 +39,7 @@ export function ReadinessJobList({
               key={job.jobId}
               className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 transition-colors duration-300"
               style={{
-                background: highlight ? 'rgba(34, 197, 94, 0.03)' : '#0f172a',
+                background: highlight ? 'rgba(34, 197, 94, 0.03)' : '#ffffff',
                 border: `1px solid ${
                   highlight ? 'rgba(34, 197, 94, 0.08)' : '#e2e8f0'
                 }`,
@@ -127,7 +127,7 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
                   }}
                   className="cursor-pointer rounded-[10px] p-3 transition-colors duration-150"
                   style={{
-                    background: isExpanded ? 'rgba(244, 63, 94, 0.04)' : '#0f172a',
+                    background: isExpanded ? 'rgba(244, 63, 94, 0.04)' : '#ffffff',
                     border: `1px solid ${
                       isExpanded ? 'rgba(244, 63, 94, 0.12)' : '#e2e8f0'
                     }`,

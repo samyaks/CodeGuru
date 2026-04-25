@@ -47,7 +47,7 @@ function Btn({
   type?: 'button' | 'submit';
 }) {
   const styles = {
-    primary: { bg: '#f43f5e', color: '#0f172a', border: 'none' },
+    primary: { bg: '#f43f5e', color: '#ffffff', border: 'none' },
     secondary: { bg: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1' },
     ghost: { bg: 'transparent', color: '#64748b', border: '1px solid #e2e8f0' },
     success: { bg: 'rgba(34,197,94,0.12)', color: '#16a34a', border: '1px solid rgba(34,197,94,0.12)' },
@@ -93,7 +93,7 @@ function Card({ children, active, onClick }: { children: React.ReactNode; active
       className="rounded-[10px] px-4 py-3.5 transition"
       onKeyDown={onClick ? (e) => (e.key === 'Enter' || e.key === ' ' ? onClick() : undefined) : undefined}
       style={{
-        background: active ? 'rgba(244,63,94,0.04)' : '#0f172a',
+        background: active ? 'rgba(244,63,94,0.04)' : '#ffffff',
         border: `1px solid ${active ? 'rgba(244,63,94,0.12)' : '#e2e8f0'}`,
         cursor: onClick ? 'pointer' : 'default',
       }}
@@ -433,7 +433,7 @@ function StepJobs({
             key={j.id}
             className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5"
             style={{
-              background: j.confirmed ? 'rgba(34,197,94,0.03)' : '#0f172a',
+              background: j.confirmed ? 'rgba(34,197,94,0.03)' : '#ffffff',
               border: `1px solid ${
                 j.confirmed ? 'rgba(34,197,94,0.08)' : '#e2e8f0'
               }`,
@@ -676,7 +676,7 @@ export default function ProductMapOnboarding() {
                   border: `1.5px solid ${
                     i === step ? '#f43f5e' : i < step ? '#16a34a' : '#cbd5e1'
                   }`,
-                  color: i === step ? '#0f172a' : i < step ? '#16a34a' : '#cbd5e1',
+                  color: i === step ? '#ffffff' : i < step ? '#16a34a' : '#cbd5e1',
                 }}
               >
                 {i < step ? '✓' : i + 1}

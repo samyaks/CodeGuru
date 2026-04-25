@@ -58,7 +58,7 @@ export function ModuleImpact({
               onBlur={() => onHover(null)}
               className="cursor-pointer rounded-[10px] p-3.5 transition-colors duration-200"
               style={{
-                background: isHovered ? 'rgba(244, 63, 94, 0.04)' : '#0f172a',
+                background: isHovered ? 'rgba(244, 63, 94, 0.04)' : '#ffffff',
                 border: `1px solid ${
                   isHovered ? 'rgba(244,63,94,0.12)' : '#e2e8f0'
                 }`,
