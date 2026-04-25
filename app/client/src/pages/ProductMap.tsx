@@ -410,7 +410,9 @@ export default function ProductMap() {
     );
   }
 
-  if (!map || jobs.length === 0) {
+  // Do not use jobs.length: API can return a valid map with graph on siblings
+  // (client merge); empty jobs alone is not "no map".
+  if (!map?.id) {
     return (
       <div
         className="min-h-screen bg-[#0c0c14] p-6 text-[#dcdce6]"
