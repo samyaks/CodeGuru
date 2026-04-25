@@ -1,8 +1,18 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
-  CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
-  ExternalLink, Loader2, Trash2, Lightbulb, Star, GitFork, Map,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Rocket,
+  ClipboardList,
+  ExternalLink,
+  Loader2,
+  Trash2,
+  Lightbulb,
+  Star,
+  GitFork,
+  Map,
 } from 'lucide-react';
 import Header from '../components/Header';
 import FeaturesSummary from '../components/FeaturesSummary';
@@ -18,27 +28,37 @@ import {
   type PlanStep,
 } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import { Badge, Button, Card, Pill, ScoreRing, SegmentedTabs } from '../components/ui';
+import type { BadgeStatus, TabItem } from '../components/ui';
 
 type Tab = 'overview' | 'analysis' | 'suggestions' | 'settings';
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  ready: <CheckCircle2 size={18} className="text-emerald-600" />,
-  partial: <AlertCircle size={18} className="text-amber-600" />,
-  missing: <XCircle size={18} className="text-red-600" />,
+  ready: <CheckCircle2 size={18} className="text-success shrink-0" />,
+  partial: <AlertCircle size={18} className="text-warning shrink-0" />,
+  missing: <XCircle size={18} className="text-danger shrink-0" />,
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  live: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  deployed: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  deploying: 'bg-gold/10 text-gold border-gold/20',
-  building: 'bg-gold/10 text-gold border-gold/20',
-  ready: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  scored: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  failed: 'bg-red-500/10 text-red-600 border-red-500/20',
-  error: 'bg-red-500/10 text-red-600 border-red-500/20',
-  pending: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  analyzing: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-};
+const KNOWN_BADGE_STATUSES: ReadonlyArray<BadgeStatus> = [
+  'live',
+  'deployed',
+  'deploying',
+  'building',
+  'ready',
+  'scored',
+  'failed',
+  'error',
+  'analyzing',
+  'pending',
+  'partial',
+  'missing',
+];
+
+function asBadgeStatus(s: string): BadgeStatus {
+  return (KNOWN_BADGE_STATUSES as ReadonlyArray<string>).includes(s)
+    ? (s as BadgeStatus)
+    : 'neutral';
+}
 
 export default function ProjectView() {
   const { id } = useParams<{ id: string }>();
@@ -92,10 +112,10 @@ export default function ProjectView() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col bg-page">
         <Header backTo="/dashboard" />
         <main className="flex-1 flex items-center justify-center">
-          <Loader2 size={32} className="animate-spin text-sky-muted" />
+          <Loader2 size={32} className="animate-spin text-text-faint" />
         </main>
       </div>
     );
@@ -104,18 +124,17 @@ export default function ProjectView() {
   if (error || !project) {
     const isForbidden = error?.toLowerCase().includes('forbidden');
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col bg-page">
         <Header backTo="/dashboard" />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3">
-            <div className="text-red-600">{isForbidden ? 'This project is private' : error || 'Project not found'}</div>
+            <div className="text-danger">
+              {isForbidden ? 'This project is private' : error || 'Project not found'}
+            </div>
             {isForbidden && !user && (
-              <button
-                onClick={() => login('github')}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold/10 text-gold border border-gold/20 hover:bg-gold/20 text-sm font-medium transition-colors"
-              >
+              <Button variant="secondary" onClick={() => login('github')}>
                 Sign in to view
-              </button>
+              </Button>
             )}
           </div>
         </main>
@@ -134,15 +153,25 @@ export default function ProjectView() {
   const recommendation = project.recommendation || 'plan';
   const isDeployRecommended = recommendation === 'deploy';
   const analysis = project.analysis_data;
-
-  const statusClass = STATUS_COLORS[project.status] || 'bg-sky-muted/10 text-sky-muted border-sky-border';
+  const planPct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0;
 
   const suggestionsCount = project.suggestions_count ?? 0;
+  const missingCount = Object.values(categories).filter((c) => c.status === 'missing').length;
 
-  const tabs: { key: Tab; label: string; badge?: number }[] = [
+  const tabs: TabItem<Tab>[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'analysis', label: 'Analysis' },
-    { key: 'suggestions', label: 'Suggestions', badge: suggestionsCount > 0 ? suggestionsCount : undefined },
+    {
+      key: 'suggestions',
+      label: 'Suggestions',
+      icon: <Lightbulb size={14} />,
+      badge:
+        suggestionsCount > 0 ? (
+          <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-bg text-amber-fg border border-amber-border font-mono font-bold">
+            {suggestionsCount}
+          </span>
+        ) : undefined,
+    },
     { key: 'settings', label: 'Settings' },
   ];
 
@@ -153,37 +182,31 @@ export default function ProjectView() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-page">
       <Header backTo="/dashboard" title={`${project.owner}/${project.repo}`} />
 
-      <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-8 space-y-8">
-        {/* Project header info */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className={`px-2.5 py-0.5 rounded text-xs font-medium border ${statusClass}`}>
-            {project.status}
-          </span>
+      <main className="flex-1 max-w-[720px] mx-auto w-full px-6 py-8 flex flex-col gap-6">
+        {/* Status row */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Badge status={asBadgeStatus(project.status)}>{project.status}</Badge>
 
           {score > 0 && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-8 h-8 rounded-full border-2 border-gold/30 bg-midnight flex items-center justify-center">
-                <span className="text-xs font-bold text-sky-white">{score}%</span>
+            <div className="flex items-center gap-2">
+              <div className="w-[34px] h-[34px] rounded-full border-2 border-brand bg-brand-tint flex items-center justify-center">
+                <span className="text-[10px] font-bold text-brand">{score}%</span>
               </div>
-              <span className="text-xs text-sky-muted">Readiness</span>
+              <span className="text-xs text-text-muted">Readiness</span>
             </div>
           )}
 
-          {project.framework && (
-            <span className="px-2.5 py-0.5 rounded text-xs bg-navy-mid border border-sky-border text-sky-off">
-              {project.framework}
-            </span>
-          )}
+          {project.framework && <Pill>{project.framework}</Pill>}
 
           {deployed && project.live_url && (
             <a
               href={project.live_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-success-bg text-success border border-success-border hover:opacity-80 transition-opacity"
             >
               <ExternalLink size={12} />
               Live URL
@@ -192,107 +215,129 @@ export default function ProjectView() {
         </div>
 
         {/* Tabs */}
-        <div role="tablist" className="flex gap-1 bg-navy rounded-lg p-1 w-fit border border-sky-border/50">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              aria-controls={`tabpanel-${t.key}`}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                tab === t.key
-                  ? 'bg-gold/10 text-gold border border-gold/20'
-                  : 'text-sky-muted hover:text-sky-white border border-transparent'
-              }`}
-            >
-              {t.key === 'suggestions' && <Lightbulb size={14} />}
-              {t.label}
-              {t.badge !== undefined && (
-                <span className="ml-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
-                  {t.badge}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs<Tab>
+          tabs={tabs}
+          value={tab}
+          onChange={setTab}
+          className="self-start"
+        />
 
-        {/* ───────── Overview Tab ───────── */}
+        {/* ── Overview ── */}
         {tab === 'overview' && (
-          <div role="tabpanel" id="tabpanel-overview" className="space-y-8">
-            {/* Stack badges */}
+          <div role="tabpanel" id="tabpanel-overview" className="flex flex-col gap-4">
             {stack && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {[stack.framework, stack.styling, stack.database, stack.auth, ...(stack.languages || [])]
                   .filter(Boolean)
                   .map((badge) => (
-                    <span key={badge} className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-off">
-                      {badge}
-                    </span>
+                    <Pill key={badge!}>{badge}</Pill>
                   ))}
                 {buildPlan?.type && (
-                  <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">
-                    {buildPlan.type === 'static' ? 'Static site' : buildPlan.type === 'fullstack' ? 'Full-stack' : buildPlan.type}
-                  </span>
+                  <Pill className="!bg-brand-tint !border-brand-tint-border !text-brand">
+                    {buildPlan.type === 'static'
+                      ? 'Static site'
+                      : buildPlan.type === 'fullstack'
+                      ? 'Full-stack'
+                      : buildPlan.type}
+                  </Pill>
                 )}
                 {analysis?.meta && (
                   <>
                     {analysis.meta.stars > 0 && (
-                      <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                      <Pill className="inline-flex items-center gap-1">
                         <Star size={10} /> {analysis.meta.stars}
-                      </span>
+                      </Pill>
                     )}
                     {analysis.meta.forks > 0 && (
-                      <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                      <Pill className="inline-flex items-center gap-1">
                         <GitFork size={10} /> {analysis.meta.forks}
-                      </span>
+                      </Pill>
                     )}
                   </>
                 )}
               </div>
             )}
 
-            {/* What It Does */}
             {project.features_summary && (
               <FeaturesSummary summary={project.features_summary} />
             )}
 
-            {/* Build Story */}
             {id && <BuildStory projectId={id} />}
 
-            {/* Plan progress bar */}
             {totalSteps > 0 && (
-              <div className="bg-navy border border-sky-border/50 rounded-xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-sky-white flex items-center gap-2">
-                    <ClipboardList size={18} className="text-gold" />
+              <Card padding="md">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-sm text-text inline-flex items-center gap-2">
+                    <ClipboardList size={18} className="text-brand" />
                     Plan Progress
                   </h3>
                   <Link
                     to={`/takeoff/${id}/plan`}
-                    className="text-xs text-gold hover:text-gold-dim transition-colors"
+                    className="text-xs text-brand hover:text-brand-hov font-medium transition-colors"
                   >
-                    View full plan →
+                    View full plan &rarr;
                   </Link>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-sky-muted">{doneSteps} of {totalSteps} steps complete</span>
-                  <span className="text-gold font-medium">
-                    {totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0}%
+                <div className="flex justify-between text-[13px] mb-2.5">
+                  <span className="text-text-muted">
+                    {doneSteps} of {totalSteps} steps complete
                   </span>
+                  <span className="text-brand font-semibold">{planPct}%</span>
                 </div>
-                <div className="h-2 rounded-full bg-midnight border border-sky-border/50 overflow-hidden">
+                <div
+                  className="h-1.5 rounded-full bg-surface-2 border border-line overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow={planPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
                   <div
-                    className="h-full rounded-full bg-gold transition-all duration-500"
-                    style={{ width: `${totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0}%` }}
+                    className="h-full rounded-full bg-brand transition-all duration-500"
+                    style={{ width: `${planPct}%` }}
                   />
                 </div>
-              </div>
+              </Card>
             )}
 
-            {/* Action buttons */}
-            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {/* Action grid: Product Map full-width, then Deploy + View Plan 2-col */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Link
+                to={`/projects/${id}/map`}
+                className="md:col-span-2 group rounded-[14px] p-5 border flex items-center gap-3.5 transition-colors"
+                style={{
+                  background: 'rgba(244,63,94,0.05)',
+                  borderColor: 'rgba(244,63,94,0.15)',
+                }}
+              >
+                <div
+                  className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                  style={{
+                    background: 'rgba(244,63,94,0.12)',
+                    border: '1px solid rgba(244,63,94,0.2)',
+                  }}
+                >
+                  <Map size={18} className="text-rose" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-text text-sm">Product Map</div>
+                  <div className="text-xs text-text-muted mt-0.5">
+                    Jobs &amp; personas vs your code &mdash; readiness by what users need.
+                  </div>
+                </div>
+                <span
+                  className="text-[11px] font-semibold px-2.5 py-0.5 rounded-md shrink-0"
+                  style={{
+                    color: '#f43f5e',
+                    background: 'rgba(244,63,94,0.08)',
+                    border: '1px solid rgba(244,63,94,0.15)',
+                  }}
+                >
+                  New
+                </span>
+              </Link>
+
               <button
+                type="button"
                 onClick={() => {
                   if (!user) {
                     alert('Please log in to deploy.');
@@ -300,14 +345,14 @@ export default function ProjectView() {
                   }
                   navigate(`/deploy/${id}`);
                 }}
-                className="p-5 rounded-xl bg-gold/10 border border-gold/30 hover:bg-gold/20 transition-all text-left flex items-center gap-4"
+                className="group rounded-[14px] p-5 border bg-brand border-brand-hov text-left flex items-center gap-3.5 transition-colors hover:bg-brand-hov focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
               >
-                <Rocket size={22} className="text-gold flex-shrink-0" />
+                <Rocket size={22} className="text-white shrink-0 -rotate-45" />
                 <div>
-                  <div className="font-semibold text-sky-white">
+                  <div className="font-semibold text-white text-sm">
                     {deployed ? 'Redeploy' : 'Deploy Now'}
                   </div>
-                  <div className="text-xs text-sky-muted">
+                  <div className="text-xs text-white/70 mt-0.5">
                     {deployed ? 'Push a new version.' : 'Ship it to the world.'}
                   </div>
                 </div>
@@ -315,24 +360,13 @@ export default function ProjectView() {
 
               <Link
                 to={`/takeoff/${id}/plan`}
-                className="p-5 rounded-xl bg-navy border border-sky-border hover:bg-navy-mid transition-all text-left flex items-center gap-4"
+                className="rounded-[14px] p-5 border border-line bg-surface text-left flex items-center gap-3.5 transition-colors hover:bg-page"
               >
-                <ClipboardList size={22} className="text-sky-muted flex-shrink-0" />
+                <ClipboardList size={22} className="text-text-faint shrink-0" />
                 <div>
-                  <div className="font-semibold text-sky-white">View Plan</div>
-                  <div className="text-xs text-sky-muted">See all steps and prompts.</div>
-                </div>
-              </Link>
-
-              <Link
-                to={`/projects/${id}/map`}
-                className="p-5 rounded-xl bg-navy border border-sky-border hover:bg-navy-mid transition-all text-left flex items-center gap-4 md:col-span-2 xl:col-span-1"
-              >
-                <Map size={22} className="text-rose-400 flex-shrink-0" />
-                <div>
-                  <div className="font-semibold text-sky-white">Product map</div>
-                  <div className="text-xs text-sky-muted">
-                    Jobs & personas vs your code — readiness by what users need.
+                  <div className="font-semibold text-text text-sm">View Plan</div>
+                  <div className="text-xs text-text-muted mt-0.5">
+                    See all steps and prompts.
                   </div>
                 </div>
               </Link>
@@ -340,177 +374,240 @@ export default function ProjectView() {
           </div>
         )}
 
-        {/* ───────── Analysis Tab ───────── */}
+        {/* ── Analysis ── */}
         {tab === 'analysis' && (
-          <div role="tabpanel" id="tabpanel-analysis" className="space-y-8">
-            {/* Readiness score circle */}
+          <div role="tabpanel" id="tabpanel-analysis" className="flex flex-col gap-5">
             {score > 0 && (
-              <div className="text-center space-y-4">
-                <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-4 border-gold/30 bg-navy">
-                  <span className="text-4xl font-bold text-sky-white">{score}%</span>
-                </div>
-                <h2 className="text-2xl font-semibold text-sky-white">Production Readiness</h2>
+              <div className="text-center pb-1">
+                <ScoreRing score={score} size={112} stroke={4} className="mx-auto mb-4" />
+                <h2 className="text-xl font-semibold text-text mb-2">Production Readiness</h2>
                 {project.description && (
-                  <p className="text-sky-off text-sm max-w-lg mx-auto italic">{project.description}</p>
+                  <p className="text-text-soft text-sm max-w-lg mx-auto italic">
+                    {project.description}
+                  </p>
                 )}
-                <p className="text-sky-muted text-sm max-w-md mx-auto">
+                <p className="text-text-muted text-[13px] max-w-md mx-auto mt-2">
                   {score >= 90
                     ? 'Your app looks ready to deploy. You can ship it now or review the details below.'
                     : `Your app is ${score}% of the way there. We've identified what's missing and built you a plan.`}
                 </p>
                 <Link
                   to={`/projects/${id}/map`}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-lg px-4 py-2 bg-rose-500/5 transition-colors"
+                  className="inline-flex items-center gap-2 text-sm font-medium mt-4 rounded-lg px-4 py-2 transition-opacity hover:opacity-80"
+                  style={{
+                    color: '#f43f5e',
+                    background: 'rgba(244,63,94,0.05)',
+                    border: '1px solid rgba(244,63,94,0.20)',
+                  }}
                 >
                   <Map size={16} />
-                  Product map — score by jobs
+                  Product map &mdash; score by jobs
                 </Link>
               </div>
             )}
 
-            {/* Category breakdown */}
             {Object.keys(categories).length > 0 && (
-              <div className="grid gap-2">
+              <div className="flex flex-col gap-1.5">
                 {Object.entries(categories).map(([key, cat]) => (
-                  <div key={key} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
-                    {STATUS_ICON[cat.status]}
+                  <div
+                    key={key}
+                    className="flex items-center gap-3 px-3.5 py-2.5 rounded-[10px] bg-surface border border-line"
+                  >
+                    {STATUS_ICON[cat.status] || (
+                      <AlertCircle size={18} className="text-text-faint shrink-0" />
+                    )}
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-sky-white">{cat.label}</div>
-                      <div className="text-xs text-sky-muted truncate">{cat.detail}</div>
+                      <div className="text-[13px] font-medium text-text">{cat.label}</div>
+                      <div className="text-[11px] text-text-faint truncate">{cat.detail}</div>
                     </div>
-                    <div className="text-xs text-sky-muted">{cat.earned}/{cat.weight}</div>
+                    <span className="text-[11px] text-text-faint shrink-0">
+                      {cat.earned}/{cat.weight}
+                    </span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Dual-path CTA */}
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-2 gap-3">
               <button
+                type="button"
                 onClick={() => {
-                  if (!user) { alert('Please log in to deploy.'); return; }
+                  if (!user) {
+                    alert('Please log in to deploy.');
+                    return;
+                  }
                   navigate(`/takeoff/${id}/env-setup`);
                 }}
-                className={`p-6 rounded-xl border text-left transition-all ${
+                className={[
+                  'rounded-[14px] p-5 border text-left transition-all',
                   isDeployRecommended
-                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
-                    : 'bg-navy border-sky-border hover:bg-navy-mid'
-                }`}
+                    ? 'bg-brand border-brand-hov text-white hover:bg-brand-hov'
+                    : 'bg-surface border-line hover:border-brand hover:shadow-card-hov',
+                ].join(' ')}
               >
-                <Rocket size={24} className={isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
-                <h3 className="font-semibold text-sky-white mb-1">
+                <Rocket
+                  size={24}
+                  className={[
+                    'mb-2.5 -rotate-45',
+                    isDeployRecommended ? 'text-white' : 'text-brand',
+                  ].join(' ')}
+                />
+                <h3
+                  className={[
+                    'font-semibold text-[13px] mb-1',
+                    isDeployRecommended ? 'text-white' : 'text-text',
+                  ].join(' ')}
+                >
                   {isDeployRecommended ? 'Deploy Now' : 'Deploy Anyway'}
                 </h3>
-                <p className="text-xs text-sky-muted">
+                <p
+                  className={[
+                    'text-[11px]',
+                    isDeployRecommended ? 'text-white/70' : 'text-text-muted',
+                  ].join(' ')}
+                >
                   {isDeployRecommended
                     ? 'Your app looks ready. Ship it to the world.'
                     : 'Ship as-is. You can improve later.'}
                 </p>
                 {isDeployRecommended && (
-                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                  <span className="inline-block mt-2.5 text-[11px] font-semibold text-amber-bg">
+                    Recommended
+                  </span>
                 )}
               </button>
 
               <Link
                 to={`/takeoff/${id}/plan`}
-                className={`p-6 rounded-xl border text-left transition-all block ${
+                className={[
+                  'rounded-[14px] p-5 border text-left transition-all block',
                   !isDeployRecommended
-                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
-                    : 'bg-navy border-sky-border hover:bg-navy-mid'
-                }`}
+                    ? 'bg-brand border-brand-hov text-white hover:bg-brand-hov'
+                    : 'bg-surface border-line hover:border-brand hover:shadow-card-hov',
+                ].join(' ')}
               >
-                <ClipboardList size={24} className={!isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
-                <h3 className="font-semibold text-sky-white mb-1">
+                <ClipboardList
+                  size={24}
+                  className={[
+                    'mb-2.5',
+                    !isDeployRecommended ? 'text-white' : 'text-brand',
+                  ].join(' ')}
+                />
+                <h3
+                  className={[
+                    'font-semibold text-[13px] mb-1',
+                    !isDeployRecommended ? 'text-white' : 'text-text',
+                  ].join(' ')}
+                >
                   {!isDeployRecommended ? 'Plan to Ship' : 'See Plan Anyway'}
                 </h3>
-                <p className="text-xs text-sky-muted">
+                <p
+                  className={[
+                    'text-[11px]',
+                    !isDeployRecommended ? 'text-white/70' : 'text-text-muted',
+                  ].join(' ')}
+                >
                   {!isDeployRecommended
-                    ? `${Object.values(categories).filter((c) => c.status === 'missing').length} things to add. Context files + prompts for each step.`
+                    ? `${missingCount} thing${missingCount === 1 ? '' : 's'} to add. Context files + prompts for each step.`
                     : 'Review what could be improved with context files for each area.'}
                 </p>
                 {!isDeployRecommended && (
-                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                  <span className="inline-block mt-2.5 text-[11px] font-semibold text-amber-bg">
+                    Recommended
+                  </span>
                 )}
               </Link>
             </div>
 
-            {/* Codebase Details */}
             {analysis ? (
               <CodebaseDetails analysis={analysis} gaps={analysis.gaps || {}} />
             ) : (
-              <div className="text-center py-12 text-sky-muted text-sm">
+              <div className="text-center py-12 text-text-muted text-sm">
                 Detailed analysis data is not available for this project. Try re-analyzing.
               </div>
             )}
           </div>
         )}
 
-        {/* ───────── Suggestions Tab (lazy mount, stays mounted) ───────── */}
+        {/* ── Suggestions (lazy mount, stays mounted) ── */}
         {mountedTabs.current.has('suggestions') && id && (
-          <div role="tabpanel" id="tabpanel-suggestions" className={tab !== 'suggestions' ? 'hidden' : ''}>
+          <div
+            role="tabpanel"
+            id="tabpanel-suggestions"
+            className={tab !== 'suggestions' ? 'hidden' : ''}
+          >
             <SuggestionsPanel projectId={id} projectStatus={project.status} />
           </div>
         )}
 
-        {/* ───────── Settings Tab (lazy mount, stays mounted) ───────── */}
+        {/* ── Settings (lazy mount, stays mounted) ── */}
         {mountedTabs.current.has('settings') && (
-          <div role="tabpanel" id="tabpanel-settings" className={`space-y-8 ${tab !== 'settings' ? 'hidden' : ''}`}>
-            {/* Analytics */}
+          <div
+            role="tabpanel"
+            id="tabpanel-settings"
+            className={`flex flex-col gap-4 ${tab !== 'settings' ? 'hidden' : ''}`}
+          >
             {id && <Analytics projectId={id} />}
 
-            {/* Build configuration */}
-            <div className="bg-navy border border-sky-border/50 rounded-xl p-5 space-y-3">
-              <h3 className="font-medium text-sky-white">Build Configuration</h3>
+            <Card padding="md">
+              <h3 className="font-semibold text-sm text-text mb-3.5">Build Configuration</h3>
               {buildPlan ? (
-                <div className="space-y-2">
+                <div>
                   <Row label="Type" value={buildPlan.type} />
                   <Row label="Framework" value={buildPlan.framework} />
                   <Row label="Confidence" value={buildPlan.confidence} />
-                  {buildPlan.buildCommand && <Row label="Build command" value={buildPlan.buildCommand} />}
-                  {buildPlan.startCommand && <Row label="Start command" value={buildPlan.startCommand} />}
+                  {buildPlan.buildCommand && (
+                    <Row label="Build command" value={buildPlan.buildCommand} mono />
+                  )}
+                  {buildPlan.startCommand && (
+                    <Row label="Start command" value={buildPlan.startCommand} mono last />
+                  )}
                 </div>
               ) : (
-                <p className="text-sm text-sky-muted">No build plan detected yet.</p>
+                <p className="text-sm text-text-muted">No build plan detected yet.</p>
               )}
-            </div>
+            </Card>
 
             {envVars.length > 0 && (
-              <div className="bg-navy border border-sky-border/50 rounded-xl p-5 space-y-3">
-                <h3 className="font-medium text-sky-white">Detected Environment Variables</h3>
-                <pre className="text-xs text-sky-off bg-midnight rounded-lg p-4 border border-sky-border/30 overflow-auto">
+              <Card padding="md">
+                <h3 className="font-semibold text-sm text-text mb-3">
+                  Detected Environment Variables
+                </h3>
+                <pre className="text-xs text-text-soft bg-page rounded-lg p-4 border border-line overflow-auto font-mono">
                   {envVars.join('\n')}
                 </pre>
-              </div>
+              </Card>
             )}
 
-            {/* Danger zone — only show to authenticated users */}
+            {/* Danger zone — auth-gated */}
             {user && (
-              <div className="bg-navy border border-red-500/20 rounded-xl p-5 space-y-4">
-                <h3 className="font-medium text-red-600">Danger Zone</h3>
-                <p className="text-sm text-sky-muted">
+              <div className="bg-surface border border-danger-border rounded-[14px] p-5 shadow-card">
+                <h3 className="font-semibold text-sm text-danger mb-2">Danger Zone</h3>
+                <p className="text-[13px] text-text-muted mb-3.5">
                   Permanently delete this project and all associated data.
                 </p>
                 {!confirmDelete ? (
-                  <button
-                    onClick={() => setConfirmDelete(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-600 border border-red-500/20 hover:bg-red-500/20 text-sm font-medium transition-colors"
-                  >
+                  <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
                     <Trash2 size={14} />
                     Delete Project
-                  </button>
+                  </Button>
                 ) : (
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <button
                       onClick={handleDelete}
                       disabled={deleting}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 transition-colors disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-danger text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
                     >
-                      {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {deleting ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={14} />
+                      )}
                       {deleting ? 'Deleting...' : 'Confirm Delete'}
                     </button>
                     <button
                       onClick={() => setConfirmDelete(false)}
-                      className="px-4 py-2 rounded-lg text-sm text-sky-muted hover:text-sky-white transition-colors"
+                      className="text-sm text-text-muted hover:text-text transition-colors px-2"
                     >
                       Cancel
                     </button>
@@ -525,11 +622,28 @@ export default function ProjectView() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string | null | undefined }) {
+function Row({
+  label,
+  value,
+  mono,
+  last,
+}: {
+  label: string;
+  value: string | null | undefined;
+  mono?: boolean;
+  last?: boolean;
+}) {
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-sky-muted">{label}</span>
-      <span className="text-sky-off font-medium">{value || '—'}</span>
+    <div
+      className={[
+        'flex items-center justify-between text-[13px] py-1.5',
+        last ? '' : 'border-b border-divider',
+      ].join(' ')}
+    >
+      <span className="text-text-muted">{label}</span>
+      <span className={['text-text-soft font-medium', mono ? 'font-mono' : ''].join(' ')}>
+        {value || '—'}
+      </span>
     </div>
   );
 }

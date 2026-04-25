@@ -1,9 +1,21 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, ClipboardList, Search, Lock, Star, ChevronDown, Link2, Rocket, FolderUp } from 'lucide-react';
+import {
+  CheckCircle2,
+  Search,
+  Lock,
+  Star,
+  ChevronDown,
+  Rocket,
+  FolderUp,
+  Github,
+  Map,
+  ArrowLeft,
+} from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../hooks/useAuth';
 import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
+import { Button, DotGridBg } from '../components/ui';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -11,13 +23,20 @@ const EXAMPLES = [
   { label: 'cal.com', url: 'https://github.com/calcom/cal.com' },
 ];
 
+type Mode = 'connect' | 'picker' | 'url' | 'upload';
+
 export default function Landing() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, login } = useAuth();
+
   const [repoUrl, setRepoUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<'picker' | 'url' | 'upload'>(user ? 'picker' : 'url');
+
+  // When signed in we default to the repo picker; otherwise we lead with the
+  // GitHub connect CTA (kit's `mode==='github'`).
+  const [mode, setMode] = useState<Mode>(user ? 'picker' : 'connect');
+
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadProjectName, setUploadProjectName] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -29,7 +48,10 @@ export default function Landing() {
   const [search, setSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { login } = useAuth();
+
+  useEffect(() => {
+    if (user && mode === 'connect') setMode('picker');
+  }, [user, mode]);
 
   useEffect(() => {
     if (user && mode === 'picker') {
@@ -57,9 +79,11 @@ export default function Landing() {
 
   const filtered = repos.filter((r) => {
     const q = search.toLowerCase();
-    return r.full_name.toLowerCase().includes(q) ||
+    return (
+      r.full_name.toLowerCase().includes(q) ||
       (r.description || '').toLowerCase().includes(q) ||
-      (r.language || '').toLowerCase().includes(q);
+      (r.language || '').toLowerCase().includes(q)
+    );
   });
 
   const handleSubmit = async (e: FormEvent) => {
@@ -156,7 +180,10 @@ export default function Landing() {
     setLoading(true);
     setError(null);
     try {
-      const { projectId } = await startTakeoffUpload(selectedFiles, uploadProjectName || 'My Project');
+      const { projectId } = await startTakeoffUpload(
+        selectedFiles,
+        uploadProjectName || 'My Project',
+      );
       navigate(`/takeoff/${projectId}`);
     } catch (err: any) {
       setError(err.message || 'Upload failed');
@@ -174,82 +201,290 @@ export default function Landing() {
     return `${Math.floor(days / 365)}y ago`;
   }
 
+  const features = [
+    {
+      icon: <Map size={17} className="text-brand" />,
+      title: 'Product Map',
+      body: "Jobs and personas scored against your codebase — see what users actually need.",
+    },
+    {
+      icon: <CheckCircle2 size={17} className="text-brand" />,
+      title: 'Readiness Score',
+      body: 'Weighted by real user impact, not just technical completeness.',
+    },
+    {
+      icon: <Rocket size={17} className="text-brand -rotate-45" />,
+      title: 'One-Click Deploy',
+      body: 'From analysis to live URL. Env vars set automatically.',
+    },
+  ];
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-page">
       <Header />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 relative overflow-hidden">
-        {/* Subtle grid background */}
-        <div className="absolute inset-0 pointer-events-none" style={{
-          backgroundImage: 'linear-gradient(rgba(63,63,70,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(63,63,70,0.15) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-        }} />
-        <div className="absolute inset-0 pointer-events-none" style={{
-          background: 'radial-gradient(ellipse at center, transparent 30%, #050505 75%)',
-        }} />
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 pt-10 relative">
+        <DotGridBg />
 
-        <div className="max-w-3xl w-full text-center space-y-10 relative z-10">
-          <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-gold/30 bg-gold/[0.08] text-xs font-medium text-gold">
-              <span className="w-[5px] h-[5px] rounded-full bg-gold animate-pulse flex-shrink-0" />
-              Now in early access
-            </div>
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tighter leading-[1.05] gradient-text">
-              You built it,<br />now let's ship it!
-            </h1>
-            <p className="text-lg text-sky-muted max-w-lg mx-auto leading-relaxed">
-              {user
-                ? 'Select a repo, paste a URL, or upload a folder to get started.'
-                : 'Paste a GitHub URL or upload your project folder to get started.'}
-            </p>
+        <div className="max-w-[560px] w-full text-center relative z-10">
+          {/* Early-access pill */}
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border border-amber-border bg-amber-bg text-xs font-medium text-amber-fg mb-6">
+            <span className="w-[5px] h-[5px] rounded-full bg-amber animate-ds-pulse" />
+            Now in early access
           </div>
 
-          <div className="flex items-center justify-center gap-2 text-sm">
-            {user && (
-              <button
-                onClick={() => setMode('picker')}
-                className={`px-4 py-1.5 rounded-lg transition-colors text-sm font-medium ${mode === 'picker' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+          {/* Hero */}
+          <h1
+            className="font-extrabold text-text mb-4"
+            style={{
+              fontSize: 'clamp(2.2rem, 5vw, 3.6rem)',
+              letterSpacing: '-0.05em',
+              lineHeight: 1.05,
+            }}
+          >
+            You built it,
+            <br />
+            <span className="text-amber">now let&rsquo;s ship it.</span>
+          </h1>
+          <p className="text-base text-text-muted max-w-[400px] mx-auto leading-relaxed mb-9">
+            {user
+              ? 'Pick a repo from your GitHub, paste a URL, or upload a folder. We will analyze the code and tell you exactly what to build next.'
+              : "Connect your GitHub repo. We'll analyze the code, map it to your users' needs, and tell you exactly what to build next."}
+          </p>
+
+          {/* ── Connect GitHub (default for signed-out users) ── */}
+          {mode === 'connect' && (
+            <div className="flex flex-col items-center gap-3.5">
+              <Button
+                size="lg"
+                onClick={() => login('github')}
+                className="w-full max-w-[320px]"
               >
-                My Repos
-              </button>
-            )}
-            <button
-              onClick={() => setMode('url')}
-              className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'url' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
-            >
-              <Link2 size={14} />
-              Paste URL
-            </button>
-            <button
-              onClick={() => setMode('upload')}
-              className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-sm font-medium ${mode === 'upload' ? 'bg-gold/[0.12] text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
-            >
-              <FolderUp size={14} />
-              Upload Folder
-            </button>
-          </div>
+                <Github size={18} />
+                Connect GitHub
+              </Button>
+              <div className="flex items-center gap-3 text-[13px] text-text-faint">
+                <button
+                  onClick={() => setMode('url')}
+                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                >
+                  or paste a public repo URL
+                </button>
+                <span className="text-text-disabled" aria-hidden>
+                  ·
+                </span>
+                <button
+                  onClick={() => setMode('upload')}
+                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                >
+                  upload a folder
+                </button>
+              </div>
+            </div>
+          )}
 
-          {mode === 'upload' ? (
-            <div className="max-w-xl mx-auto space-y-4">
+          {/* ── Repo picker (signed-in default) ── */}
+          {mode === 'picker' && (
+            <div className="max-w-[480px] mx-auto">
+              <div className="flex items-center gap-1.5 mb-3 px-3.5 py-2 bg-success-bg border border-success-border rounded-[9px] text-[13px] text-success font-medium">
+                <CheckCircle2 size={14} strokeWidth={2.5} />
+                GitHub connected — pick a repo to analyze
+              </div>
+
+              <div ref={dropdownRef} className="relative text-left">
+                <div
+                  className="flex items-center gap-2 bg-surface border border-line rounded-[10px] px-3.5 py-2.5 shadow-card cursor-text"
+                  onClick={() => setShowDropdown(true)}
+                >
+                  <Search size={16} className="text-text-faint shrink-0" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setShowDropdown(true);
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDropdown(true);
+                    }}
+                    placeholder="Search your repos..."
+                    className="flex-1 bg-transparent outline-none text-[13px] text-text placeholder:text-text-faint"
+                    disabled={loading}
+                  />
+                  <ChevronDown
+                    size={16}
+                    className={`text-text-faint transition-transform ${showDropdown ? 'rotate-180' : ''}`}
+                  />
+                </div>
+
+                {showDropdown && (
+                  <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-surface border border-line rounded-xl overflow-hidden z-50 shadow-card-hov max-h-80 overflow-y-auto">
+                    {reposLoading ? (
+                      <div className="px-4 py-6 text-center text-text-muted text-sm">
+                        <span className="inline-block w-4 h-4 border-2 border-line border-t-text-muted rounded-full animate-spin mr-2 align-middle" />
+                        Loading your repos...
+                      </div>
+                    ) : needsRelogin ? (
+                      <div className="px-4 py-6 text-center text-sm space-y-2">
+                        <p className="text-text-muted">GitHub access needs to be refreshed.</p>
+                        <button
+                          onClick={() => login('github')}
+                          className="text-brand hover:text-brand-hov underline underline-offset-2 transition-colors"
+                        >
+                          Sign in again to load your repos
+                        </button>
+                      </div>
+                    ) : filtered.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-text-muted text-sm">
+                        {search ? 'No repos match your search' : 'No repos found'}
+                      </div>
+                    ) : (
+                      filtered.map((repo) => (
+                        <button
+                          key={repo.full_name}
+                          onClick={() => selectRepo(repo)}
+                          disabled={loading}
+                          className="w-full text-left px-4 py-3 hover:bg-page border-b border-divider last:border-b-0 transition-colors disabled:opacity-50 group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-[13px] text-text group-hover:text-brand transition-colors truncate">
+                              {repo.full_name}
+                            </span>
+                            {repo.private && <Lock size={12} className="text-text-faint shrink-0" />}
+                            {repo.stargazers_count > 0 && (
+                              <span className="flex items-center gap-0.5 text-[11px] text-text-faint shrink-0">
+                                <Star size={10} /> {repo.stargazers_count}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5">
+                            {repo.language && (
+                              <span className="text-[11px] text-text-muted">{repo.language}</span>
+                            )}
+                            {repo.description && (
+                              <span className="text-[11px] text-text-faint truncate">
+                                {repo.description}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-text-disabled shrink-0 ml-auto">
+                              {timeAgo(repo.updated_at)}
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {loading && (
+                <div className="mt-3 flex items-center justify-center gap-2 text-brand text-sm">
+                  <span className="w-4 h-4 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
+                  Analyzing...
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-center gap-3 text-[13px] text-text-faint">
+                <button
+                  onClick={() => setMode('url')}
+                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                >
+                  paste a URL
+                </button>
+                <span className="text-text-disabled" aria-hidden>
+                  ·
+                </span>
+                <button
+                  onClick={() => setMode('upload')}
+                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                >
+                  upload a folder
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Paste URL ── */}
+          {mode === 'url' && (
+            <div className="max-w-[480px] mx-auto text-left">
+              <form onSubmit={handleSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={repoUrl}
+                  onChange={(e) => setRepoUrl(e.target.value)}
+                  placeholder="https://github.com/owner/repo"
+                  disabled={loading}
+                  className="flex-1 px-4 py-3 rounded-[10px] bg-surface border border-line text-text text-[13px] font-mono outline-none shadow-card focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all"
+                />
+                <Button type="submit" disabled={loading || !repoUrl.trim()}>
+                  {loading ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    'Analyze'
+                  )}
+                </Button>
+              </form>
+              <div className="mt-3 text-[13px] text-text-faint">
+                Try:
+                {EXAMPLES.map((ex, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setRepoUrl(ex.url);
+                      analyze(ex.url);
+                    }}
+                    disabled={loading}
+                    className="ml-1.5 text-brand hover:text-brand-hov underline underline-offset-2 transition-colors disabled:opacity-50"
+                  >
+                    {ex.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setMode(user ? 'picker' : 'connect')}
+                className="mt-4 inline-flex items-center gap-1 text-[13px] text-text-faint hover:text-text-muted underline underline-offset-[3px] transition-colors"
+              >
+                <ArrowLeft size={12} />
+                {user ? 'Back to my repos' : 'Connect GitHub instead'}
+              </button>
+            </div>
+          )}
+
+          {/* ── Upload folder ── */}
+          {mode === 'upload' && (
+            <div className="max-w-[480px] mx-auto text-left space-y-3">
               <div
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); }}
-                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOver(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setDragOver(false);
+                }}
                 onDrop={handleDrop}
                 onClick={() => folderInputRef.current?.click()}
-                className={`glass rounded-xl p-10 text-center cursor-pointer transition-all ${
-                  dragOver ? 'border-gold/50 bg-gold/[0.05]' : 'hover:border-gold/30'
-                }`}
+                className={[
+                  'rounded-[14px] p-10 text-center cursor-pointer transition-all border bg-surface shadow-card',
+                  dragOver ? 'border-brand bg-brand-tint' : 'border-line hover:border-brand',
+                ].join(' ')}
               >
-                <FolderUp size={32} className="text-gold mx-auto mb-3" />
-                <p className="text-sm text-sky-white font-medium mb-1">
+                <FolderUp size={32} className="text-brand mx-auto mb-3" />
+                <p className="text-sm text-text font-semibold mb-1">
                   {selectedFiles.length > 0
                     ? `${selectedFiles.length} files selected`
                     : 'Drop a folder here or click to browse'}
                 </p>
-                <p className="text-xs text-sky-muted">
+                <p className="text-xs text-text-muted">
                   {selectedFiles.length > 0
                     ? uploadProjectName || 'Ready to analyze'
-                    : 'Select your project folder \u2014 we\'ll analyze it locally'}
+                    : "Select your project folder \u2014 we'll analyze it locally"}
                 </p>
                 <input
                   ref={folderInputRef}
@@ -269,174 +504,56 @@ export default function Landing() {
                     value={uploadProjectName}
                     onChange={(e) => setUploadProjectName(e.target.value)}
                     placeholder="Project name (optional)"
-                    className="flex-1 px-4 py-3 rounded-xl glass text-sky-white placeholder-sky-muted focus:outline-none focus:ring-2 focus:ring-gold/30 text-sm"
+                    className="flex-1 px-4 py-3 rounded-[10px] bg-surface border border-line text-text placeholder:text-text-faint outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 text-sm transition-all"
                   />
-                  <button
-                    onClick={handleUpload}
-                    disabled={loading}
-                    className="px-6 py-3 rounded-xl bg-gold text-midnight font-semibold text-sm hover:bg-gold-dim transition-all btn-glow disabled:opacity-50 flex items-center gap-2"
-                  >
+                  <Button onClick={handleUpload} disabled={loading}>
                     {loading ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-midnight/30 border-t-midnight rounded-full animate-spin" />
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                         Uploading {selectedFiles.length} files...
-                      </span>
-                    ) : 'Analyze'}
-                  </button>
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </Button>
                 </div>
               )}
-            </div>
-          ) : user && mode === 'picker' ? (
-            <div ref={dropdownRef} className="relative max-w-xl mx-auto">
-              <div
-                className="glass flex items-center gap-2 px-4 py-3 rounded-xl text-sky-white cursor-pointer hover:border-gold/40 transition-colors"
-                onClick={() => setShowDropdown(!showDropdown)}
-              >
-                <Search size={16} className="text-sky-muted shrink-0" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
-                  onClick={(e) => { e.stopPropagation(); setShowDropdown(true); }}
-                  placeholder="Search your repos..."
-                  className="flex-1 bg-transparent outline-none placeholder-sky-muted text-sm font-sans"
-                  disabled={loading}
-                />
-                <ChevronDown size={16} className={`text-sky-muted transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
-              </div>
-
-              {showDropdown && (
-                <div className="absolute z-50 top-full mt-1 w-full rounded-xl glass shadow-lg max-h-80 overflow-y-auto">
-                  {reposLoading ? (
-                    <div className="px-4 py-6 text-center text-sky-muted text-sm">
-                      <span className="inline-block w-4 h-4 border-2 border-sky-border border-t-sky-muted rounded-full animate-spin mr-2" />
-                      Loading your repos...
-                    </div>
-                  ) : needsRelogin ? (
-                    <div className="px-4 py-6 text-center text-sm space-y-2">
-                      <p className="text-sky-muted">GitHub access needs to be refreshed.</p>
-                      <button
-                        onClick={() => login('github')}
-                        className="text-gold hover:text-gold-dim underline underline-offset-2 transition-colors"
-                      >
-                        Sign in again to load your repos
-                      </button>
-                    </div>
-                  ) : filtered.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-sky-muted text-sm">
-                      {search ? 'No repos match your search' : 'No repos found'}
-                    </div>
-                  ) : (
-                    filtered.map((repo) => (
-                      <button
-                        key={repo.full_name}
-                        onClick={() => selectRepo(repo)}
-                        disabled={loading}
-                        className="w-full text-left px-4 py-3 hover:bg-navy-mid border-b border-sky-border/30 last:border-b-0 transition-colors disabled:opacity-50 group"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm text-sky-white group-hover:text-gold transition-colors truncate">
-                            {repo.full_name}
-                          </span>
-                          {repo.private && <Lock size={12} className="text-sky-muted shrink-0" />}
-                          {repo.stargazers_count > 0 && (
-                            <span className="flex items-center gap-0.5 text-xs text-sky-muted shrink-0">
-                              <Star size={10} /> {repo.stargazers_count}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 mt-0.5">
-                          {repo.language && (
-                            <span className="text-xs text-sky-muted">{repo.language}</span>
-                          )}
-                          {repo.description && (
-                            <span className="text-xs text-sky-muted truncate">{repo.description}</span>
-                          )}
-                          <span className="text-xs text-border-dark shrink-0 ml-auto">{timeAgo(repo.updated_at)}</span>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {loading && (
-                <div className="mt-3 flex items-center justify-center gap-2 text-gold text-sm">
-                  <span className="w-4 h-4 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
-                  Analyzing...
-                </div>
-              )}
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex gap-2 max-w-xl mx-auto">
-              <input
-                type="text"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="https://github.com/owner/repo"
-                className="flex-1 px-4 py-3.5 rounded-xl glass text-sky-white placeholder-sky-muted focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold/50 transition-all text-sm font-mono"
-                disabled={loading}
-              />
               <button
-                type="submit"
-                disabled={loading || !repoUrl.trim()}
-                className="px-6 py-3.5 rounded-xl bg-gold text-midnight font-semibold text-sm hover:bg-gold-dim transition-all btn-glow disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                onClick={() => setMode(user ? 'picker' : 'connect')}
+                className="inline-flex items-center gap-1 text-[13px] text-text-faint hover:text-text-muted underline underline-offset-[3px] transition-colors"
               >
-                {loading ? (
-                  <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 border-2 border-midnight/30 border-t-midnight rounded-full animate-spin" />
-                    Analyzing...
-                  </span>
-                ) : (
-                  <>Analyze</>
-                )}
+                <ArrowLeft size={12} />
+                {user ? 'Back to my repos' : 'Connect GitHub instead'}
               </button>
-            </form>
+            </div>
           )}
 
           {error && (
-            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
+            <div className="mt-5 max-w-[480px] mx-auto text-danger text-sm bg-danger-bg border border-danger-border rounded-lg px-4 py-2 text-left">
               {error}
             </div>
           )}
 
-          {mode === 'url' && (
-            <div className="text-sm text-sky-muted">
-              Try an example:
-              {EXAMPLES.map((ex, i) => (
-                <button
-                  key={i}
-                  onClick={() => { setRepoUrl(ex.url); analyze(ex.url); }}
-                  disabled={loading}
-                  className="ml-2 text-gold hover:text-gold-dim underline underline-offset-2 transition-colors disabled:opacity-50"
-                >
-                  {ex.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="grid sm:grid-cols-3 gap-4 pt-6">
-            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
-              <CheckCircle2 size={20} className="text-gold mb-4" />
-              <h3 className="text-base font-semibold text-sky-white mb-2">Readiness Score</h3>
-              <p className="text-sm text-sky-muted leading-relaxed">See exactly what's ready and what's missing — auth, database, tests, and more.</p>
-            </div>
-            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
-              <ClipboardList size={20} className="text-gold mb-4" />
-              <h3 className="text-base font-semibold text-sky-white mb-2">Plan to Ship</h3>
-              <p className="text-sm text-sky-muted leading-relaxed">Step-by-step plan with context files and Cursor prompts for each thing you need to add.</p>
-            </div>
-            <div className="glass rounded-xl p-6 text-left hover:border-gold/30 transition-all group">
-              <Rocket size={20} className="text-gold mb-4" />
-              <h3 className="text-base font-semibold text-sky-white mb-2">One-Click Deploy</h3>
-              <p className="text-sm text-sky-muted leading-relaxed">When you're ready, deploy to production with a single click. No config needed.</p>
-            </div>
+          {/* ── Feature strip ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-13" style={{ marginTop: 52 }}>
+            {features.map((card) => (
+              <div
+                key={card.title}
+                className="bg-surface border border-line rounded-[14px] px-4 py-4.5 text-left shadow-card transition-all hover:border-brand hover:-translate-y-px hover:shadow-card-hov"
+                style={{ padding: '18px 16px' }}
+              >
+                <div className="w-[34px] h-[34px] rounded-lg bg-surface-2 flex items-center justify-center mb-3">
+                  {card.icon}
+                </div>
+                <div className="text-[13px] font-semibold text-text mb-1">{card.title}</div>
+                <div className="text-xs text-text-muted leading-relaxed">{card.body}</div>
+              </div>
+            ))}
           </div>
         </div>
       </main>
 
-      <footer className="text-center py-6 text-xs text-sky-muted border-t border-sky-border">
+      <footer className="text-center py-4 text-xs text-text-faint border-t border-line bg-page">
         Takeoff &middot; From vibe code to production
       </footer>
     </div>
