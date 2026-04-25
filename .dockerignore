@@ -26,7 +26,5 @@ fastapi-project/
 *.swp
 *.swo
 
-# Docker
-Dockerfile
+# Docker compose (optional local files — not needed in image)
 docker-compose*.yml
-.dockerignore
