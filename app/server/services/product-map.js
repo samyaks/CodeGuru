@@ -129,6 +129,35 @@ function computeScoresFromGraph(g) {
   return buildScoresObject(g.jobs, g.entities, g.edges);
 }
 
+/**
+ * map_entities.id is a global PRIMARY KEY (not scoped by map_id). Code entities
+ * use stable logical ids (e.g. cap:auth, page:/dashboard). Remap to UUIDs per
+ * map insert and rewrite edges so second+ maps for the same repo do not collide.
+ */
+function remapEntityIdsForPersistence(entities, edges) {
+  if (!entities || entities.length === 0) {
+    return { entities: entities || [], edges: edges || [] };
+  }
+  const idMap = new Map();
+  for (const e of entities) {
+    idMap.set(e.id, crypto.randomUUID());
+  }
+  const newEntities = entities.map((e) => ({
+    ...e,
+    id: idMap.get(e.id),
+    metadata: {
+      ...(e.metadata && typeof e.metadata === 'object' ? e.metadata : {}),
+      logicalEntityId: e.id,
+    },
+  }));
+  const newEdges = (edges || []).map((edge) => ({
+    ...edge,
+    fromId: idMap.has(edge.fromId) ? idMap.get(edge.fromId) : edge.fromId,
+    toId: idMap.has(edge.toId) ? idMap.get(edge.toId) : edge.toId,
+  }));
+  return { entities: newEntities, edges: newEdges };
+}
+
 async function createProductMap(projectId, analysisId, description, { req } = {}) {
   if (!description || !String(description).trim()) {
     throw AppError.badRequest('description is required');
@@ -161,9 +190,10 @@ async function createProductMap(projectId, analysisId, description, { req } = {}
     }];
   }
 
-  const entities = extractCodeEntities(codebaseModel);
-  const edges = await linkAll(jobs, entities, codebaseModel, analysisId);
-  const scores = buildScoresObject(jobs, entities, edges);
+  const entitiesLogical = extractCodeEntities(codebaseModel);
+  const edgesLogical = await linkAll(jobs, entitiesLogical, codebaseModel, analysisId);
+  const scores = buildScoresObject(jobs, entitiesLogical, edgesLogical);
+  const { entities, edges } = remapEntityIdsForPersistence(entitiesLogical, edgesLogical);
 
   const mapId = crypto.randomUUID();
   const sortP = personas.map((p, i) => ({ ...p, sort_order: i }));
