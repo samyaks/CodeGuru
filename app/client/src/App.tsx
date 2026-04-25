@@ -15,6 +15,8 @@ import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
 import EnvSetup from './pages/EnvSetup';
 import ProjectView from './pages/ProjectView';
+import ProductMap from './pages/ProductMap';
+import ProductMapOnboarding from './pages/ProductMapOnboarding';
 import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
@@ -46,6 +48,8 @@ export default function App() {
 
             {/* Projects — reads are public for user_id:null projects, writes need auth */}
             <Route path="/projects/:id" element={<ProjectView />} />
+            <Route path="/projects/:id/map" element={<ProductMap />} />
+            <Route path="/projects/:id/map/onboard" element={<ProductMapOnboarding />} />
             <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
 
             {/* Takeoff flow */}

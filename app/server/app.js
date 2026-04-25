@@ -17,6 +17,7 @@ const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
 const projectAnalyticsRoutes = require('./routes/project-analytics');
 const collectRoutes = require('./routes/collect');
+const productMapRoutes = require('./routes/product-map');
 const { getDb, closeDb } = require('./lib/db');
 const { requestLogger } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
@@ -102,6 +103,7 @@ if (supabase) {
   app.use('/api/projects', optionalAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), projectAnalyticsRoutes);
+  app.use('/api/product-map', optionalAuth(supabase), productMapRoutes);
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
@@ -113,6 +115,7 @@ if (supabase) {
     res.status(503).json({ error: 'Authentication must be configured for BuildStory.' });
   });
   app.use('/api/projects/:projectId/analytics', projectAnalyticsRoutes);
+  app.use('/api/product-map', productMapRoutes);
 }
 
 // Protected routes (require auth when Supabase is configured)

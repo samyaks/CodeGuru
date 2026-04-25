@@ -1109,9 +1109,12 @@ const analysisEvents = {
   },
 };
 
+const { productMap } = require('./db-map');
+
 module.exports = {
   getDb, closeDb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
   analyses, deployments, buildEntries, projectServices, projectEvents,
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
+  productMap,
 };
