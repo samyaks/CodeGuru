@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "app"
+    "app",
+    "app/client"
   ],
   "scripts": {
     "dev": "npm run dev --prefix app",

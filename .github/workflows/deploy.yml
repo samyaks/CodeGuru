@@ -21,17 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install client dependencies
-        working-directory: app/client
-        run: npm install
-
       - name: Build client
-        working-directory: app/client
-        run: npm run build
+        run: npm run build --prefix app/client
 
       - name: TypeScript check
-        working-directory: app/client
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

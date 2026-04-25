@@ -1,12 +1,18 @@
-# Stage 1: Install all dependencies and build the React client
+# syntax=docker/dockerfile:1
+#
+# Speed notes:
+# - `app/client` is a root npm workspace → one `npm ci` installs client + server deps
+#   (no second `npm install` in app/client).
+# - Layer order: packages → annotate build → app/client → Vite build, so server-only
+#   commits reuse the annotate layer from cache.
+# - BuildKit `--mount=type=cache` for npm + Vite speeds rebuilds on Railway/Fly.
+# - Do not add `echo $(date)` before the client build — it busts the cache every push.
+
 FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Copy workspace root and lockfile first (cache layer)
 COPY package.json package-lock.json ./
-
-# Copy workspace package.json files so npm can resolve workspace links
 COPY packages/annotate/package.json packages/annotate/package.json
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/github/package.json packages/github/package.json
@@ -15,24 +21,19 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN npm ci --include=dev
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --include=dev
 
-# Copy source code
 COPY packages/ packages/
-COPY app/ app/
-
-# Build the annotate package first (client depends on it)
 RUN cd packages/annotate && npm run build:lib
 
-# Install client deps and build
-RUN cd app/client && npm install && echo "build:$(date +%s)" && npm run build
+COPY app/client/ app/client/
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/app/app/client/node_modules/.vite \
+    npm run build --prefix app/client
 
 # Stage 2: Production image — server + built client
 FROM node:20-slim AS production
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -45,16 +46,14 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev && npm cache clean --force
 
-# Copy workspace packages (server uses them at runtime)
 COPY packages/ packages/
 
-# Copy server code
 COPY app/server/ app/server/
 COPY app/package.json app/package.json
 
-# Copy built client from builder stage
 COPY --from=builder /app/app/client/dist app/client/dist
 
 ENV NODE_ENV=production
@@ -62,12 +61,5 @@ ENV PORT=3001
 
 EXPOSE 3001
 
-# No Docker HEALTHCHECK: Railway (and Fly) probe /health themselves via the
-# platform config (railway.toml / fly.toml). A container-local HEALTHCHECK
-# that fetches process.env.API_URL races against platform routing during
-# rolling deploys and can mark a freshly-booted replica "unhealthy" even
-# when the app is fine.
-
 WORKDIR /app/app
-# Run migrations before starting the server (idempotent — skips already applied)
 CMD ["sh", "-c", "node server/lib/migrate.js && node server/app.js"]
