@@ -5,7 +5,9 @@
 #   (no second `npm install` in app/client).
 # - Layer order: packages → annotate build → app/client → Vite build, so server-only
 #   commits reuse the annotate layer from cache.
-# - BuildKit `--mount=type=cache` for npm + Vite speeds rebuilds on Railway/Fly.
+# - No `RUN --mount=type=cache` here: Railway requires
+#   id=s/<service-uuid>-<target> (hardcoded; ARG not allowed). Plain RUN works
+#   on Railway, Fly, and local Docker.
 # - Do not add `echo $(date)` before the client build — it busts the cache every push.
 
 FROM node:20-slim AS builder
@@ -21,16 +23,13 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN --mount=type=cache,id=npm-dev,target=/root/.npm \
-    npm ci --include=dev
+RUN npm ci --include=dev
 
 COPY packages/ packages/
 RUN cd packages/annotate && npm run build:lib
 
 COPY app/client/ app/client/
-RUN --mount=type=cache,id=npm-dev,target=/root/.npm \
-    --mount=type=cache,id=vite,target=/app/app/client/node_modules/.vite \
-    npm run build --prefix app/client
+RUN npm run build --prefix app/client
 
 # Stage 2: Production image — server + built client
 FROM node:20-slim AS production
@@ -46,8 +45,7 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN --mount=type=cache,id=npm-prod,target=/root/.npm \
-    npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY packages/ packages/
 
