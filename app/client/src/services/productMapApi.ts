@@ -2,6 +2,74 @@ import { handleApiResponse } from '../lib/api-error';
 
 const API = '/api';
 
+/** Response from POST /api/product-map/extract-intent (aligned with map-extractor.js). */
+export interface ProductIntentPersona {
+  id: string;
+  name: string;
+  description: string;
+  emoji: string;
+  confirmed: boolean;
+}
+
+export interface ProductIntentJob {
+  id: string;
+  personaId: string;
+  title: string;
+  priority: 'high' | 'medium' | 'low';
+  weight: number;
+  confirmed: boolean;
+}
+
+export interface ProductIntentExtraction {
+  domain: string;
+  personas: ProductIntentPersona[];
+  jobs: ProductIntentJob[];
+}
+
+function parsePriority(p: unknown): 'high' | 'medium' | 'low' {
+  const s = typeof p === 'string' ? p : 'medium';
+  return s === 'high' || s === 'low' ? s : 'medium';
+}
+
+function normalizeExtractionPayload(raw: Record<string, unknown>): ProductIntentExtraction {
+  const domain =
+    typeof raw.domain === 'string' && raw.domain.trim() ? String(raw.domain) : 'General';
+  const personasIn = Array.isArray(raw.personas) ? raw.personas : [];
+  const personas: ProductIntentPersona[] = personasIn.map((p, i) => {
+    const o = p as Record<string, unknown>;
+    return {
+      id: String(o.id ?? `persona-${i}`),
+      name: String(o.name ?? `Persona ${i + 1}`),
+      description: o.description != null ? String(o.description) : '',
+      emoji: o.emoji != null ? String(o.emoji) : '👤',
+      confirmed: Boolean(o.confirmed),
+    };
+  });
+  const jobsIn = Array.isArray(raw.jobs) ? raw.jobs : [];
+  const jobs: ProductIntentJob[] = jobsIn.map((j, i) => {
+    const o = j as Record<string, unknown>;
+    const pr = parsePriority(o.priority);
+    return {
+      id: String(o.id ?? `job-${i}`),
+      personaId: String(
+        o.personaId ?? o.persona_id ?? (personas[0]?.id ?? 'persona-0'),
+      ),
+      title: String(o.title ?? 'Untitled job'),
+      priority: pr,
+      weight:
+        typeof o.weight === 'number'
+          ? o.weight
+          : pr === 'high'
+            ? 3
+            : pr === 'low'
+              ? 1
+              : 2,
+      confirmed: Boolean(o.confirmed),
+    };
+  });
+  return { domain, personas, jobs };
+}
+
 function authFetch(url: string, opts: RequestInit = {}) {
   return fetch(url, { ...opts, credentials: 'include' });
 }
@@ -300,4 +368,24 @@ export async function createProductMap(
   });
   const data = (await handleApiResponse(res)) as Record<string, unknown>;
   return normalizeFromMapEnvelope(data) ?? normalizeMapPayload(data);
+}
+
+/**
+ * POST /api/product-map/extract-intent
+ * Body: { description, analysisId? } — analysisId is optional; used for LLM usage tracking.
+ */
+export async function extractProductIntent(
+  description: string,
+  analysisId?: string,
+): Promise<ProductIntentExtraction> {
+  const res = await authFetch(`${API}/product-map/extract-intent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      description,
+      ...(analysisId != null && String(analysisId).trim() !== '' ? { analysisId: String(analysisId).trim() } : {}),
+    }),
+  });
+  const data = (await handleApiResponse(res)) as Record<string, unknown>;
+  return normalizeExtractionPayload(data);
 }

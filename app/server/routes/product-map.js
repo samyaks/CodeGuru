@@ -10,8 +10,75 @@ const {
   simulateForModule,
   getMapByProject,
 } = require('../services/product-map');
+const { extractProductIntent } = require('../services/map-extractor');
 
 const router = express.Router();
+
+function isClaudeConfigError(err) {
+  if (!err) return false;
+  const s = String(err.status || err.statusCode || '');
+  if (s === '401' || s === 401) return true;
+  const m = String(err.message || err.error?.message || '');
+  if (/api[_\s-]?key|authentication|401|x-api-key|invalid key/i.test(m)) return true;
+  return false;
+}
+
+router.post(
+  '/extract-intent',
+  asyncHandler(async (req, res) => {
+    try {
+      const { description, analysisId } = req.body || {};
+      if (typeof description !== 'string') {
+        return res.status(400).json({
+          error: 'description is required and must be a string',
+          code: 'BAD_REQUEST',
+        });
+      }
+      const desc = description.trim();
+      if (desc.length < 20) {
+        return res.status(400).json({
+          error: 'description must be at least 20 characters after trimming whitespace',
+          code: 'BAD_REQUEST',
+        });
+      }
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return res.status(500).json({
+          error:
+            'Claude is not available: ANTHROPIC_API_KEY is not set on the server. Add it to your environment and restart the API.',
+          code: 'INTERNAL_ERROR',
+        });
+      }
+      if (analysisId != null && typeof analysisId !== 'string') {
+        return res.status(400).json({
+          error: 'analysisId, when provided, must be a string',
+          code: 'BAD_REQUEST',
+        });
+      }
+      const out = await extractProductIntent(desc, analysisId || null);
+      res.json({
+        domain: out.domain,
+        personas: out.personas,
+        jobs: out.jobs,
+      });
+    } catch (err) {
+      if (err.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message, code: err.code || 'ERROR' });
+      }
+      if (isClaudeConfigError(err)) {
+        return res.status(500).json({
+          error:
+            'Claude could not be reached. Verify ANTHROPIC_API_KEY is set, valid, and has not expired, then try again.',
+          code: 'INTERNAL_ERROR',
+        });
+      }
+      console.error('[product-map] POST extract-intent', err);
+      return res.status(500).json({
+        error: err.message || 'Failed to extract product intent from the description',
+        code: 'INTERNAL_ERROR',
+      });
+    }
+  })
+);
 
 function mapRowToApi(map) {
   if (!map) return null;

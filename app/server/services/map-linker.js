@@ -90,8 +90,9 @@ async function claudeLink(job, entities, codebaseModel, analysisId) {
   const raw = response.content?.[0]?.text || '[]';
   const links = JSON.parse(stripJsonFence(raw));
   if (!Array.isArray(links)) return [];
+  const entityIds = new Set(entities.map((e) => e.id));
   return links
-    .filter((l) => l && l.confidence >= 0.5 && l.entityId)
+    .filter((l) => l && l.confidence >= 0.5 && l.entityId && entityIds.has(l.entityId))
     .map((l) => ({
       fromId: job.id,
       toId: l.entityId,

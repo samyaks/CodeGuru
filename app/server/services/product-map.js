@@ -207,55 +207,84 @@ async function recomputeAndPersist(mapId) {
   return { ...full, map: { ...full.map, scores }, graph: g, scores };
 }
 
+function patchPayload(input) {
+  if (input != null && typeof input === 'object' && !Array.isArray(input)) {
+    return input;
+  }
+  return {};
+}
+
+function requireNonEmptyString(p, key, actionLabel) {
+  const v = p[key];
+  if (v == null || (typeof v === 'string' && v.trim() === '')) {
+    throw AppError.badRequest(`${actionLabel}: ${key} is required`);
+  }
+}
+
 async function updateProductMap(mapId, action, payload, { req } = {}) {
   const ctx = await mapDb.getMapContext(mapId);
   if (!ctx) throw AppError.notFound('Product map not found');
   const deployment = await deployments.findById(ctx.projectId);
   if (deployment && req) checkProjectAccess(deployment, req);
 
+  const p = patchPayload(payload);
+
   switch (action) {
     case 'confirmPersona': {
-      await mapDb.updatePersona(payload.personaId, { confirmed: true });
+      requireNonEmptyString(p, 'personaId', 'confirmPersona');
+      await mapDb.updatePersona(p.personaId, { confirmed: true });
       break;
     }
     case 'addPersona': {
-      await mapDb.addPersona(mapId, payload);
+      requireNonEmptyString(p, 'name', 'addPersona');
+      await mapDb.addPersona(mapId, p);
       break;
     }
     case 'removePersona': {
-      await mapDb.removePersona(payload.personaId);
+      requireNonEmptyString(p, 'personaId', 'removePersona');
+      await mapDb.removePersona(p.personaId);
       break;
     }
     case 'confirmJob': {
-      await mapDb.updateJob(payload.jobId, { confirmed: true });
+      requireNonEmptyString(p, 'jobId', 'confirmJob');
+      await mapDb.updateJob(p.jobId, { confirmed: true });
       break;
     }
     case 'addJob': {
-      await mapDb.addJob(mapId, payload);
+      requireNonEmptyString(p, 'personaId', 'addJob');
+      requireNonEmptyString(p, 'title', 'addJob');
+      await mapDb.addJob(mapId, p);
       break;
     }
     case 'removeJob': {
-      await mapDb.removeJob(payload.jobId);
+      requireNonEmptyString(p, 'jobId', 'removeJob');
+      await mapDb.removeJob(p.jobId);
       break;
     }
     case 'setPriority': {
-      const pr = payload.priority || 'medium';
-      await mapDb.updateJob(payload.jobId, {
+      requireNonEmptyString(p, 'jobId', 'setPriority');
+      const pr = p.priority || 'medium';
+      await mapDb.updateJob(p.jobId, {
         priority: pr,
         weight: weightFromPriority(pr),
       });
       break;
     }
     case 'addEdge': {
-      await mapDb.addEdge(mapId, payload);
+      requireNonEmptyString(p, 'fromId', 'addEdge');
+      requireNonEmptyString(p, 'toId', 'addEdge');
+      requireNonEmptyString(p, 'type', 'addEdge');
+      await mapDb.addEdge(mapId, p);
       break;
     }
     case 'removeEdge': {
-      await mapDb.removeEdge(payload.edgeId);
+      requireNonEmptyString(p, 'edgeId', 'removeEdge');
+      await mapDb.removeEdge(p.edgeId);
       break;
     }
     case 'confirmEdge': {
-      await mapDb.confirmEdge(payload.edgeId);
+      requireNonEmptyString(p, 'edgeId', 'confirmEdge');
+      await mapDb.confirmEdge(p.edgeId);
       break;
     }
     default:

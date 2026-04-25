@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { createProductMap } from '../services/productMapApi';
+import { createProductMap, extractProductIntent, type ProductIntentExtraction } from '../services/productMapApi';
 import { fetchProjectDetail } from '../services/api';
 import { ApiError } from '../lib/api-error';
 
@@ -115,12 +115,7 @@ function StepDescribe({
 }: {
   value: string;
   onChange: (s: string) => void;
-  onAnalyzed: (result: {
-    summary: string;
-    suggestedPersonas: { name: string; description: string; emoji: string }[];
-    suggestedJobs: string[];
-    detectedDomain: string;
-  }) => void;
+  onAnalyzed: (result: ProductIntentExtraction | null) => void;
   onAccept: () => void;
   analysisId: string;
   onAnalysisIdChange: (s: string) => void;
@@ -128,45 +123,23 @@ function StepDescribe({
   posting: boolean;
 }) {
   const [aiParsing, setAiParsing] = useState(false);
-  const [aiResult, setAiResult] = useState<{
-    summary: string;
-    suggestedPersonas: { name: string; description: string; emoji: string }[];
-    suggestedJobs: string[];
-    detectedDomain: string;
-  } | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<ProductIntentExtraction | null>(null);
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
+    setAnalyzeError(null);
     setAiParsing(true);
-    window.setTimeout(() => {
-      setAiParsing(false);
-      const res = {
-        summary:
-          'A project management platform for freelance designers to find clients, manage projects, and handle invoicing.',
-        suggestedPersonas: [
-          {
-            name: 'Freelance Designer',
-            description:
-              'Independent creative professional looking for clients and managing multiple design projects',
-            emoji: '🎨',
-          },
-          {
-            name: 'Client',
-            description: 'Business owner or marketing manager who needs design work done',
-            emoji: '💼',
-          },
-        ],
-        suggestedJobs: [
-          'Find and attract new clients',
-          'Manage active design projects',
-          'Share deliverables and get feedback',
-          'Send invoices and get paid',
-          'Build a portfolio to showcase work',
-        ],
-        detectedDomain: 'Creative services / Freelance',
-      };
+    try {
+      const res = await extractProductIntent(value.trim(), analysisId.trim() || undefined);
       setAiResult(res);
       onAnalyzed(res);
-    }, 1500);
+    } catch (e) {
+      setAnalyzeError(
+        e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Could not analyze your description',
+      );
+    } finally {
+      setAiParsing(false);
+    }
   };
 
   return (
@@ -197,6 +170,7 @@ function StepDescribe({
         style={font}
       />
       {postError && <p className="mt-2 text-xs text-red-400">{postError}</p>}
+      {analyzeError && <p className="mt-2 text-xs text-red-400">{analyzeError}</p>}
       <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
         <Btn onClick={handleAnalyze} disabled={value.trim().length < 20 || aiParsing || posting}>
           {aiParsing ? 'Understanding your app...' : 'Analyze'}
@@ -214,7 +188,7 @@ function StepDescribe({
             <Badge color="#f43f5e">AI Understanding</Badge>
             <span className="text-[11px] text-[#5a5a6e]">Review and confirm</span>
           </div>
-          <p className="mb-4 text-[13px] leading-relaxed text-[#b8b8c8]">{aiResult.summary}</p>
+          <p className="mb-4 text-[13px] leading-relaxed text-[#b8b8c8]">{aiResult.domain}</p>
           <div
             className="mb-2 text-[11px] font-bold uppercase text-[#6a6a7e]"
             style={{ ...mono, letterSpacing: '0.1em' }}
@@ -222,9 +196,9 @@ function StepDescribe({
             Personas we detected
           </div>
           <div className="mb-4 flex flex-wrap gap-2.5">
-            {aiResult.suggestedPersonas.map((p, i) => (
+            {aiResult.personas.map((p) => (
               <div
-                key={i}
+                key={p.id}
                 className="min-w-[200px] flex-1 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3.5 py-2.5"
               >
                 <div className="mb-1 text-sm">
@@ -241,15 +215,15 @@ function StepDescribe({
             Jobs they need to do
           </div>
           <div className="mb-4.5 flex flex-col gap-1">
-            {aiResult.suggestedJobs.map((j, i) => (
+            {aiResult.jobs.map((j) => (
               <div
-                key={i}
+                key={j.id}
                 className="flex items-center gap-2 rounded-md bg-white/[0.02] px-2.5 py-1.5 text-xs text-[#b8b8c8]"
               >
                 <span className="shrink-0 text-[10px] text-[#f43f5e]" style={mono}>
                   →
                 </span>
-                {j}
+                {j.title}
               </div>
             ))}
           </div>
@@ -257,7 +231,14 @@ function StepDescribe({
             <Btn onClick={onAccept} disabled={posting || !analysisId.trim()}>
               {posting ? 'Creating map…' : 'Looks right — continue'}
             </Btn>
-            <Btn variant="ghost" onClick={() => setAiResult(null)} disabled={posting}>
+            <Btn
+              variant="ghost"
+              onClick={() => {
+                setAiResult(null);
+                onAnalyzed(null);
+              }}
+              disabled={posting}
+            >
               Let me edit my description
             </Btn>
           </div>
@@ -610,9 +591,7 @@ export default function ProductMapOnboarding() {
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
-  const [analyzed, setAnalyzed] = useState<{
-    suggestedPersonas: { name: string; description: string; emoji: string }[];
-  } | null>(null);
+  const [extractedIntent, setExtractedIntent] = useState<ProductIntentExtraction | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -628,36 +607,34 @@ export default function ProductMapOnboarding() {
       setPostError('Add an analysis ID and description.');
       return;
     }
+    if (!extractedIntent) {
+      setPostError('Use Analyze to extract personas and jobs first.');
+      return;
+    }
     setPostError(null);
     setPosting(true);
     try {
       await createProductMap(projectId, { analysisId: analysisId.trim(), description: appDescription.trim() });
-      const pList: Persona[] = (analyzed?.suggestedPersonas || []).map((p, i) => ({
-        id: `persona-${i}`,
-        name: p.name,
-        description: p.description,
-        emoji: p.emoji,
-        confirmed: false,
-      }));
-      setPersonas(pList);
-      const pid0 = pList[0]?.id;
-      const pid1 = pList[1]?.id;
-      if (pid0) {
-        setJobs([
-          { id: 'j1', personaId: pid0, title: 'Find and attract new clients', priority: 'high', confirmed: false },
-          { id: 'j2', personaId: pid0, title: 'Manage active design projects', priority: 'high', confirmed: false },
-          { id: 'j3', personaId: pid0, title: 'Share deliverables and get feedback', priority: 'medium', confirmed: false },
-          { id: 'j4', personaId: pid0, title: 'Send invoices and get paid', priority: 'medium', confirmed: false },
-          { id: 'j5', personaId: pid0, title: 'Build a portfolio to showcase work', priority: 'low', confirmed: false },
-          ...(pid1
-            ? [
-                { id: 'j6', personaId: pid1, title: 'Browse and hire designers', priority: 'high' as const, confirmed: false },
-                { id: 'j7', personaId: pid1, title: 'Review project deliverables', priority: 'medium' as const, confirmed: false },
-                { id: 'j8', personaId: pid1, title: 'Pay for completed work', priority: 'medium' as const, confirmed: false },
-              ]
-            : []),
-        ]);
-      }
+      // User already accepted the extraction ("Looks right — continue"); wizard steps
+      // require confirmed personas and confirmed jobs per persona — seed true so the flow is not stuck.
+      setPersonas(
+        extractedIntent.personas.map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          emoji: p.emoji,
+          confirmed: true,
+        })),
+      );
+      setJobs(
+        extractedIntent.jobs.map((j) => ({
+          id: j.id,
+          personaId: j.personaId,
+          title: j.title,
+          priority: j.priority,
+          confirmed: true,
+        })),
+      );
       setStep(1);
     } catch (e) {
       setPostError(
@@ -722,7 +699,7 @@ export default function ProductMapOnboarding() {
           <StepDescribe
             value={appDescription}
             onChange={setAppDescription}
-            onAnalyzed={(r) => setAnalyzed(r)}
+            onAnalyzed={(r) => setExtractedIntent(r)}
             onAccept={handleAcceptDescribe}
             analysisId={analysisId}
             onAnalysisIdChange={setAnalysisId}
