@@ -21,15 +21,15 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm-dev,target=/root/.npm \
     npm ci --include=dev
 
 COPY packages/ packages/
 RUN cd packages/annotate && npm run build:lib
 
 COPY app/client/ app/client/
-RUN --mount=type=cache,target=/root/.npm \
-    --mount=type=cache,target=/app/app/client/node_modules/.vite \
+RUN --mount=type=cache,id=npm-dev,target=/root/.npm \
+    --mount=type=cache,id=vite,target=/app/app/client/node_modules/.vite \
     npm run build --prefix app/client
 
 # Stage 2: Production image — server + built client
@@ -46,7 +46,7 @@ COPY packages/railway/package.json packages/railway/package.json
 COPY app/package.json app/package.json
 COPY app/client/package.json app/client/package.json
 
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=npm-prod,target=/root/.npm \
     npm ci --omit=dev && npm cache clean --force
 
 COPY packages/ packages/
