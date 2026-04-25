@@ -36,7 +36,12 @@ export default function AnalysisProgress() {
 
   useEffect(() => {
     if (completed && id) {
-      const timer = setTimeout(() => navigate(`/projects/${id}`), 800);
+      // Takeoff uses the deployment id as the analysis id, so we can jump straight
+      // into Product Map onboarding and prefill the analysisId.
+      const timer = setTimeout(
+        () => navigate(`/projects/${id}/map/onboard?analysisId=${encodeURIComponent(id)}`),
+        800,
+      );
       return () => clearTimeout(timer);
     }
   }, [completed, id, navigate]);
