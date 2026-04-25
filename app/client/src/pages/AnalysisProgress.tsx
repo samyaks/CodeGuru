@@ -57,14 +57,14 @@ export default function AnalysisProgress() {
         <div className="max-w-lg w-full text-center space-y-8">
           {error ? (
             <div className="space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
+              <div className="w-16 h-16 mx-auto rounded-full bg-danger-bg border border-danger-border flex items-center justify-center text-2xl">
                 !
               </div>
               <h2 className="text-xl font-semibold">Analysis Failed</h2>
-              <p className="text-sky-muted text-sm">{error?.error}</p>
+              <p className="text-text-muted text-sm">{error?.error}</p>
               <button
                 onClick={() => navigate('/')}
-                className="px-6 py-2 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
+                className="px-6 py-2 rounded-lg bg-surface border border-line text-text-soft hover:bg-page transition-colors text-sm"
               >
                 Try Another Repo
               </button>
@@ -72,25 +72,25 @@ export default function AnalysisProgress() {
           ) : (
             <div className="space-y-6">
               <div className="relative w-20 h-20 mx-auto">
-                <Loader2 className="w-20 h-20 text-gold animate-spin" />
+                <Loader2 className="w-20 h-20 text-brand animate-spin" />
                 {scored && (
-                  <div className="absolute inset-0 flex items-center justify-center font-bold text-lg text-sky-white">
+                  <div className="absolute inset-0 flex items-center justify-center font-bold text-lg text-text">
                     {scored.score}%
                   </div>
                 )}
               </div>
 
               <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-sky-white">
+                <h2 className="text-xl font-semibold text-text">
                   {completed ? 'Analysis Complete' : scored ? 'Generating plan...' : 'Analyzing your repo'}
                 </h2>
-                <p className="text-sky-muted text-sm">
+                <p className="text-text-muted text-sm">
                   {message || (phase && PHASE_LABELS[phase]) || 'Starting analysis...'}
                 </p>
               </div>
 
               {scored && !completed && (
-                <div className="text-sm text-gold">
+                <div className="text-sm text-brand">
                   Production readiness: {scored.score}%
                 </div>
               )}
@@ -100,7 +100,7 @@ export default function AnalysisProgress() {
                   .filter((m) => m.type === 'progress')
                   .slice(-5)
                   .map((m, i) => (
-                    <div key={i} className="text-xs text-sky-muted truncate">
+                    <div key={i} className="text-xs text-text-muted truncate">
                       {(m as ProgressMessage).message}
                     </div>
                   ))}

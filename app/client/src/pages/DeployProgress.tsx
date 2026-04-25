@@ -55,28 +55,28 @@ export default function DeployProgress() {
         <div className="max-w-lg w-full text-center space-y-8">
           {deployError && !deployed && !failed ? (
             <div className="space-y-4">
-              <AlertCircle size={48} className="text-red-600 mx-auto" />
-              <h2 className="text-xl font-semibold text-sky-white">Deploy Failed to Start</h2>
-              <p className="text-sm text-sky-muted">{deployError}</p>
+              <AlertCircle size={48} className="text-danger mx-auto" />
+              <h2 className="text-xl font-semibold text-text">Deploy Failed to Start</h2>
+              <p className="text-sm text-text-muted">{deployError}</p>
               <button
                 onClick={() => navigate(`/projects/${id}`)}
-                className="px-6 py-2 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
+                className="px-6 py-2 rounded-lg bg-surface border border-line text-text-soft hover:bg-page transition-colors text-sm"
               >
                 Back to Project
               </button>
             </div>
           ) : deployed ? (
             <div className="space-y-6">
-              <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500/10 border-2 border-emerald-500/30 flex items-center justify-center">
-                <Rocket size={36} className="text-emerald-600" />
+              <div className="w-20 h-20 mx-auto rounded-full bg-success-bg border-2 border-success-border flex items-center justify-center">
+                <Rocket size={36} className="text-success" />
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-bold text-sky-white">Your app is live!</h2>
+                <h2 className="text-2xl font-bold text-text">Your app is live!</h2>
                 <a
                   href={deployed.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-gold hover:underline"
+                  className="inline-flex items-center gap-2 text-brand hover:underline"
                 >
                   {deployed.url} <ExternalLink size={14} />
                 </a>
@@ -86,45 +86,45 @@ export default function DeployProgress() {
                   href={deployed.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-6 py-2.5 rounded-lg bg-gold text-midnight font-medium hover:bg-gold-dim transition-colors text-sm"
+                  className="px-6 py-2.5 rounded-lg bg-brand text-white font-medium hover:bg-brand-hov transition-colors text-sm"
                 >
                   Visit Your App
                 </a>
                 <button
                   onClick={() => navigate('/dashboard')}
-                  className="px-6 py-2.5 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
+                  className="px-6 py-2.5 rounded-lg bg-surface border border-line text-text-soft hover:bg-page transition-colors text-sm"
                 >
                   Dashboard
                 </button>
               </div>
 
               {(isSyncing || urlSynced) && (
-                <div className="mt-6 text-left glass rounded-lg p-4 border border-sky-border/30">
-                  <h3 className="text-sm font-medium text-sky-white mb-3">URL Sync</h3>
+                <div className="mt-6 text-left glass rounded-lg p-4 border border-divider">
+                  <h3 className="text-sm font-medium text-text mb-3">URL Sync</h3>
                   {isSyncing && !urlSynced && (
-                    <div className="flex items-center gap-2 text-xs text-sky-muted">
-                      <Loader2 size={14} className="animate-spin text-gold" />
+                    <div className="flex items-center gap-2 text-xs text-text-muted">
+                      <Loader2 size={14} className="animate-spin text-brand" />
                       Syncing live URL across services...
                     </div>
                   )}
                   {urlSynced?.results?.map((r: any, i: number) => (
                     <div key={i} className="flex items-start gap-2 text-xs py-1">
                       {r.status === 'synced' ? (
-                        <CheckCircle2 size={14} className="text-emerald-500 mt-0.5 shrink-0" />
+                        <CheckCircle2 size={14} className="text-success mt-0.5 shrink-0" />
                       ) : (
-                        <AlertTriangle size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                        <AlertTriangle size={14} className="text-warning mt-0.5 shrink-0" />
                       )}
                       <div>
-                        <span className="text-sky-white">
+                        <span className="text-text">
                           {r.service === 'railway_env' ? 'Railway env vars' : 'Supabase Auth'}
                         </span>
                         {r.status === 'synced' && r.updated && (
-                          <span className="text-sky-muted ml-1">
+                          <span className="text-text-muted ml-1">
                             ({r.updated.join(', ')})
                           </span>
                         )}
                         {r.status === 'failed' && (
-                          <span className="text-amber-400 ml-1">{r.error}</span>
+                          <span className="text-warning ml-1">{r.error}</span>
                         )}
                       </div>
                     </div>
@@ -134,29 +134,29 @@ export default function DeployProgress() {
             </div>
           ) : failed ? (
             <div className="space-y-6">
-              <AlertCircle size={48} className="text-red-600 mx-auto" />
+              <AlertCircle size={48} className="text-danger mx-auto" />
               <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-sky-white">Deploy Failed</h2>
-                <p className="text-sm text-sky-muted">{(failed as any).error}</p>
+                <h2 className="text-xl font-semibold text-text">Deploy Failed</h2>
+                <p className="text-sm text-text-muted">{(failed as any).error}</p>
               </div>
               {(failed as any).buildLogs && (
-                <pre className="text-left text-xs text-sky-off bg-midnight rounded-lg p-4 overflow-auto max-h-64 border border-sky-border/30">
+                <pre className="text-left text-xs text-text-soft bg-page rounded-lg p-4 overflow-auto max-h-64 border border-divider">
                   {(failed as any).buildLogs}
                 </pre>
               )}
               <button
                 onClick={() => navigate(`/projects/${id}`)}
-                className="px-6 py-2 rounded-lg bg-navy border border-sky-border text-sky-off hover:bg-navy-mid transition-colors text-sm"
+                className="px-6 py-2 rounded-lg bg-surface border border-line text-text-soft hover:bg-page transition-colors text-sm"
               >
                 Back to Project
               </button>
             </div>
           ) : (
             <div className="space-y-6">
-              <Loader2 className="w-16 h-16 text-gold animate-spin mx-auto" />
+              <Loader2 className="w-16 h-16 text-brand animate-spin mx-auto" />
               <div className="space-y-2">
-                <h2 className="text-xl font-semibold text-sky-white">Deploying your app</h2>
-                <p className="text-sky-muted text-sm">
+                <h2 className="text-xl font-semibold text-text">Deploying your app</h2>
+                <p className="text-text-muted text-sm">
                   {latestProgress?.message || 'Starting deployment...'}
                 </p>
               </div>
@@ -165,7 +165,7 @@ export default function DeployProgress() {
                   .filter((m) => m.type === 'progress')
                   .slice(-5)
                   .map((m, i) => (
-                    <div key={i} className="text-xs text-sky-muted truncate">
+                    <div key={i} className="text-xs text-text-muted truncate">
                       {(m as any).message}
                     </div>
                   ))}

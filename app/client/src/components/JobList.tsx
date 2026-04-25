@@ -25,7 +25,7 @@ export function ReadinessJobList({
   return (
     <div className={className}>
       <div
-        className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-[#4a4a60]"
+        className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]"
         style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.1em' }}
       >
         Job readiness
@@ -39,18 +39,18 @@ export function ReadinessJobList({
               key={job.jobId}
               className="flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 transition-colors duration-300"
               style={{
-                background: highlight ? 'rgba(34, 197, 94, 0.03)' : 'rgba(255,255,255,0.02)',
+                background: highlight ? 'rgba(34, 197, 94, 0.03)' : '#0f172a',
                 border: `1px solid ${
-                  highlight ? 'rgba(34, 197, 94, 0.08)' : 'rgba(255,255,255,0.05)'
+                  highlight ? 'rgba(34, 197, 94, 0.08)' : '#e2e8f0'
                 }`,
               }}
             >
               <span className="w-4 text-xs">{job.personaEmoji}</span>
-              <span className="min-w-0 flex-1 text-xs font-medium text-[#b8b8c8]">
+              <span className="min-w-0 flex-1 text-xs font-medium text-[#64748b]">
                 {job.title}
               </span>
               <span
-                className="text-[10px] text-[#4a4a60]"
+                className="text-[10px] text-[#94a3b8]"
                 style={{ fontFamily: "'DM Mono', monospace" }}
               >
                 {job.builtCount}/{job.needsCount} done
@@ -94,7 +94,7 @@ type GroupedJobListProps = {
 
 const PRIORITY_STY: Record<string, { bg: string; text: string }> = {
   high: { bg: 'rgba(244, 63, 94, 0.1)', text: '#f43f5e' },
-  medium: { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b' },
+  medium: { bg: 'rgba(245, 158, 11, 0.1)', text: '#d97706' },
   low: { bg: 'rgba(107, 114, 128, 0.1)', text: '#9ca3af' },
 };
 
@@ -105,7 +105,7 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
     <div className={className}>
       {groups.map(({ persona, jobs }) => (
         <div key={persona.id} className="mb-6">
-          <div className="mb-2.5 flex items-center gap-2 text-sm font-bold text-[#dcdce6]">
+          <div className="mb-2.5 flex items-center gap-2 text-sm font-bold text-[#0f172a]">
             <span className="text-base">{persona.emoji}</span>
             {persona.name}
           </div>
@@ -127,15 +127,15 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
                   }}
                   className="cursor-pointer rounded-[10px] p-3 transition-colors duration-150"
                   style={{
-                    background: isExpanded ? 'rgba(244, 63, 94, 0.04)' : 'rgba(255,255,255,0.02)',
+                    background: isExpanded ? 'rgba(244, 63, 94, 0.04)' : '#0f172a',
                     border: `1px solid ${
-                      isExpanded ? 'rgba(244, 63, 94, 0.12)' : 'rgba(255,255,255,0.05)'
+                      isExpanded ? 'rgba(244, 63, 94, 0.12)' : '#e2e8f0'
                     }`,
                   }}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-[13px] font-semibold text-[#dcdce6]">
+                      <span className="text-[13px] font-semibold text-[#0f172a]">
                         {job.title}
                       </span>
                       <span
@@ -153,7 +153,7 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
                   </div>
                   {isExpanded && job.needs.length > 0 && (
                     <div
-                      className="mt-3 border-t border-white/[0.04] pt-2.5"
+                      className="mt-3 border-t border-divider pt-2.5"
                     >
                       {job.needs.map((n, i) => (
                         <div
@@ -162,7 +162,7 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
                           style={{
                             borderBottom:
                               i < job.needs.length - 1
-                                ? '1px solid rgba(255,255,255,0.03)'
+                                ? '1px solid #f8fafc'
                                 : 'none',
                           }}
                         >
@@ -170,7 +170,7 @@ export function GroupedExpandableJobList({ groups, className = '' }: GroupedJobL
                             className="h-[7px] w-[7px] shrink-0 rounded-full"
                             style={{ background: n.statusColor }}
                           />
-                          <span className="min-w-0 flex-1 text-xs text-[#8a8a9c]">
+                          <span className="min-w-0 flex-1 text-xs text-[#64748b]">
                             {n.detail || n.label}
                           </span>
                           <span

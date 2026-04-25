@@ -9,9 +9,9 @@ type ReadinessRingProps = {
 };
 
 function scoreHue(score: number) {
-  if (score >= 70) return '#22c55e';
-  if (score >= 40) return '#f59e0b';
-  return '#ef4444';
+  if (score >= 70) return '#16a34a';
+  if (score >= 40) return '#d97706';
+  return '#dc2626';
 }
 
 export function ReadinessRing({
@@ -46,7 +46,7 @@ export function ReadinessRing({
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="rgba(255,255,255,0.05)"
+            stroke="#e2e8f0"
             strokeWidth={stroke}
           />
           <circle
@@ -73,7 +73,7 @@ export function ReadinessRing({
             {Math.round(clamped)}
           </span>
           <span
-            className="mt-[-2px] text-[#4a4a60]"
+            className="mt-[-2px] text-[#94a3b8]"
             style={{ fontSize: size * 0.09, fontFamily: "'DM Mono', monospace" }}
           >
             / 100
@@ -81,9 +81,9 @@ export function ReadinessRing({
         </div>
       </div>
       {label && (
-        <span className="text-xs font-semibold text-[#dcdce6]">{label}</span>
+        <span className="text-xs font-semibold text-[#0f172a]">{label}</span>
       )}
-      {sublabel && <span className="text-[10px] text-[#4a4a60]">{sublabel}</span>}
+      {sublabel && <span className="text-[10px] text-[#94a3b8]">{sublabel}</span>}
     </div>
   );
 }
@@ -103,7 +103,7 @@ export function MiniScoreBar({ score, width = 50, color, className = '' }: MiniS
       style={{ fontFamily: "'DM Mono', monospace" }}
     >
       <div
-        className="h-1 overflow-hidden rounded-sm bg-white/[0.06]"
+        className="h-1 overflow-hidden rounded-sm bg-surface-2"
         style={{ width }}
       >
         <div
@@ -131,7 +131,7 @@ export function DeltaBadge({ delta, className = '' }: DeltaBadgeProps) {
   if (delta === 0) return null;
   return (
     <span
-      className={`inline-flex items-center gap-0.5 text-[11px] font-bold text-emerald-500 ${className}`}
+      className={`inline-flex items-center gap-0.5 text-[11px] font-bold text-success ${className}`}
       style={{ fontFamily: "'DM Mono', monospace" }}
     >
       +{delta}%
@@ -142,9 +142,9 @@ export function DeltaBadge({ delta, className = '' }: DeltaBadgeProps) {
 type ImpactArrowProps = { before: number; after: number };
 
 function arrowHue(v: number) {
-  if (v >= 70) return '#22c55e';
-  if (v >= 40) return '#f59e0b';
-  return '#ef4444';
+  if (v >= 70) return '#16a34a';
+  if (v >= 40) return '#d97706';
+  return '#dc2626';
 }
 
 export function ImpactArrow({ before, after }: ImpactArrowProps) {
@@ -154,7 +154,7 @@ export function ImpactArrow({ before, after }: ImpactArrowProps) {
       style={{ fontFamily: "'DM Mono', monospace" }}
     >
       <span className="font-bold" style={{ color: arrowHue(before) }}>{before}%</span>
-      <span className="text-[#3a3a4e]">→</span>
+      <span className="text-[#cbd5e1]">→</span>
       <span className="font-bold" style={{ color: arrowHue(after) }}>{after}%</span>
     </div>
   );

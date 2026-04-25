@@ -23,9 +23,9 @@ import {
 import { useAuth } from '../hooks/useAuth';
 
 const STATUS_ICON: Record<string, React.ReactNode> = {
-  ready: <CheckCircle2 size={18} className="text-emerald-600" />,
-  partial: <AlertCircle size={18} className="text-amber-600" />,
-  missing: <XCircle size={18} className="text-red-600" />,
+  ready: <CheckCircle2 size={18} className="text-success" />,
+  partial: <AlertCircle size={18} className="text-warning" />,
+  missing: <XCircle size={18} className="text-danger" />,
 };
 
 const GAP_META: Record<string, { icon: React.ReactNode; label: string }> = {
@@ -88,7 +88,7 @@ export default function ReadinessReport() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-sky-muted">Loading report...</div>
+          <div className="text-text-muted">Loading report...</div>
         </main>
       </div>
     );
@@ -99,7 +99,7 @@ export default function ReadinessReport() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-red-600">{error || 'Project not found'}</div>
+          <div className="text-danger">{error || 'Project not found'}</div>
         </main>
       </div>
     );
@@ -130,14 +130,14 @@ export default function ReadinessReport() {
       <main className="flex-1 px-6 py-10 max-w-3xl mx-auto w-full space-y-10">
         {/* Score + description */}
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-4 border-gold/30 bg-navy">
-            <span className="text-4xl font-bold text-sky-white">{score}%</span>
+          <div className="inline-flex items-center justify-center w-28 h-28 rounded-full border-4 border-brand bg-surface">
+            <span className="text-4xl font-bold text-text">{score}%</span>
           </div>
-          <h1 className="text-2xl font-semibold text-sky-white">Production Readiness</h1>
+          <h1 className="text-2xl font-semibold text-text">Production Readiness</h1>
           {project.description && (
-            <p className="text-sky-off text-sm max-w-lg mx-auto italic">{project.description}</p>
+            <p className="text-text-soft text-sm max-w-lg mx-auto italic">{project.description}</p>
           )}
-          <p className="text-sky-muted text-sm max-w-md mx-auto">
+          <p className="text-text-muted text-sm max-w-md mx-auto">
             {score >= 90
               ? 'Your app looks ready to deploy. You can ship it now or review the details below.'
               : `Your app is ${score}% of the way there. We've identified what's missing and built you a plan.`}
@@ -148,24 +148,24 @@ export default function ReadinessReport() {
         {stackBadges.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2">
             {stackBadges.map((badge) => (
-              <span key={badge} className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-off">
+              <span key={badge} className="px-3 py-1 rounded-full text-xs bg-surface border border-line text-text-soft">
                 {badge}
               </span>
             ))}
             {buildPlan.type && (
-              <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">
+              <span className="px-3 py-1 rounded-full text-xs bg-brand-tint border border-brand-tint-border text-brand">
                 {buildPlan.type === 'static' ? 'Static site' : buildPlan.type === 'fullstack' ? 'Full-stack' : buildPlan.type}
               </span>
             )}
             {analysis?.meta && (
               <>
                 {analysis.meta.stars > 0 && (
-                  <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                  <span className="px-3 py-1 rounded-full text-xs bg-surface border border-line text-text-muted flex items-center gap-1">
                     <Star size={10} /> {analysis.meta.stars}
                   </span>
                 )}
                 {analysis.meta.forks > 0 && (
-                  <span className="px-3 py-1 rounded-full text-xs bg-navy border border-sky-border text-sky-muted flex items-center gap-1">
+                  <span className="px-3 py-1 rounded-full text-xs bg-surface border border-line text-text-muted flex items-center gap-1">
                     <GitFork size={10} /> {analysis.meta.forks}
                   </span>
                 )}
@@ -179,31 +179,31 @@ export default function ReadinessReport() {
           {project.features_summary && (
             <button
               onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('summary'); }}
-              className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'summary' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+              className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'summary' ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
             >
               What It Does
             </button>
           )}
           <button
             onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('overview'); }}
-            className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+            className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
           >
             Readiness
           </button>
           <button
             onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('details'); }}
-            className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'details' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+            className={`px-4 py-1.5 rounded-lg transition-colors ${activeTab === 'details' ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
           >
             Codebase Details
           </button>
           <button
             onClick={() => { hasUserSwitchedTab.current = true; setActiveTab('suggestions'); }}
-            className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${activeTab === 'suggestions' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+            className={`px-4 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${activeTab === 'suggestions' ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
           >
             <Lightbulb size={14} />
             Suggestions
             {suggestionsSummary && suggestionsSummary.total > 0 && (
-              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-gold/10 text-gold border border-gold/20">
+              <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-brand-tint text-brand border border-brand-tint-border">
                 {suggestionsSummary.total}
               </span>
             )}
@@ -214,7 +214,7 @@ export default function ReadinessReport() {
           <FeaturesSummary summary={project.features_summary} />
         ) : activeTab === 'suggestions' ? (
           suggestionsError ? (
-            <div className="text-center py-12 text-red-600 text-sm">Failed to load suggestions: {suggestionsError}</div>
+            <div className="text-center py-12 text-danger text-sm">Failed to load suggestions: {suggestionsError}</div>
           ) : (
             <SuggestionsPreview suggestions={suggestions} summary={suggestionsSummary} projectId={id ?? ''} />
           )
@@ -223,13 +223,13 @@ export default function ReadinessReport() {
             {/* Category breakdown */}
             <div className="grid gap-2">
               {Object.entries(categories).map(([key, cat]) => (
-                <div key={key} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
+                <div key={key} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-surface border border-line">
                   {STATUS_ICON[cat.status]}
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-sky-white">{cat.label}</div>
-                    <div className="text-xs text-sky-muted truncate">{cat.detail}</div>
+                    <div className="text-sm font-medium text-text">{cat.label}</div>
+                    <div className="text-xs text-text-muted truncate">{cat.detail}</div>
                   </div>
-                  <div className="text-xs text-sky-muted">{cat.earned}/{cat.weight}</div>
+                  <div className="text-xs text-text-muted">{cat.earned}/{cat.weight}</div>
                 </div>
               ))}
             </div>
@@ -243,21 +243,21 @@ export default function ReadinessReport() {
                 }}
                 className={`p-6 rounded-xl border text-left transition-all ${
                   isDeployRecommended
-                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
-                    : 'bg-navy border-sky-border hover:bg-navy-mid'
+                    ? 'bg-brand-tint border-brand hover:bg-brand-tint-2 ring-1 ring-brand-tint-border'
+                    : 'bg-surface border-line hover:bg-page'
                 }`}
               >
-                <Rocket size={24} className={isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
-                <h3 className="font-semibold text-sky-white mb-1">
+                <Rocket size={24} className={isDeployRecommended ? 'text-brand mb-3' : 'text-text-muted mb-3'} />
+                <h3 className="font-semibold text-text mb-1">
                   {isDeployRecommended ? 'Deploy Now' : 'Deploy Anyway'}
                 </h3>
-                <p className="text-xs text-sky-muted">
+                <p className="text-xs text-text-muted">
                   {isDeployRecommended
                     ? 'Your app looks ready. Ship it to the world.'
                     : 'Ship as-is. You can improve later.'}
                 </p>
                 {isDeployRecommended && (
-                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                  <span className="inline-block mt-3 text-xs text-brand font-medium">Recommended</span>
                 )}
               </button>
 
@@ -265,21 +265,21 @@ export default function ReadinessReport() {
                 to={`/takeoff/${id}/plan`}
                 className={`p-6 rounded-xl border text-left transition-all block ${
                   !isDeployRecommended
-                    ? 'bg-gold/10 border-gold/30 hover:bg-gold/20 ring-1 ring-gold/20'
-                    : 'bg-navy border-sky-border hover:bg-navy-mid'
+                    ? 'bg-brand-tint border-brand hover:bg-brand-tint-2 ring-1 ring-brand-tint-border'
+                    : 'bg-surface border-line hover:bg-page'
                 }`}
               >
-                <ClipboardList size={24} className={!isDeployRecommended ? 'text-gold mb-3' : 'text-sky-muted mb-3'} />
-                <h3 className="font-semibold text-sky-white mb-1">
+                <ClipboardList size={24} className={!isDeployRecommended ? 'text-brand mb-3' : 'text-text-muted mb-3'} />
+                <h3 className="font-semibold text-text mb-1">
                   {!isDeployRecommended ? 'Plan to Ship' : 'See Plan Anyway'}
                 </h3>
-                <p className="text-xs text-sky-muted">
+                <p className="text-xs text-text-muted">
                   {!isDeployRecommended
                     ? `${Object.values(categories).filter((c) => c.status === 'missing').length} things to add. Context files + prompts for each step.`
                     : 'Review what could be improved with context files for each area.'}
                 </p>
                 {!isDeployRecommended && (
-                  <span className="inline-block mt-3 text-xs text-gold font-medium">Recommended</span>
+                  <span className="inline-block mt-3 text-xs text-brand font-medium">Recommended</span>
                 )}
               </Link>
             </div>
@@ -287,7 +287,7 @@ export default function ReadinessReport() {
         ) : analysis ? (
           <CodebaseDetails analysis={analysis} gaps={analysis.gaps} />
         ) : (
-          <div className="text-center py-12 text-sky-muted text-sm">
+          <div className="text-center py-12 text-text-muted text-sm">
             Detailed analysis data is not available for this project. Try re-analyzing.
           </div>
         )}
@@ -301,7 +301,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
     <div className="space-y-6">
       {/* Project structure */}
       <CollapsibleSection
-        icon={<FolderTree size={18} className="text-gold" />}
+        icon={<FolderTree size={18} className="text-brand" />}
         title="Project Structure"
         subtitle={`${analysis.fileTree.length} files · ${analysis.structure.directories.length} directories`}
         defaultOpen
@@ -309,30 +309,30 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
         <div className="space-y-4">
           {analysis.structure.entryPoints.length > 0 && (
             <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Entry Points</h4>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Entry Points</h4>
               <div className="flex flex-wrap gap-1.5">
                 {analysis.structure.entryPoints.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-600">{f}</code>
+                  <code key={f} className="text-xs px-2 py-1 rounded bg-surface border border-line text-success">{f}</code>
                 ))}
               </div>
             </div>
           )}
           {analysis.structure.routeFiles.length > 0 && (
             <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Routes / API</h4>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Routes / API</h4>
               <div className="flex flex-wrap gap-1.5">
                 {analysis.structure.routeFiles.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-off">{f}</code>
+                  <code key={f} className="text-xs px-2 py-1 rounded bg-surface border border-line text-text-soft">{f}</code>
                 ))}
               </div>
             </div>
           )}
           {analysis.structure.configFiles.length > 0 && (
             <div>
-              <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Config Files</h4>
+              <h4 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">Config Files</h4>
               <div className="flex flex-wrap gap-1.5">
                 {analysis.structure.configFiles.map((f) => (
-                  <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-muted">{f}</code>
+                  <code key={f} className="text-xs px-2 py-1 rounded bg-surface border border-line text-text-muted">{f}</code>
                 ))}
               </div>
             </div>
@@ -343,7 +343,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
       {/* Feature modules */}
       {analysis.features.length > 0 && (
         <CollapsibleSection
-          icon={<Layers size={18} className="text-gold" />}
+          icon={<Layers size={18} className="text-brand" />}
           title="Feature Modules"
           subtitle={`${analysis.features.length} modules detected`}
           defaultOpen
@@ -356,7 +356,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
                 <FeatureRow key={feat.path} feature={feat} />
               ))}
             {analysis.features.length > 20 && (
-              <p className="text-xs text-sky-muted pt-1">...and {analysis.features.length - 20} more</p>
+              <p className="text-xs text-text-muted pt-1">...and {analysis.features.length - 20} more</p>
             )}
           </div>
         </CollapsibleSection>
@@ -364,7 +364,7 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
 
       {/* Gap detail */}
       <CollapsibleSection
-        icon={<Code2 size={18} className="text-amber-600" />}
+        icon={<Code2 size={18} className="text-warning" />}
         title="Infrastructure Gaps"
         subtitle={`${Object.values(gaps).filter((g) => g.exists).length} of ${Object.keys(gaps).length} areas covered`}
         defaultOpen
@@ -378,13 +378,13 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
 
       {/* File tree */}
       <CollapsibleSection
-        icon={<FileCode size={18} className="text-sky-muted" />}
+        icon={<FileCode size={18} className="text-text-muted" />}
         title="File Tree"
         subtitle={`${analysis.fileTree.length} files analyzed`}
       >
         <div className="max-h-64 overflow-y-auto space-y-0.5">
           {analysis.fileTree.map((f) => (
-            <div key={f} className="text-xs text-sky-muted font-mono truncate">{f}</div>
+            <div key={f} className="text-xs text-text-muted font-mono truncate">{f}</div>
           ))}
         </div>
       </CollapsibleSection>
@@ -393,13 +393,13 @@ function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Rec
       {(analysis.existingContext.hasCursorRules || analysis.existingContext.hasClaudeMd || analysis.existingContext.hasContextMd) && (
         <div className="flex flex-wrap gap-2 pt-2">
           {analysis.existingContext.hasCursorRules && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .cursorrules</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-brand-tint border border-brand-tint-border text-brand">Has .cursorrules</span>
           )}
           {analysis.existingContext.hasClaudeMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has CLAUDE.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-brand-tint border border-brand-tint-border text-brand">Has CLAUDE.md</span>
           )}
           {analysis.existingContext.hasContextMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .context.md</span>
+            <span className="px-3 py-1 rounded-full text-xs bg-brand-tint border border-brand-tint-border text-brand">Has .context.md</span>
           )}
         </div>
       )}
@@ -414,17 +414,17 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl bg-navy border border-sky-border/50 overflow-hidden">
+    <div className="rounded-xl bg-surface border border-line overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-sky-border/5 transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-page transition-colors"
       >
         {icon}
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-sky-white">{title}</span>
-          <span className="ml-2 text-xs text-sky-muted">{subtitle}</span>
+          <span className="text-sm font-medium text-text">{title}</span>
+          <span className="ml-2 text-xs text-text-muted">{subtitle}</span>
         </div>
-        {open ? <ChevronDown size={16} className="text-sky-muted" /> : <ChevronRight size={16} className="text-sky-muted" />}
+        {open ? <ChevronDown size={16} className="text-text-muted" /> : <ChevronRight size={16} className="text-text-muted" />}
       </button>
       {open && <div className="px-5 pb-5 pt-1">{children}</div>}
     </div>
@@ -433,13 +433,13 @@ function CollapsibleSection({
 
 function FeatureRow({ feature }: { feature: FeatureInfo }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-midnight/50 border border-sky-border/30">
-      <code className="text-xs text-sky-off font-medium truncate flex-1">{feature.name}</code>
+    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-page border border-divider">
+      <code className="text-xs text-text-soft font-medium truncate flex-1">{feature.name}</code>
       <div className="flex items-center gap-2 shrink-0">
-        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold/10 text-gold border border-gold/20">UI</span>}
-        {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">API</span>}
-        {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">Tests</span>}
-        <span className="text-[10px] text-sky-muted">{feature.fileCount} files</span>
+        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-tint text-brand border border-brand-tint-border">UI</span>}
+        {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-info-bg text-info border border-info-border">API</span>}
+        {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-bg text-success border border-success-border">Tests</span>}
+        <span className="text-[10px] text-text-muted">{feature.fileCount} files</span>
       </div>
     </div>
   );
@@ -456,22 +456,22 @@ function FeaturesSummary({ summary }: { summary: string }) {
   };
 
   return (
-    <div className="rounded-xl border border-gold/20 bg-navy overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gold/10">
+    <div className="rounded-xl border border-brand-tint-border bg-surface overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-brand-tint-border">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-gold/10">
-            <BookOpen size={20} className="text-gold" />
+          <div className="p-2 rounded-lg bg-brand-tint">
+            <BookOpen size={20} className="text-brand" />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-sky-white">What this project does</h2>
-            <p className="text-xs text-sky-muted">Plain-English explanation — no technical jargon</p>
+            <h2 className="text-base font-semibold text-text">What this project does</h2>
+            <p className="text-xs text-text-muted">Plain-English explanation — no technical jargon</p>
           </div>
         </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold/10 hover:bg-gold/20 text-gold border border-gold/20 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-tint hover:bg-brand-tint-2 text-brand border border-brand-tint-border transition-colors"
         >
-          {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
@@ -490,12 +490,12 @@ function SummarySection({ title, content, defaultOpen }: { title: string; conten
     <div>
       <button onClick={() => setOpen(!open)} className="flex items-center gap-2 w-full text-left group">
         {open
-          ? <ChevronDown size={16} className="text-gold shrink-0" />
-          : <ChevronRight size={16} className="text-sky-muted group-hover:text-gold shrink-0" />}
-        <h3 className="text-sm font-semibold text-gold group-hover:text-gold-dim transition-colors">{title}</h3>
+          ? <ChevronDown size={16} className="text-brand shrink-0" />
+          : <ChevronRight size={16} className="text-text-muted group-hover:text-brand shrink-0" />}
+        <h3 className="text-sm font-semibold text-brand group-hover:text-brand-hov transition-colors">{title}</h3>
       </button>
       {open && (
-        <div className="mt-2 ml-6 text-sm text-sky-off leading-relaxed whitespace-pre-wrap">{content}</div>
+        <div className="mt-2 ml-6 text-sm text-text-soft leading-relaxed whitespace-pre-wrap">{content}</div>
       )}
     </div>
   );
@@ -542,18 +542,18 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
   if (gap.issues && gap.issues.length > 0) details.push(...gap.issues);
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-midnight/50 border border-sky-border/30">
-      <span className={gap.exists ? 'text-emerald-600' : 'text-red-600'}>{meta.icon}</span>
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-page border border-divider">
+      <span className={gap.exists ? 'text-success' : 'text-danger'}>{meta.icon}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-sky-white">{meta.label}</div>
+        <div className="text-sm text-text">{meta.label}</div>
         {details.length > 0 && (
-          <div className="text-xs text-sky-muted mt-0.5">{details.join(' · ')}</div>
+          <div className="text-xs text-text-muted mt-0.5">{details.join(' · ')}</div>
         )}
       </div>
       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
         gap.exists
-          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-          : 'bg-red-500/10 text-red-600 border border-red-500/20'
+          ? 'bg-success-bg text-success border border-success-border'
+          : 'bg-danger-bg text-danger border border-danger-border'
       }`}>
         {gap.exists ? 'Found' : 'Missing'}
       </span>
@@ -569,8 +569,8 @@ function SuggestionsPreview({ suggestions, summary, projectId }: { suggestions: 
   if (openSuggestions.length === 0) {
     return (
       <div className="text-center py-12 space-y-3">
-        <Lightbulb size={32} className="text-sky-muted mx-auto" />
-        <p className="text-sm text-sky-muted">No suggestions found for this project.</p>
+        <Lightbulb size={32} className="text-text-muted mx-auto" />
+        <p className="text-sm text-text-muted">No suggestions found for this project.</p>
       </div>
     );
   }
@@ -579,14 +579,14 @@ function SuggestionsPreview({ suggestions, summary, projectId }: { suggestions: 
     <div className="space-y-4">
       {/* Quick stats */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm text-sky-white font-medium">{openSuggestions.length} suggestions</span>
+        <span className="text-sm text-text font-medium">{openSuggestions.length} suggestions</span>
         {criticalCount > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-red-500/10 text-red-600 border-red-500/20">
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-danger-bg text-danger border-danger-border">
             {criticalCount} critical
           </span>
         )}
         {highCount > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-amber-500/10 text-amber-600 border-amber-500/20">
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border bg-warning-bg text-warning border-warning-border">
             {highCount} high
           </span>
         )}
@@ -595,18 +595,18 @@ function SuggestionsPreview({ suggestions, summary, projectId }: { suggestions: 
       {/* Top 5 suggestions preview */}
       <div className="grid gap-2">
         {openSuggestions.slice(0, 5).map(s => (
-          <div key={s.id} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-navy border border-sky-border/50">
+          <div key={s.id} className="flex items-start gap-3 px-4 py-3 rounded-lg bg-surface border border-line">
             <span className={`mt-0.5 text-xs font-medium px-1.5 py-0.5 rounded border ${
-              s.priority === 'critical' ? 'bg-red-500/10 text-red-600 border-red-500/20' :
-              s.priority === 'high' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
-              s.priority === 'medium' ? 'bg-gold/10 text-gold border-gold/20' :
-              'bg-sky-muted/10 text-sky-muted border-sky-border'
+              s.priority === 'critical' ? 'bg-danger-bg text-danger border-danger-border' :
+              s.priority === 'high' ? 'bg-warning-bg text-warning border-warning-border' :
+              s.priority === 'medium' ? 'bg-brand-tint text-brand border-brand-tint-border' :
+              'bg-surface-2 text-text-muted border-line'
             }`}>
               {s.priority}
             </span>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-sky-white">{s.title}</div>
-              <div className="text-xs text-sky-muted mt-0.5 truncate">{s.description}</div>
+              <div className="text-sm font-medium text-text">{s.title}</div>
+              <div className="text-xs text-text-muted mt-0.5 truncate">{s.description}</div>
             </div>
           </div>
         ))}
@@ -614,12 +614,12 @@ function SuggestionsPreview({ suggestions, summary, projectId }: { suggestions: 
 
       {/* View all link */}
       {openSuggestions.length > 5 && (
-        <p className="text-xs text-sky-muted">Showing top 5 of {openSuggestions.length}</p>
+        <p className="text-xs text-text-muted">Showing top 5 of {openSuggestions.length}</p>
       )}
 
       <Link
         to={`/takeoff/${projectId}/suggestions`}
-        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors"
+        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors"
       >
         View All Suggestions →
       </Link>

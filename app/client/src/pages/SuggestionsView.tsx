@@ -15,11 +15,11 @@ import {
 } from '../services/api';
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
-  bug: <Bug size={16} className="text-red-600" />,
-  fix: <Wrench size={16} className="text-amber-600" />,
-  feature: <Sparkles size={16} className="text-gold" />,
-  idea: <Lightbulb size={16} className="text-sky-off" />,
-  perf: <Zap size={16} className="text-emerald-600" />,
+  bug: <Bug size={16} className="text-danger" />,
+  fix: <Wrench size={16} className="text-warning" />,
+  feature: <Sparkles size={16} className="text-brand" />,
+  idea: <Lightbulb size={16} className="text-text-soft" />,
+  perf: <Zap size={16} className="text-success" />,
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -31,10 +31,10 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const PRIORITY_STYLES: Record<string, string> = {
-  critical: 'bg-red-500/10 text-red-600 border-red-500/20',
-  high: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  medium: 'bg-gold/10 text-gold border-gold/20',
-  low: 'bg-sky-muted/10 text-sky-muted border-sky-border',
+  critical: 'bg-danger-bg text-danger border-danger-border',
+  high: 'bg-warning-bg text-warning border-warning-border',
+  medium: 'bg-brand-tint text-brand border-brand-tint-border',
+  low: 'bg-surface-2 text-text-muted border-line',
 };
 
 function SuggestionCard({
@@ -53,32 +53,32 @@ function SuggestionCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-xl bg-navy border border-sky-border/50 overflow-hidden">
+    <div className="rounded-xl bg-surface border border-line overflow-hidden">
       <div className="p-5 space-y-3">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5">{TYPE_ICONS[suggestion.type] ?? <Sparkles size={16} className="text-sky-muted" />}</div>
+          <div className="mt-0.5">{TYPE_ICONS[suggestion.type] ?? <Sparkles size={16} className="text-text-muted" />}</div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium border ${PRIORITY_STYLES[suggestion.priority] ?? PRIORITY_STYLES.low}`}>
                 {suggestion.priority}
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-navy-mid border border-sky-border text-sky-muted">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 border border-line text-text-muted">
                 {suggestion.category}
               </span>
               {suggestion.source === 'ai' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-tint-2 border border-brand-tint-border text-brand font-mono font-semibold">
                   AI
                 </span>
               )}
             </div>
-            <h3 className="text-sm font-medium text-sky-white">{suggestion.title}</h3>
+            <h3 className="text-sm font-medium text-text">{suggestion.title}</h3>
           </div>
         </div>
 
-        <p className="text-sm text-sky-off leading-relaxed">{suggestion.description}</p>
+        <p className="text-sm text-text-soft leading-relaxed">{suggestion.description}</p>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs text-sky-muted">
+          <span className="text-xs text-text-muted">
             ⏱ {suggestion.effort === 'quick' ? 'Quick fix' : suggestion.effort === 'medium' ? 'Medium effort' : 'Large effort'}
           </span>
         </div>
@@ -86,7 +86,7 @@ function SuggestionCard({
         {suggestion.evidence && suggestion.evidence.length > 0 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-1.5 text-xs text-sky-muted hover:text-sky-white transition-colors"
+            className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text transition-colors"
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             {suggestion.evidence.length} file{suggestion.evidence.length > 1 ? 's' : ''} affected
@@ -94,14 +94,14 @@ function SuggestionCard({
         )}
 
         {expanded && suggestion.evidence && (
-          <div className="space-y-2 pl-2 border-l-2 border-sky-border/30">
+          <div className="space-y-2 pl-2 border-l-2 border-divider">
             {suggestion.evidence.map((e, i) => (
               <div key={i} className="text-xs">
-                <code className="text-gold">{e.file}{e.line ? `:${e.line}` : ''}</code>
+                <code className="text-brand">{e.file}{e.line ? `:${e.line}` : ''}</code>
                 {e.snippet && (
-                  <pre className="mt-1 p-2 rounded bg-midnight/50 text-sky-muted overflow-x-auto text-[11px]">{e.snippet}</pre>
+                  <pre className="mt-1 p-2 rounded bg-page text-text-muted overflow-x-auto text-[11px]">{e.snippet}</pre>
                 )}
-                <p className="text-sky-muted mt-0.5">{e.reason}</p>
+                <p className="text-text-muted mt-0.5">{e.reason}</p>
               </div>
             ))}
           </div>
@@ -111,21 +111,21 @@ function SuggestionCard({
           {suggestion.cursor_prompt ? (
             <button
               onClick={() => onCopy(suggestion.id, suggestion.cursor_prompt as string)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold/10 hover:bg-gold/20 text-gold border border-gold/20 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-tint hover:bg-brand-tint-2 text-brand border border-brand-tint-border transition-colors"
             >
-              {copiedId === suggestion.id ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+              {copiedId === suggestion.id ? <Check size={12} className="text-success" /> : <Copy size={12} />}
               {copiedId === suggestion.id ? 'Copied!' : 'Copy Cursor Prompt'}
             </button>
           ) : null}
           <button
             onClick={() => onDone(suggestion.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-600 hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/20 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-success hover:bg-success-bg border border-transparent hover:border-success-border transition-colors"
           >
             <CheckCircle2 size={12} /> Done
           </button>
           <button
             onClick={() => onDismiss(suggestion.id)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-sky-muted hover:bg-sky-border/10 border border-transparent hover:border-sky-border/30 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-muted hover:bg-page border border-transparent hover:border-divider transition-colors"
           >
             <X size={12} /> Dismiss
           </button>
@@ -226,7 +226,7 @@ export default function SuggestionsView() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-sky-muted">Loading suggestions...</div>
+          <div className="text-text-muted">Loading suggestions...</div>
         </main>
       </div>
     );
@@ -237,7 +237,7 @@ export default function SuggestionsView() {
       <div className="min-h-screen flex flex-col">
         <Header backTo="/" />
         <main className="flex-1 flex items-center justify-center">
-          <div className="text-red-600">{error || 'Project not found'}</div>
+          <div className="text-danger">{error || 'Project not found'}</div>
         </main>
       </div>
     );
@@ -259,11 +259,11 @@ export default function SuggestionsView() {
         <Header backTo={`/takeoff/${id}/report`} title={`${project.owner}/${project.repo}`} />
         <main className="flex-1 px-6 py-10 max-w-3xl mx-auto w-full space-y-8">
           <div className="text-center py-16 space-y-3">
-            <Sparkles size={40} className="text-sky-muted mx-auto" />
-            <h3 className="text-lg font-semibold text-sky-white">No suggestions yet</h3>
-            <p className="text-sm text-sky-muted">Suggestions are generated during analysis. Re-analyze to get fresh suggestions.</p>
+            <Sparkles size={40} className="text-text-muted mx-auto" />
+            <h3 className="text-lg font-semibold text-text">No suggestions yet</h3>
+            <p className="text-sm text-text-muted">Suggestions are generated during analysis. Re-analyze to get fresh suggestions.</p>
           </div>
-          <Link to={`/takeoff/${id}/report`} className="inline-flex items-center gap-1.5 text-sm text-sky-muted hover:text-gold transition-colors">
+          <Link to={`/takeoff/${id}/report`} className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-brand transition-colors">
             <ArrowLeft size={14} /> Back to report
           </Link>
         </main>
@@ -278,7 +278,7 @@ export default function SuggestionsView() {
       <main className="flex-1 px-6 py-10 max-w-3xl mx-auto w-full space-y-8">
         {/* AI analysis in-progress banner — auto-hides after polling completes */}
         {suggestions.length > 0 && !suggestions.some(s => s.source === 'ai') && project.status === 'ready' && !aiDonePolling && (
-          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-purple-500/5 border border-purple-500/10 text-xs text-purple-400">
+          <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-brand-tint border border-brand-tint-border text-xs text-brand">
             <Sparkles size={14} className="animate-pulse flex-shrink-0" />
             AI is analyzing your codebase for deeper suggestions — they'll appear here shortly.
           </div>
@@ -286,13 +286,13 @@ export default function SuggestionsView() {
 
         {/* Progress bar */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs text-sky-muted">
+          <div className="flex items-center justify-between text-xs text-text-muted">
             <span>{totalDone} of {addressableCount} addressed</span>
             <span>{totalOpen} remaining</span>
           </div>
-          <div className="h-1.5 rounded-full bg-navy-mid overflow-hidden">
+          <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
             <div
-              className="h-full rounded-full bg-gold transition-all"
+              className="h-full rounded-full bg-brand transition-all"
               style={{ width: `${addressableCount > 0 ? (totalDone / addressableCount) * 100 : 0}%` }}
             />
           </div>
@@ -307,7 +307,7 @@ export default function SuggestionsView() {
             <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
               <button
                 onClick={() => setActiveFilter('all')}
-                className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === 'all' ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === 'all' ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
               >
                 All {openItems.length}
               </button>
@@ -315,7 +315,7 @@ export default function SuggestionsView() {
                 <button
                   key={type}
                   onClick={() => setActiveFilter(type)}
-                  className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === type ? 'bg-gold/15 text-gold border border-gold/30' : 'text-sky-muted hover:text-sky-white'}`}
+                  className={`px-4 py-1.5 rounded-lg transition-colors ${activeFilter === type ? 'bg-brand-tint-2 text-brand border border-brand' : 'text-text-muted hover:text-text'}`}
                 >
                   {TYPE_LABELS[type] || type} {count}
                 </button>
@@ -326,7 +326,7 @@ export default function SuggestionsView() {
 
         {/* Grouped suggestion cards */}
         {filtered.length === 0 ? (
-          <div className="text-center py-12 text-sky-muted text-sm">
+          <div className="text-center py-12 text-text-muted text-sm">
             No open suggestions in this category.
           </div>
         ) : (
@@ -336,7 +336,7 @@ export default function SuggestionsView() {
               if (group.length === 0) return null;
               return (
                 <div key={priority} className="space-y-3">
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-sky-muted">
+                  <h3 className="text-xs font-medium uppercase tracking-wide text-text-muted">
                     {priority} · {group.length}
                   </h3>
                   {group.map(s => (
@@ -356,7 +356,7 @@ export default function SuggestionsView() {
         )}
 
         {/* Back link */}
-        <Link to={`/takeoff/${id}/report`} className="inline-flex items-center gap-1.5 text-sm text-sky-muted hover:text-gold transition-colors">
+        <Link to={`/takeoff/${id}/report`} className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-brand transition-colors">
           <ArrowLeft size={14} /> Back to report
         </Link>
       </main>

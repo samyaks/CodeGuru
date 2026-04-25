@@ -8,9 +8,9 @@ import Header from '../components/Header';
 import { fetchFixPrompt, postFixEvent, FixPromptFull } from '../services/api';
 
 const severityStyles: Record<string, string> = {
-  critical: 'bg-red-500/15 text-red-600 border-red-500/30',
-  warning: 'bg-amber-500/15 text-amber-600 border-amber-500/30',
-  info: 'bg-blue-500/15 text-blue-600 border-blue-500/30',
+  critical: 'bg-page text-danger border-danger-border',
+  warning: 'bg-page text-warning border-warning-border',
+  info: 'bg-page text-info border-info-border',
 };
 
 const severityIcon: Record<string, React.ReactNode> = {
@@ -68,7 +68,7 @@ export default function FixPrompt() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center gap-2 text-sky-muted">
+        <div className="flex items-center gap-2 text-text-muted">
           <Loader size={18} className="animate-spin" />
           Loading fix prompt…
         </div>
@@ -80,9 +80,9 @@ export default function FixPrompt() {
     return (
       <div className="min-h-screen flex items-center justify-center px-6">
         <div className="text-center space-y-3">
-          <AlertCircle size={32} className="mx-auto text-red-600" />
+          <AlertCircle size={32} className="mx-auto text-danger" />
           <h2 className="text-xl font-semibold">Fix prompt not found</h2>
-          <p className="text-sky-muted text-sm max-w-md">
+          <p className="text-text-muted text-sm max-w-md">
             {error || 'This fix prompt may have expired or the link is invalid.'}
           </p>
         </div>
@@ -102,16 +102,16 @@ export default function FixPrompt() {
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${sev}`}>
               {severityIcon[prompt.severity]} {prompt.severity}
             </span>
-            <span className="text-xs text-sky-muted uppercase tracking-wider font-medium">
+            <span className="text-xs text-text-muted uppercase tracking-wider font-medium">
               {prompt.issue_category}
             </span>
           </div>
           <h1 className="text-2xl font-bold">{prompt.issue_title}</h1>
-          <p className="flex items-center gap-1.5 text-sm text-sky-muted font-mono">
+          <p className="flex items-center gap-1.5 text-sm text-text-muted font-mono">
             <Code2 size={14} className="shrink-0" />
             {prompt.file_path}
             {prompt.line_start && (
-              <span className="text-sky-muted">
+              <span className="text-text-muted">
                 :{prompt.line_start}{prompt.line_end ? `-${prompt.line_end}` : ''}
               </span>
             )}
@@ -119,11 +119,11 @@ export default function FixPrompt() {
         </div>
 
         {prompt.issue_description && (
-          <p className="text-sm text-sky-off leading-relaxed">{prompt.issue_description}</p>
+          <p className="text-sm text-text-soft leading-relaxed">{prompt.issue_description}</p>
         )}
 
         {isStale && (
-          <div className="text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
+          <div className="text-sm text-warning bg-warning-bg border border-warning-border rounded-lg px-4 py-3">
             This fix prompt was generated over 24 hours ago. Line numbers may have shifted if the PR was updated.
           </div>
         )}
@@ -132,15 +132,15 @@ export default function FixPrompt() {
           onClick={handleCopy}
           className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm transition-colors ${
             copied
-              ? 'bg-emerald-600 text-paper'
-              : 'bg-ink hover:bg-sky-off text-paper'
+              ? 'bg-success text-white'
+              : 'bg-brand hover:bg-brand-hov text-white'
           }`}
         >
           {copied ? <><Check size={18} /> Copied to clipboard!</> : <><Copy size={18} /> Copy fix prompt to clipboard</>}
         </button>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs text-sky-muted">Then paste into:</span>
+          <span className="text-xs text-text-muted">Then paste into:</span>
           {[
             { target: 'cursor', label: 'Cursor', icon: <Terminal size={14} /> },
             { target: 'claude_code', label: 'Claude Code', icon: <Terminal size={14} /> },
@@ -149,30 +149,30 @@ export default function FixPrompt() {
             <button
               key={dl.target}
               onClick={() => handleDeeplink(dl.target)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-navy-mid border border-sky-border text-sky-off hover:bg-navy-mid hover:text-ink transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-2 border border-line text-text-soft hover:bg-page hover:text-text transition-colors"
             >
               {dl.icon} {dl.label}
             </button>
           ))}
         </div>
 
-        <div className="rounded-xl border border-sky-border overflow-hidden">
-          <div className="px-4 py-2.5 bg-navy-mid border-b border-sky-border text-xs font-medium text-sky-muted">
+        <div className="rounded-xl border border-line overflow-hidden">
+          <div className="px-4 py-2.5 bg-surface-2 border-b border-line text-xs font-medium text-text-muted">
             Fix Prompt
           </div>
-          <pre className="p-4 text-sm text-sky-off whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
+          <pre className="p-4 text-sm text-text-soft whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
             {prompt.full_prompt}
           </pre>
         </div>
 
         {prompt.related_files.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-sky-off">Related Files</h3>
+            <h3 className="text-sm font-medium text-text-soft">Related Files</h3>
             <div className="space-y-1.5">
               {prompt.related_files.map((rf, i) => (
-                <div key={i} className="flex items-start gap-3 px-3 py-2 rounded-lg bg-navy border border-sky-border text-sm">
-                  <code className="text-gold shrink-0">{rf.path}</code>
-                  <span className="text-sky-muted">{rf.reason}</span>
+                <div key={i} className="flex items-start gap-3 px-3 py-2 rounded-lg bg-surface border border-line text-sm">
+                  <code className="text-brand shrink-0">{rf.path}</code>
+                  <span className="text-text-muted">{rf.reason}</span>
                 </div>
               ))}
             </div>
@@ -180,15 +180,15 @@ export default function FixPrompt() {
         )}
 
         <div className="flex items-center gap-4">
-          <span className="text-sm text-sky-muted">Was this helpful?</span>
+          <span className="text-sm text-text-muted">Was this helpful?</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => handleFeedback('up')}
               disabled={feedback !== null}
               className={`p-2 rounded-lg border transition-colors ${
                 feedback === 'up'
-                  ? 'bg-green-500/15 border-green-500/30 text-emerald-600'
-                  : 'border-sky-border text-sky-muted hover:text-ink hover:border-border-dark disabled:opacity-40'
+                  ? 'bg-green-500/15 border-green-500/30 text-success'
+                  : 'border-line text-text-muted hover:text-text hover:border-border-dark disabled:opacity-40'
               }`}
             >
               <ThumbsUp size={16} />
@@ -198,18 +198,18 @@ export default function FixPrompt() {
               disabled={feedback !== null}
               className={`p-2 rounded-lg border transition-colors ${
                 feedback === 'down'
-                  ? 'bg-red-500/15 border-red-500/30 text-red-600'
-                  : 'border-sky-border text-sky-muted hover:text-ink hover:border-border-dark disabled:opacity-40'
+                  ? 'bg-page border-danger-border text-danger'
+                  : 'border-line text-text-muted hover:text-text hover:border-border-dark disabled:opacity-40'
               }`}
             >
               <ThumbsDown size={16} />
             </button>
           </div>
-          {feedback && <span className="text-xs text-sky-muted">Thanks for the feedback!</span>}
+          {feedback && <span className="text-xs text-text-muted">Thanks for the feedback!</span>}
         </div>
 
-        <div className="pt-4 border-t border-sky-border/50 text-center text-xs text-border-dark">
-          Powered by <strong className="text-sky-muted">CodeGuru</strong> &middot;
+        <div className="pt-4 border-t border-line text-center text-xs text-border-dark">
+          Powered by <strong className="text-text-muted">CodeGuru</strong> &middot;
           Expires {new Date(prompt.expires_at).toLocaleDateString()}
         </div>
       </div>

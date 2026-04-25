@@ -76,21 +76,21 @@ const TYPE_ICON: Record<BuildEntry['entry_type'], React.ReactNode> = {
 };
 
 const TYPE_COLORS: Record<BuildEntry['entry_type'], string> = {
-  prompt: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
-  note: 'bg-sky-muted/10 text-sky-muted border-sky-border',
-  decision: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  milestone: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  deploy_event: 'bg-gold/10 text-gold border-gold/20',
-  file: 'bg-sky-muted/10 text-sky-muted border-sky-border',
+  prompt: 'bg-info-bg text-info border-info-border',
+  note: 'bg-surface-2 text-text-muted border-line',
+  decision: 'bg-warning-bg text-warning border-warning-border',
+  milestone: 'bg-success-bg text-success border-success-border',
+  deploy_event: 'bg-brand-tint text-brand border-brand-tint-border',
+  file: 'bg-surface-2 text-text-muted border-line',
 };
 
 const TYPE_LINE_COLORS: Record<BuildEntry['entry_type'], string> = {
-  prompt: 'bg-blue-500/30',
-  note: 'bg-sky-border',
-  decision: 'bg-amber-500/30',
-  milestone: 'bg-emerald-500/30',
-  deploy_event: 'bg-gold/30',
-  file: 'bg-sky-border',
+  prompt: 'bg-info-bg',
+  note: 'bg-line',
+  decision: 'bg-warning-bg',
+  milestone: 'bg-success-bg',
+  deploy_event: 'bg-brand-tint-2',
+  file: 'bg-line',
 };
 
 interface EntryForm {
@@ -271,7 +271,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
   const content = (
     <div className="space-y-6">
       {error && (
-        <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-sm">
+        <div className="px-4 py-3 rounded-lg bg-danger-bg border border-danger-border text-danger text-sm">
           {error}
           <button onClick={() => setError(null)} className="ml-2 underline">
             Dismiss
@@ -281,21 +281,21 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
 
       {/* Share bar */}
       {project?.slug && (
-        <div className="bg-navy border border-sky-border/50 rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-sky-white">
-            <Share2 size={16} className="text-gold" />
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-text">
+            <Share2 size={16} className="text-brand" />
             Share your build story
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-midnight border border-sky-border/50 text-sm text-sky-off overflow-hidden">
-              <LinkIcon size={14} className="text-sky-muted flex-shrink-0" />
+            <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-page border border-line text-sm text-text-soft overflow-hidden">
+              <LinkIcon size={14} className="text-text-muted flex-shrink-0" />
               <span className="truncate">
                 {window.location.origin}/story/{project.slug}
               </span>
             </div>
             <button
               onClick={copyShareLink}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-gold text-midnight hover:bg-gold-dim transition-colors flex-shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-brand text-white hover:bg-brand-hov transition-colors flex-shrink-0"
             >
               {linkCopied ? <Check size={14} /> : <Copy size={14} />}
               {linkCopied ? 'Copied!' : 'Copy link'}
@@ -305,7 +305,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
             <button
               onClick={handleGenerateSummary}
               disabled={generatingSummary}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-sky-border/50 text-sky-off hover:text-sky-white hover:border-sky-border transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-line text-text-soft hover:text-text hover:border-line transition-colors disabled:opacity-50"
             >
               {generatingSummary ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -315,7 +315,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
               {generatingSummary ? 'Generating...' : 'Generate summary'}
             </button>
             {socialSummary && (
-              <p className="text-xs text-sky-muted italic flex-1 min-w-0 truncate">
+              <p className="text-xs text-text-muted italic flex-1 min-w-0 truncate">
                 {socialSummary}
               </p>
             )}
@@ -327,7 +327,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
       {!showAddForm ? (
         <button
           onClick={() => setShowAddForm(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors"
         >
           <Plus size={16} />
           Add Entry
@@ -346,16 +346,16 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
       {/* Loading */}
       {isLoading && (
         <div className="flex justify-center py-16">
-          <Loader2 size={32} className="animate-spin text-sky-muted" />
+          <Loader2 size={32} className="animate-spin text-text-muted" />
         </div>
       )}
 
       {/* Empty states */}
       {!isLoading && entries.length === 0 && commits.length === 0 && (
         <div className="text-center py-16 space-y-3">
-          <FileText size={48} className="mx-auto text-sky-muted" />
-          <h3 className="text-lg font-semibold text-sky-white">Your BuildStory is empty</h3>
-          <p className="text-sm text-sky-muted max-w-md mx-auto">
+          <FileText size={48} className="mx-auto text-text-muted" />
+          <h3 className="text-lg font-semibold text-text">Your BuildStory is empty</h3>
+          <p className="text-sm text-text-muted max-w-md mx-auto">
             {commitsReason
               ? "Commit history couldn't be loaded (private repo or rate limit). Add entries manually to document your build."
               : 'Start documenting your build journey — prompts, decisions, milestones, and more.'}
@@ -364,17 +364,17 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
       )}
 
       {!isLoading && entries.length === 0 && commits.length > 0 && (
-        <div className="bg-navy border border-sky-border/50 rounded-xl p-5 text-center space-y-2">
-          <p className="text-sm text-sky-white font-medium">
+        <div className="bg-surface border border-line rounded-xl p-5 text-center space-y-2">
+          <p className="text-sm text-text font-medium">
             Your commit history is here — {commits.length} commit{commits.length !== 1 ? 's' : ''}
           </p>
-          <p className="text-xs text-sky-muted">
+          <p className="text-xs text-text-muted">
             Add a note, decision, or milestone to tell the story behind what you built.
           </p>
           {!showAddForm && (
             <button
               onClick={() => setShowAddForm(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors mt-2"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors mt-2"
             >
               <Plus size={16} />
               Add First Entry
@@ -386,15 +386,15 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
       {/* Filter bar */}
       {!isLoading && timeline.length > 0 && (
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-sky-muted mr-1">Show:</span>
+          <span className="text-text-muted mr-1">Show:</span>
           {(['all', 'commits', 'entries'] as FilterMode[]).map((mode) => (
             <button
               key={mode}
               onClick={() => setFilter(mode)}
               className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
                 filter === mode
-                  ? 'bg-gold/10 text-gold border border-gold/20'
-                  : 'text-sky-muted hover:text-sky-white border border-transparent'
+                  ? 'bg-brand-tint text-brand border border-brand-tint-border'
+                  : 'text-text-muted hover:text-text border border-transparent'
               }`}
             >
               {mode === 'all' ? 'All' : mode === 'commits' ? 'Commits only' : 'My entries only'}
@@ -449,7 +449,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                       saveLabel="Save Changes"
                     />
                   ) : (
-                    <div className="bg-navy border border-sky-border/50 rounded-xl p-4 group">
+                    <div className="bg-surface border border-line rounded-xl p-4 group">
                       <div className="flex items-start justify-between gap-3 mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span
@@ -458,19 +458,19 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                             {entry.entry_type}
                           </span>
                           {entry.title && (
-                            <span className="text-sm font-medium text-sky-white">
+                            <span className="text-sm font-medium text-text">
                               {entry.title}
                             </span>
                           )}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.is_public ? 'text-emerald-600 bg-emerald-500/10' : 'text-sky-muted bg-sky-muted/10'}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${entry.is_public ? 'text-success bg-success-bg' : 'text-text-muted bg-surface-2'}`}>
                             {entry.is_public ? 'Public' : 'Private'}
                           </span>
                           <button
                             onClick={() => toggleVisibility(entry)}
                             disabled={togglingVisibility === entry.id}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors disabled:opacity-50"
+                            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-page transition-colors disabled:opacity-50"
                             title={entry.is_public ? 'Make private' : 'Make public'}
                           >
                             {togglingVisibility === entry.id ? (
@@ -483,24 +483,24 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                           </button>
                           <button
                             onClick={() => startEdit(entry)}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-sky-white hover:bg-navy-mid transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-page transition-colors opacity-0 group-hover:opacity-100"
                             title="Edit"
                           >
                             <Pencil size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(entry.id)}
-                            className="p-1.5 rounded-md text-sky-muted hover:text-red-600 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger-bg transition-colors opacity-0 group-hover:opacity-100"
                             title="Delete"
                           >
                             <Trash2 size={14} />
                           </button>
                         </div>
                       </div>
-                      <p className="text-sm text-sky-off whitespace-pre-wrap break-words">
+                      <p className="text-sm text-text-soft whitespace-pre-wrap break-words">
                         {entry.content}
                       </p>
-                      <p className="text-[11px] text-sky-muted mt-2">
+                      <p className="text-[11px] text-text-muted mt-2">
                         {new Date(entry.created_at).toLocaleString()}
                       </p>
                     </div>
@@ -514,11 +514,11 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
 
       {/* Generate context button */}
       {!isLoading && entries.length > 0 && (
-        <div className="pt-4 border-t border-sky-border/30">
+        <div className="pt-4 border-t border-divider">
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors disabled:opacity-50"
           >
             {generating ? (
               <Loader2 size={16} className="animate-spin" />
@@ -532,28 +532,28 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
 
       {/* Context result panel */}
       {contextResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-midnight/80 backdrop-blur-sm p-4">
-          <div className="bg-navy border border-sky-border rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-sky-border/50">
-              <h3 className="font-semibold text-sky-white">Generated .context.md</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-page/80 backdrop-blur-sm p-4">
+          <div className="bg-surface border border-line rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+              <h3 className="font-semibold text-text">Generated .context.md</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={copyContext}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold text-midnight hover:bg-gold-dim transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand text-white hover:bg-brand-hov transition-colors"
                 >
                   {copied ? <Check size={14} /> : <Copy size={14} />}
                   {copied ? 'Copied!' : 'Copy'}
                 </button>
                 <button
                   onClick={() => setContextResult(null)}
-                  className="p-1.5 rounded-md text-sky-muted hover:text-sky-white transition-colors"
+                  className="p-1.5 rounded-md text-text-muted hover:text-text transition-colors"
                 >
                   <X size={18} />
                 </button>
               </div>
             </div>
             <div className="flex-1 overflow-auto p-5">
-              <pre className="text-xs text-sky-off whitespace-pre-wrap font-mono">{contextResult}</pre>
+              <pre className="text-xs text-text-soft whitespace-pre-wrap font-mono">{contextResult}</pre>
             </div>
           </div>
         </div>
@@ -591,14 +591,14 @@ function EntryFormCard({
   saveLabel: string;
 }) {
   return (
-    <div className="bg-navy border border-sky-border/50 rounded-xl p-4 space-y-3">
+    <div className="bg-surface border border-line rounded-xl p-4 space-y-3">
       {/* Type selector */}
       <div>
-        <label className="block text-xs font-medium text-sky-muted mb-1">Type</label>
+        <label className="block text-xs font-medium text-text-muted mb-1">Type</label>
         <select
           value={form.entry_type}
           onChange={(e) => onChange({ ...form, entry_type: e.target.value as BuildEntry['entry_type'] })}
-          className="w-full px-3 py-2 rounded-lg bg-midnight border border-sky-border/50 text-sm text-sky-white focus:outline-none focus:border-gold/50"
+          className="w-full px-3 py-2 rounded-lg bg-page border border-line text-sm text-text focus:outline-none focus:border-brand"
         >
           {ENTRY_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -610,25 +610,25 @@ function EntryFormCard({
 
       {/* Title */}
       <div>
-        <label className="block text-xs font-medium text-sky-muted mb-1">Title (optional)</label>
+        <label className="block text-xs font-medium text-text-muted mb-1">Title (optional)</label>
         <input
           type="text"
           value={form.title}
           onChange={(e) => onChange({ ...form, title: e.target.value })}
           placeholder="Brief title for this entry"
-          className="w-full px-3 py-2 rounded-lg bg-midnight border border-sky-border/50 text-sm text-sky-white placeholder-sky-muted/50 focus:outline-none focus:border-gold/50"
+          className="w-full px-3 py-2 rounded-lg bg-page border border-line text-sm text-text placeholder-text-disabled focus:outline-none focus:border-brand"
         />
       </div>
 
       {/* Content */}
       <div>
-        <label className="block text-xs font-medium text-sky-muted mb-1">Content</label>
+        <label className="block text-xs font-medium text-text-muted mb-1">Content</label>
         <textarea
           value={form.content}
           onChange={(e) => onChange({ ...form, content: e.target.value })}
           placeholder="What happened? What did you decide?"
           rows={4}
-          className="w-full px-3 py-2 rounded-lg bg-midnight border border-sky-border/50 text-sm text-sky-white placeholder-sky-muted/50 focus:outline-none focus:border-gold/50 resize-y"
+          className="w-full px-3 py-2 rounded-lg bg-page border border-line text-sm text-text placeholder-text-disabled focus:outline-none focus:border-brand resize-y"
         />
       </div>
 
@@ -637,14 +637,14 @@ function EntryFormCard({
         <button
           onClick={onSave}
           disabled={saving || !form.content.trim()}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors disabled:opacity-50"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           {saveLabel}
         </button>
         <button
           onClick={onCancel}
-          className="px-4 py-2 rounded-lg text-sm text-sky-muted hover:text-sky-white transition-colors"
+          className="px-4 py-2 rounded-lg text-sm text-text-muted hover:text-text transition-colors"
         >
           Cancel
         </button>
@@ -689,26 +689,26 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
       </div>
 
       <div className="flex-1 pb-6 min-w-0">
-        <div className="bg-midnight/50 border border-sky-400/20 rounded-xl p-4">
+        <div className="bg-page border border-sky-400/20 rounded-xl p-4">
           <div className="flex items-start justify-between gap-3 mb-1">
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-mono text-xs bg-sky-400/10 text-sky-400/80 px-1.5 py-0.5 rounded flex-shrink-0">
                 {commit.shortSha}
               </span>
-              <span className="text-sm text-sky-white truncate">{commit.title}</span>
+              <span className="text-sm text-text truncate">{commit.title}</span>
             </div>
             <a
               href={commit.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-1 rounded text-sky-muted hover:text-sky-white transition-colors flex-shrink-0"
+              className="p-1 rounded text-text-muted hover:text-text transition-colors flex-shrink-0"
               title="Open in GitHub"
             >
               <ExternalLink size={13} />
             </a>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-sky-muted">
+          <div className="flex items-center gap-2 text-[11px] text-text-muted">
             {commit.authorAvatar && (
               <img src={commit.authorAvatar} alt="" className="w-4 h-4 rounded-full" />
             )}
@@ -719,7 +719,7 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
 
           <button
             onClick={handleExpand}
-            className="mt-2 flex items-center gap-1 text-xs text-sky-muted hover:text-sky-white transition-colors"
+            className="mt-2 flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors"
           >
             {loadingFiles ? (
               <Loader2 size={12} className="animate-spin" />
@@ -738,18 +738,18 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
               {commit.filesChanged.map((f) => (
                 <div key={f.path} className="flex items-center gap-2 text-xs font-mono">
                   <span className={
-                    f.status === 'added' ? 'text-emerald-500' :
-                    f.status === 'removed' ? 'text-red-500' :
-                    f.status === 'renamed' ? 'text-amber-500' :
-                    'text-sky-muted'
+                    f.status === 'added' ? 'text-success' :
+                    f.status === 'removed' ? 'text-danger' :
+                    f.status === 'renamed' ? 'text-warning' :
+                    'text-text-muted'
                   }>
                     {f.status === 'added' ? 'A' : f.status === 'removed' ? 'D' : f.status === 'renamed' ? 'R' : 'M'}
                   </span>
-                  <span className="text-sky-off truncate">{f.path}</span>
-                  <span className="ml-auto flex-shrink-0 text-sky-muted">
-                    {f.additions > 0 && <span className="text-emerald-500">+{f.additions}</span>}
+                  <span className="text-text-soft truncate">{f.path}</span>
+                  <span className="ml-auto flex-shrink-0 text-text-muted">
+                    {f.additions > 0 && <span className="text-success">+{f.additions}</span>}
                     {f.additions > 0 && f.deletions > 0 && ' '}
-                    {f.deletions > 0 && <span className="text-red-500">-{f.deletions}</span>}
+                    {f.deletions > 0 && <span className="text-danger">-{f.deletions}</span>}
                   </span>
                 </div>
               ))}

@@ -1,10 +1,20 @@
 import { useState } from 'react';
 import {
-  ChevronDown, ChevronRight, FolderTree, Layers, Code2,
-  FileCode, Shield, Database, Rocket, TestTube2,
-  AlertTriangle, Settings2,
+  ChevronDown,
+  ChevronRight,
+  FolderTree,
+  Layers,
+  Code2,
+  FileCode,
+  Shield,
+  Database,
+  Rocket,
+  TestTube2,
+  AlertTriangle,
+  Settings2,
 } from 'lucide-react';
 import type { AnalysisData, FeatureInfo, GapInfo } from '../services/api';
+import { Pill } from './ui';
 
 const GAP_META: Record<string, { icon: React.ReactNode; label: string }> = {
   auth: { icon: <Shield size={16} />, label: 'Authentication' },
@@ -17,24 +27,36 @@ const GAP_META: Record<string, { icon: React.ReactNode; label: string }> = {
 };
 
 function CollapsibleSection({
-  icon, title, subtitle, defaultOpen = false, children,
+  icon,
+  title,
+  subtitle,
+  defaultOpen = false,
+  children,
 }: {
-  icon: React.ReactNode; title: string; subtitle: string; defaultOpen?: boolean; children: React.ReactNode;
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl bg-navy border border-sky-border/50 overflow-hidden">
+    <div className="rounded-[14px] bg-surface border border-line overflow-hidden shadow-card">
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-sky-border/5 transition-colors"
+        className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-page transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
       >
         {icon}
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-sky-white">{title}</span>
-          <span className="ml-2 text-xs text-sky-muted">{subtitle}</span>
+          <span className="text-sm font-semibold text-text">{title}</span>
+          <span className="ml-2 text-xs text-text-faint">{subtitle}</span>
         </div>
-        {open ? <ChevronDown size={16} className="text-sky-muted" /> : <ChevronRight size={16} className="text-sky-muted" />}
+        {open ? (
+          <ChevronDown size={16} className="text-text-faint shrink-0" />
+        ) : (
+          <ChevronRight size={16} className="text-text-faint shrink-0" />
+        )}
       </button>
       {open && <div className="px-5 pb-5 pt-1">{children}</div>}
     </div>
@@ -43,13 +65,27 @@ function CollapsibleSection({
 
 function FeatureRow({ feature }: { feature: FeatureInfo }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-midnight/50 border border-sky-border/30">
-      <code className="text-xs text-sky-off font-medium truncate flex-1">{feature.name}</code>
-      <div className="flex items-center gap-2 shrink-0">
-        {feature.hasUI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold/10 text-gold border border-gold/20">UI</span>}
-        {feature.hasAPI && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 border border-blue-500/20">API</span>}
-        {feature.hasTests && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">Tests</span>}
-        <span className="text-[10px] text-sky-muted">{feature.fileCount} files</span>
+    <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-page border border-line">
+      <code className="text-xs text-text-soft font-mono font-medium truncate flex-1">
+        {feature.name}
+      </code>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {feature.hasUI && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-tint text-brand border border-brand-tint-border font-medium">
+            UI
+          </span>
+        )}
+        {feature.hasAPI && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-info-bg text-info border border-info-border font-medium">
+            API
+          </span>
+        )}
+        {feature.hasTests && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-bg text-success border border-success-border font-medium">
+            Tests
+          </span>
+        )}
+        <span className="text-[10px] text-text-faint">{feature.fileCount} files</span>
       </div>
     </div>
   );
@@ -69,67 +105,96 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
   if (gap.issues && gap.issues.length > 0) details.push(...gap.issues);
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-midnight/50 border border-sky-border/30">
-      <span className={gap.exists ? 'text-emerald-600' : 'text-red-600'}>{meta.icon}</span>
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-page border border-line">
+      <span className={gap.exists ? 'text-success' : 'text-danger'}>{meta.icon}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-sky-white">{meta.label}</div>
+        <div className="text-[13px] font-medium text-text">{meta.label}</div>
         {details.length > 0 && (
-          <div className="text-xs text-sky-muted mt-0.5">{details.join(' · ')}</div>
+          <div className="text-[11px] text-text-faint mt-0.5">{details.join(' · ')}</div>
         )}
       </div>
-      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-        gap.exists
-          ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
-          : 'bg-red-500/10 text-red-600 border border-red-500/20'
-      }`}>
+      <span
+        className={[
+          'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+          gap.exists
+            ? 'bg-success-bg text-success border-success-border'
+            : 'bg-danger-bg text-danger border-danger-border',
+        ].join(' ')}
+      >
         {gap.exists ? 'Found' : 'Missing'}
       </span>
     </div>
   );
 }
 
-export default function CodebaseDetails({ analysis, gaps }: { analysis: AnalysisData; gaps: Record<string, GapInfo> }) {
+export default function CodebaseDetails({
+  analysis,
+  gaps,
+}: {
+  analysis: AnalysisData;
+  gaps: Record<string, GapInfo>;
+}) {
   const fileTree = analysis.fileTree || [];
-  const structure = analysis.structure || { directories: [], entryPoints: [], routeFiles: [], configFiles: [] };
+  const structure = analysis.structure || {
+    directories: [],
+    entryPoints: [],
+    routeFiles: [],
+    configFiles: [],
+  };
   const features = analysis.features || [];
   const existingContext = analysis.existingContext || {};
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-4">
       {fileTree.length > 0 && (
         <CollapsibleSection
-          icon={<FolderTree size={18} className="text-gold" />}
+          icon={<FolderTree size={18} className="text-brand shrink-0" />}
           title="Project Structure"
           subtitle={`${fileTree.length} files · ${(structure.directories || []).length} directories`}
           defaultOpen
         >
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             {(structure.entryPoints || []).length > 0 && (
               <div>
-                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Entry Points</h4>
+                <h4 className="eyebrow text-text-faint mb-2">Entry Points</h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.entryPoints.map((f) => (
-                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-emerald-600">{f}</code>
+                    <code
+                      key={f}
+                      className="text-xs px-2 py-1 rounded bg-success-bg border border-success-border text-success font-mono"
+                    >
+                      {f}
+                    </code>
                   ))}
                 </div>
               </div>
             )}
             {(structure.routeFiles || []).length > 0 && (
               <div>
-                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Routes / API</h4>
+                <h4 className="eyebrow text-text-faint mb-2">Routes / API</h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.routeFiles.map((f) => (
-                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-off">{f}</code>
+                    <code
+                      key={f}
+                      className="text-xs px-2 py-1 rounded bg-page border border-line text-text-soft font-mono"
+                    >
+                      {f}
+                    </code>
                   ))}
                 </div>
               </div>
             )}
             {(structure.configFiles || []).length > 0 && (
               <div>
-                <h4 className="text-xs font-medium text-sky-muted uppercase tracking-wide mb-2">Config Files</h4>
+                <h4 className="eyebrow text-text-faint mb-2">Config Files</h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.configFiles.map((f) => (
-                    <code key={f} className="text-xs px-2 py-1 rounded bg-navy border border-sky-border/50 text-sky-muted">{f}</code>
+                    <code
+                      key={f}
+                      className="text-xs px-2 py-1 rounded bg-page border border-line text-text-faint font-mono"
+                    >
+                      {f}
+                    </code>
                   ))}
                 </div>
               </div>
@@ -140,12 +205,12 @@ export default function CodebaseDetails({ analysis, gaps }: { analysis: Analysis
 
       {features.length > 0 && (
         <CollapsibleSection
-          icon={<Layers size={18} className="text-gold" />}
+          icon={<Layers size={18} className="text-brand shrink-0" />}
           title="Feature Modules"
           subtitle={`${features.length} modules detected`}
           defaultOpen
         >
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             {features
               .sort((a, b) => b.fileCount - a.fileCount)
               .slice(0, 20)
@@ -153,7 +218,9 @@ export default function CodebaseDetails({ analysis, gaps }: { analysis: Analysis
                 <FeatureRow key={feat.path} feature={feat} />
               ))}
             {features.length > 20 && (
-              <p className="text-xs text-sky-muted pt-1">...and {features.length - 20} more</p>
+              <p className="text-xs text-text-faint pt-1">
+                ...and {features.length - 20} more
+              </p>
             )}
           </div>
         </CollapsibleSection>
@@ -161,12 +228,12 @@ export default function CodebaseDetails({ analysis, gaps }: { analysis: Analysis
 
       {Object.keys(gaps).length > 0 && (
         <CollapsibleSection
-          icon={<Code2 size={18} className="text-amber-600" />}
+          icon={<Code2 size={18} className="text-warning shrink-0" />}
           title="Infrastructure Gaps"
           subtitle={`${Object.values(gaps).filter((g) => g.exists).length} of ${Object.keys(gaps).length} areas covered`}
           defaultOpen
         >
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             {Object.entries(gaps).map(([key, gap]) => (
               <GapRow key={key} gapKey={key} gap={gap} />
             ))}
@@ -176,28 +243,38 @@ export default function CodebaseDetails({ analysis, gaps }: { analysis: Analysis
 
       {fileTree.length > 0 && (
         <CollapsibleSection
-          icon={<FileCode size={18} className="text-sky-muted" />}
+          icon={<FileCode size={18} className="text-text-faint shrink-0" />}
           title="File Tree"
           subtitle={`${fileTree.length} files analyzed`}
         >
-          <div className="max-h-64 overflow-y-auto space-y-0.5">
+          <div className="max-h-64 overflow-y-auto rounded-lg bg-page border border-line p-3 flex flex-col gap-0.5">
             {fileTree.map((f) => (
-              <div key={f} className="text-xs text-sky-muted font-mono truncate">{f}</div>
+              <div key={f} className="text-xs text-text-faint font-mono truncate">
+                {f}
+              </div>
             ))}
           </div>
         </CollapsibleSection>
       )}
 
-      {(existingContext.hasCursorRules || existingContext.hasClaudeMd || existingContext.hasContextMd) && (
-        <div className="flex flex-wrap gap-2 pt-2">
+      {(existingContext.hasCursorRules ||
+        existingContext.hasClaudeMd ||
+        existingContext.hasContextMd) && (
+        <div className="flex flex-wrap gap-2 pt-1">
           {existingContext.hasCursorRules && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .cursorrules</span>
+            <Pill className="!bg-brand-tint !border-brand-tint-border !text-brand">
+              Has .cursorrules
+            </Pill>
           )}
           {existingContext.hasClaudeMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has CLAUDE.md</span>
+            <Pill className="!bg-brand-tint !border-brand-tint-border !text-brand">
+              Has CLAUDE.md
+            </Pill>
           )}
           {existingContext.hasContextMd && (
-            <span className="px-3 py-1 rounded-full text-xs bg-gold/10 border border-gold/20 text-gold">Has .context.md</span>
+            <Pill className="!bg-brand-tint !border-brand-tint-border !text-brand">
+              Has .context.md
+            </Pill>
           )}
         </div>
       )}

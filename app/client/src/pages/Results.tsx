@@ -70,7 +70,7 @@ export default function Results() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader size={32} className="animate-spin text-gold" />
+        <Loader size={32} className="animate-spin text-brand" />
       </div>
     );
   }
@@ -80,8 +80,8 @@ export default function Results() {
       <div className="min-h-screen">
         <Header backTo="/dashboard" title="Error" />
         <main className="max-w-4xl mx-auto px-6 py-12 text-center">
-          <p className="text-red-600">{error || 'Analysis not found'}</p>
-          <Link to="/" className="text-gold underline mt-4 inline-block">Go back</Link>
+          <p className="text-danger">{error || 'Analysis not found'}</p>
+          <Link to="/" className="text-brand underline mt-4 inline-block">Go back</Link>
         </main>
       </div>
     );
@@ -95,7 +95,7 @@ export default function Results() {
   return (
     <div className="min-h-screen">
       <Header backTo="/dashboard" title="Results">
-        <span className="text-sm text-sky-muted">{data.owner}/{data.repo}</span>
+        <span className="text-sm text-text-muted">{data.owner}/{data.repo}</span>
       </Header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-8">
@@ -109,12 +109,12 @@ export default function Results() {
         )}
 
         {/* Completion overview */}
-        <div className="bg-navy border border-sky-border rounded-xl p-6">
+        <div className="bg-surface border border-line rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Completion</h2>
-            <span className="text-2xl font-bold text-gold">{data.completion_pct || 0}%</span>
+            <span className="text-2xl font-bold text-brand">{data.completion_pct || 0}%</span>
           </div>
-          <div className="w-full h-3 bg-navy-mid rounded-full overflow-hidden">
+          <div className="w-full h-3 bg-surface-2 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-gold to-gold-dim rounded-full transition-all duration-500"
               style={{ width: `${data.completion_pct || 0}%` }}
@@ -127,8 +127,8 @@ export default function Results() {
                   key={key}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
                     val.exists
-                      ? 'bg-green-500/10 text-emerald-600 border border-green-500/20'
-                      : 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                      ? 'bg-green-500/10 text-success border border-green-500/20'
+                      : 'bg-warning-bg text-warning border border-warning-border'
                   }`}
                 >
                   {val.exists ? <CheckCircle size={12} /> : <AlertTriangle size={12} />}
@@ -143,7 +143,7 @@ export default function Results() {
           <div className="flex justify-end">
             <button
               onClick={downloadAll}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gold hover:bg-gold-dim text-ink text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand hover:bg-brand-hov text-text text-sm font-medium transition-colors"
             >
               <Download size={14} />
               Download all context files
@@ -154,9 +154,9 @@ export default function Results() {
         {existingFiles.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <FileText size={20} className="text-emerald-600" />
+              <FileText size={20} className="text-success" />
               Existing Code Context
-              <span className="text-xs bg-green-500/10 text-emerald-600 px-2 py-0.5 rounded-full">{existingFiles.length}</span>
+              <span className="text-xs bg-green-500/10 text-success px-2 py-0.5 rounded-full">{existingFiles.length}</span>
             </h2>
             {existingFiles.map((file, i) => (
               <ContextCard
@@ -172,9 +172,9 @@ export default function Results() {
         {gapFiles.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <AlertTriangle size={20} className="text-amber-600" />
+              <AlertTriangle size={20} className="text-warning" />
               Needs Building
-              <span className="text-xs bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">{gapFiles.length}</span>
+              <span className="text-xs bg-warning-bg text-warning px-2 py-0.5 rounded-full">{gapFiles.length}</span>
             </h2>
             {gapFiles.map((file, i) => (
               <ContextCard
@@ -190,8 +190,8 @@ export default function Results() {
         {contextFiles.length === 0 && !data.features_summary && (
           <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
             <FileText size={48} className="text-border-dark" />
-            <h2 className="text-xl font-semibold text-sky-off">No results generated</h2>
-            <p className="text-sky-muted">The analysis may still be in progress.</p>
+            <h2 className="text-xl font-semibold text-text-soft">No results generated</h2>
+            <p className="text-text-muted">The analysis may still be in progress.</p>
           </div>
         )}
       </main>
@@ -204,22 +204,22 @@ function FeaturesSummary({ summary, copied, onCopy }: { summary: string; copied:
   const sections = parseSummaryIntoSections(summary);
 
   return (
-    <div className="bg-gradient-to-br from-gold/5 to-navy border border-gold/20 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gold/10">
+    <div className="bg-gradient-to-br from-gold/5 to-navy border border-brand-tint-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-brand-tint-border">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-gold/10">
-            <BookOpen size={20} className="text-gold" />
+          <div className="p-2 rounded-lg bg-brand-tint">
+            <BookOpen size={20} className="text-brand" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-ink">What this project does</h2>
-            <p className="text-xs text-sky-muted">Plain-English explanation — no technical jargon</p>
+            <h2 className="text-lg font-semibold text-text">What this project does</h2>
+            <p className="text-xs text-text-muted">Plain-English explanation — no technical jargon</p>
           </div>
         </div>
         <button
           onClick={onCopy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gold/10 hover:bg-gold/20 text-gold border border-gold/20 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-tint hover:bg-brand-tint-2 text-brand border border-brand-tint-border transition-colors"
         >
-          {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
@@ -242,15 +242,15 @@ function SummarySection({ title, content, defaultOpen }: { title: string; conten
         className="flex items-center gap-2 w-full text-left group"
       >
         {open
-          ? <ChevronDown size={16} className="text-gold flex-shrink-0" />
-          : <ChevronRight size={16} className="text-sky-muted group-hover:text-gold flex-shrink-0" />
+          ? <ChevronDown size={16} className="text-brand flex-shrink-0" />
+          : <ChevronRight size={16} className="text-text-muted group-hover:text-brand flex-shrink-0" />
         }
-        <h3 className="text-sm font-semibold text-gold group-hover:text-ink transition-colors">
+        <h3 className="text-sm font-semibold text-brand group-hover:text-text transition-colors">
           {title}
         </h3>
       </button>
       {open && (
-        <div className="mt-2 ml-6 text-sm text-sky-off leading-relaxed whitespace-pre-wrap">
+        <div className="mt-2 ml-6 text-sm text-text-soft leading-relaxed whitespace-pre-wrap">
           {content}
         </div>
       )}
@@ -292,32 +292,32 @@ function ContextCard({ file, copied, onCopy }: { file: ContextFile; copied: bool
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-navy border border-sky-border rounded-xl overflow-hidden">
+    <div className="bg-surface border border-line rounded-xl overflow-hidden">
       <div
-        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-navy-mid transition-colors"
+        className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-page transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
             file.type === 'existing'
-              ? 'bg-green-500/10 text-emerald-600'
-              : 'bg-amber-500/10 text-amber-600'
+              ? 'bg-green-500/10 text-success'
+              : 'bg-warning-bg text-warning'
           }`}>
             {file.type === 'existing' ? 'existing' : 'needs building'}
           </span>
-          <code className="text-sm text-sky-off">{file.path}</code>
+          <code className="text-sm text-text-soft">{file.path}</code>
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); onCopy(); }}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-navy-mid hover:bg-navy-mid text-sky-off transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-2 hover:bg-page text-text-soft transition-colors"
         >
-          {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
       {expanded && (
-        <div className="border-t border-sky-border px-4 py-4 max-h-96 overflow-auto">
-          <pre className="text-sm text-sky-off whitespace-pre-wrap font-mono leading-relaxed">{file.content}</pre>
+        <div className="border-t border-line px-4 py-4 max-h-96 overflow-auto">
+          <pre className="text-sm text-text-soft whitespace-pre-wrap font-mono leading-relaxed">{file.content}</pre>
         </div>
       )}
     </div>

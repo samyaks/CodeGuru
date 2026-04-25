@@ -32,14 +32,14 @@ type View = 'readiness' | 'jobs' | 'technical';
 
 const VIEWS: { key: View; label: string; icon: string; desc: string; color: string }[] = [
   { key: 'readiness', label: 'Readiness', icon: '📊', desc: 'Score + module impact', color: '#f43f5e' },
-  { key: 'jobs', label: 'Jobs', icon: '🎯', desc: 'By persona & job', color: '#f59e0b' },
-  { key: 'technical', label: 'Technical', icon: '⚙️', desc: 'Code & routes', color: '#818cf8' },
+  { key: 'jobs', label: 'Jobs', icon: '🎯', desc: 'By persona & job', color: '#d97706' },
+  { key: 'technical', label: 'Technical', icon: '⚙️', desc: 'Code & routes', color: '#6366f1' },
 ];
 
 function statusLabelFor(value: number): { label: 'Ready' | 'Partial' | 'Missing'; color: string } {
-  if (value >= 1) return { label: 'Ready', color: '#22c55e' };
-  if (value >= 0.3) return { label: 'Partial', color: '#f59e0b' };
-  return { label: 'Missing', color: '#ef4444' };
+  if (value >= 1) return { label: 'Ready', color: '#16a34a' };
+  if (value >= 0.3) return { label: 'Partial', color: '#d97706' };
+  return { label: 'Missing', color: '#dc2626' };
 }
 
 function toMapEdges(map: ProductMapData) {
@@ -332,7 +332,7 @@ export default function ProductMap() {
         nodeId: e.id,
         name: e.label,
         sub: e.filePath || e.file_path || '—',
-        dot: e.status === 'none' || e.status === 'missing' ? '#ef4444' : '#22c55e',
+        dot: e.status === 'none' || e.status === 'missing' ? '#dc2626' : '#16a34a',
       }));
     const routes = entities
       .filter((e) => e.type === 'route')
@@ -340,7 +340,7 @@ export default function ProductMap() {
         nodeId: e.id,
         name: e.label || e.key,
         sub: e.filePath || e.file_path || 'Not created',
-        dot: e.status === 'stub' ? '#ef4444' : '#f59e0b',
+        dot: e.status === 'stub' ? '#dc2626' : '#d97706',
       }));
     const components = entities
       .filter((e) => e.type === 'component')
@@ -348,14 +348,14 @@ export default function ProductMap() {
         nodeId: e.id,
         name: e.label || e.key,
         sub: e.filePath || e.file_path || '—',
-        dot: '#22c55e',
+        dot: '#16a34a',
       }));
     const capabilities = entities
       .filter((e) => e.type === 'capability')
       .map((e) => {
         const st = e.status;
         const dot =
-          st === 'none' || st === 'missing' ? '#ef4444' : st === 'partial' ? '#f59e0b' : '#22c55e';
+          st === 'none' || st === 'missing' ? '#dc2626' : st === 'partial' ? '#d97706' : '#16a34a';
         return {
           nodeId: e.id,
           name: e.label,
@@ -374,13 +374,13 @@ export default function ProductMap() {
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
 
   if (!projectId) {
-    return <div className="min-h-screen bg-[#0c0c14] p-6 text-[#dcdce6]">Invalid route.</div>;
+    return <div className="min-h-screen bg-[#f8fafc] p-6 text-[#0f172a]">Invalid route.</div>;
   }
 
   if (loading) {
     return (
       <div
-        className="flex min-h-screen items-center justify-center bg-[#0c0c14] text-[#8a8a9c]"
+        className="flex min-h-screen items-center justify-center bg-[#f8fafc] text-[#64748b]"
         style={{ fontFamily: "'DM Sans', sans-serif" }}
       >
         <Loader2 className="h-6 w-6 animate-spin text-[#f43f5e]" />
@@ -392,14 +392,14 @@ export default function ProductMap() {
   if (error) {
     return (
       <div
-        className="min-h-screen bg-[#0c0c14] p-6 text-[#dcdce6]"
+        className="min-h-screen bg-[#f8fafc] p-6 text-[#0f172a]"
         style={{ fontFamily: "'DM Sans', sans-serif" }}
       >
-        <p className="text-red-400">{error}</p>
+        <p className="text-danger">{error}</p>
         <button
           type="button"
           onClick={load}
-          className="mt-4 cursor-pointer rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm text-[#dcdce6] hover:bg-white/10"
+          className="mt-4 cursor-pointer rounded-lg border border-line bg-surface-2 px-4 py-2 text-sm text-[#0f172a] hover:bg-page"
         >
           Retry
         </button>
@@ -415,11 +415,11 @@ export default function ProductMap() {
   if (!map?.id) {
     return (
       <div
-        className="min-h-screen bg-[#0c0c14] p-6 text-[#dcdce6]"
+        className="min-h-screen bg-[#f8fafc] p-6 text-[#0f172a]"
         style={{ fontFamily: "'DM Sans', sans-serif" }}
       >
         <h1 className="text-lg font-bold">Product map</h1>
-        <p className="mt-2 max-w-md text-sm text-[#6a6a7e]">
+        <p className="mt-2 max-w-md text-sm text-[#334155]">
           No product map for this project yet. Run onboarding to describe your app and generate a
           map.
         </p>
@@ -440,20 +440,20 @@ export default function ProductMap() {
 
   const scoreBadge =
     baseAppScore >= 70
-      ? { bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34, 197, 94, 0.15)', fg: '#22c55e' }
+      ? { bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34,197,94,0.12)', fg: '#16a34a' }
       : baseAppScore >= 40
-        ? { bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.15)', fg: '#f59e0b' }
-        : { bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.15)', fg: '#ef4444' };
+        ? { bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245,158,11,0.12)', fg: '#d97706' }
+        : { bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239,68,68,0.12)', fg: '#dc2626' };
 
   return (
     <div
-      className="min-h-screen text-[#dcdce6]"
+      className="min-h-screen text-[#0f172a]"
       style={{
-        background: '#0c0c14',
+        background: '#f8fafc',
         fontFamily: "'DM Sans', ui-sans-serif, sans-serif",
       }}
     >
-      <div className="border-b border-white/[0.06] px-4 py-3 pt-4 sm:px-6">
+      <div className="border-b border-line px-4 py-3 pt-4 sm:px-6">
         <div className="mb-3.5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div
@@ -465,13 +465,13 @@ export default function ProductMap() {
               T
             </div>
             <span
-              className="text-[13px] font-medium text-[#6a6a7e]"
+              className="text-[13px] font-medium text-[#334155]"
               style={{ fontFamily: "'DM Mono', monospace" }}
             >
               takeoff<span className="text-[#f43f5e]">/map</span>
             </span>
             {map.projectName && (
-              <span className="ml-1 text-[10px] text-[#3a3a4e]">{map.projectName}</span>
+              <span className="ml-1 text-[10px] text-[#cbd5e1]">{map.projectName}</span>
             )}
           </div>
           <div
@@ -481,7 +481,7 @@ export default function ProductMap() {
               border: `1px solid ${scoreBadge.border}`,
             }}
           >
-            <span className="text-[11px] text-[#8a8a9c]">Readiness</span>
+            <span className="text-[11px] text-[#64748b]">Readiness</span>
             <span
               className="text-sm font-extrabold"
               style={{ color: scoreBadge.fg, fontFamily: "'DM Mono', monospace" }}
@@ -498,9 +498,9 @@ export default function ProductMap() {
               onClick={() => setView(v.key)}
               className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 transition-all duration-150"
               style={{
-                background: view === v.key ? `${v.color}12` : 'rgba(255,255,255,0.02)',
+                background: view === v.key ? `${v.color}12` : '#0f172a',
                 border: `1px solid ${
-                  view === v.key ? `${v.color}40` : 'rgba(255,255,255,0.05)'
+                  view === v.key ? `${v.color}40` : '#e2e8f0'
                 }`,
                 fontFamily: "'DM Sans', sans-serif",
               }}
@@ -509,11 +509,11 @@ export default function ProductMap() {
               <div className="text-left">
                 <div
                   className="text-xs font-bold"
-                  style={{ color: view === v.key ? v.color : '#6a6a7e' }}
+                  style={{ color: view === v.key ? v.color : '#334155' }}
                 >
                   {v.label}
                 </div>
-                <div className="text-[9px] text-[#3a3a4e]">{v.desc}</div>
+                <div className="text-[9px] text-[#cbd5e1]">{v.desc}</div>
               </div>
             </button>
           ))}
@@ -524,8 +524,8 @@ export default function ProductMap() {
         {view === 'readiness' && (
           <div>
             <div
-              className="mb-6 flex items-center gap-6 rounded-[14px] border border-white/[0.05] p-4 sm:p-5 sm:px-7"
-              style={{ background: 'rgba(255,255,255,0.015)' }}
+              className="mb-6 flex items-center gap-6 rounded-[14px] border border-line p-4 sm:p-5 sm:px-7"
+              style={{ background: '#f8fafc' }}
             >
               <ReadinessRing
                 score={hoveredModule ? simRingScore : baseAppScore}
@@ -539,7 +539,7 @@ export default function ProductMap() {
                 }
               />
               <div className="min-w-0 flex-1">
-                <div className="mb-3 text-[15px] font-bold text-[#dcdce6]">
+                <div className="mb-3 text-[15px] font-bold text-[#0f172a]">
                   {heroMessage(hoveredModule ? simRingScore : baseAppScore)}
                 </div>
                 {personas.map((persona) => {
@@ -553,11 +553,11 @@ export default function ProductMap() {
                   return (
                     <div key={persona.id} className="mb-1.5 flex items-center gap-2.5">
                       <span className="w-5 text-sm">{persona.emoji}</span>
-                      <span className="w-[140px] text-xs text-[#8a8a9c]">{persona.name}</span>
+                      <span className="w-[140px] text-xs text-[#64748b]">{persona.name}</span>
                       <MiniScoreBar score={pScore} width={80} />
                       {hoveredModule && pScore > baseP && (
                         <span
-                          className="text-[10px] text-emerald-500"
+                          className="text-[10px] text-success"
                           style={{ fontFamily: "'DM Mono', monospace" }}
                         >
                           +{pScore - baseP}%
@@ -583,12 +583,12 @@ export default function ProductMap() {
           <div>
             {technicalSections.map((section) => (
               <div key={section.title} className="mb-5">
-                <div className="mb-2 flex items-center gap-2 text-[13px] font-bold text-[#dcdce6]">
+                <div className="mb-2 flex items-center gap-2 text-[13px] font-bold text-[#0f172a]">
                   <span className="text-sm">{section.icon}</span>
                   {section.title}
                 </div>
                 {section.items.length === 0 ? (
-                  <p className="text-xs text-[#4a4a60]">No {section.title.toLowerCase()} detected.</p>
+                  <p className="text-xs text-[#94a3b8]">No {section.title.toLowerCase()} detected.</p>
                 ) : (
                   <div className="flex flex-col gap-1">
                     {section.items.map((item) => {
@@ -611,9 +611,9 @@ export default function ProductMap() {
                           style={{
                             background: isSelected
                               ? 'rgba(99, 102, 241, 0.04)'
-                              : 'rgba(255,255,255,0.02)',
+                              : '#0f172a',
                             border: `1px solid ${
-                              isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255,255,255,0.05)'
+                              isSelected ? 'rgba(99, 102, 241, 0.12)' : '#e2e8f0'
                             }`,
                           }}
                         >
@@ -622,18 +622,18 @@ export default function ProductMap() {
                               className="h-1.5 w-1.5 shrink-0 rounded-full"
                               style={{ background: item.dot }}
                             />
-                            <span className="min-w-0 flex-1 text-xs font-semibold text-[#dcdce6]">
+                            <span className="min-w-0 flex-1 text-xs font-semibold text-[#0f172a]">
                               {item.name}
                             </span>
                             <span
-                              className="truncate text-[10px] text-[#4a4a60]"
+                              className="truncate text-[10px] text-[#94a3b8]"
                               style={{ fontFamily: "'DM Mono', monospace" }}
                             >
                               {item.sub}
                             </span>
                           </div>
                           {isSelected && (toEdges.length > 0 || fromEdges.length > 0) && (
-                            <div className="mt-2 border-t border-white/[0.04] pt-1.5">
+                            <div className="mt-2 border-t border-divider pt-1.5">
                               {toEdges.map((edge, i) => {
                                 const src = entities.find((n) => n.id === edge.fromId);
                                 const fromJob = jobs.find((j) => j.id === edge.fromId);
@@ -654,14 +654,14 @@ export default function ProductMap() {
                                         background: isProd
                                           ? 'rgba(244, 63, 94, 0.1)'
                                           : 'rgba(99, 102, 241, 0.1)',
-                                        color: isProd ? '#f43f5e' : '#818cf8',
+                                        color: isProd ? '#f43f5e' : '#6366f1',
                                       }}
                                     >
                                       {edge.type}
                                     </span>
                                     <span
                                       style={{
-                                        color: isProd ? '#f43f5e' : '#818cf8',
+                                        color: isProd ? '#f43f5e' : '#6366f1',
                                         fontWeight: 500,
                                       }}
                                     >
@@ -683,12 +683,12 @@ export default function ProductMap() {
                                       style={{
                                         fontFamily: "'DM Mono', monospace",
                                         background: 'rgba(99, 102, 241, 0.1)',
-                                        color: '#818cf8',
+                                        color: '#6366f1',
                                       }}
                                     >
                                       → {edge.type}
                                     </span>
-                                    <span className="font-medium text-[#818cf8]">{tLabel}</span>
+                                    <span className="font-medium text-[#6366f1]">{tLabel}</span>
                                   </div>
                                 );
                               })}
@@ -704,7 +704,7 @@ export default function ProductMap() {
           </div>
         )}
 
-        <div className="mt-8 border-t border-white/[0.06] pt-4 text-center text-[11px] text-[#4a4a60]">
+        <div className="mt-8 border-t border-line pt-4 text-center text-[11px] text-[#94a3b8]">
           <Link to={`/projects/${projectId}`} className="text-[#f43f5e] hover:underline">
             ← Project
           </Link>

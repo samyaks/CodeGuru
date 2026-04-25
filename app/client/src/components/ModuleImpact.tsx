@@ -12,9 +12,9 @@ export type ModuleImpactItem = {
 };
 
 const STATUS_COL: Record<string, string> = {
-  none: '#ef4444',
-  partial: '#f59e0b',
-  full: '#22c55e',
+  none: '#dc2626',
+  partial: '#d97706',
+  full: '#16a34a',
 };
 
 type ModuleImpactProps = {
@@ -37,7 +37,7 @@ export function ModuleImpact({
   return (
     <div className={className}>
       <div
-        className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-[#4a4a60]"
+        className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-[#94a3b8]"
         style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.1em' }}
       >
         Module impact — hover to simulate
@@ -45,7 +45,7 @@ export function ModuleImpact({
       <div className="flex flex-col gap-2">
         {modules.map((mod, i) => {
           const isHovered = hoveredModule === mod.id;
-          const sc = STATUS_COL[mod.status] ?? '#6a6a7e';
+          const sc = STATUS_COL[mod.status] ?? '#334155';
 
           return (
             <div
@@ -58,9 +58,9 @@ export function ModuleImpact({
               onBlur={() => onHover(null)}
               className="cursor-pointer rounded-[10px] p-3.5 transition-colors duration-200"
               style={{
-                background: isHovered ? 'rgba(244, 63, 94, 0.04)' : 'rgba(255,255,255,0.02)',
+                background: isHovered ? 'rgba(244, 63, 94, 0.04)' : '#0f172a',
                 border: `1px solid ${
-                  isHovered ? 'rgba(244, 63, 94, 0.15)' : 'rgba(255,255,255,0.05)'
+                  isHovered ? 'rgba(244,63,94,0.12)' : '#e2e8f0'
                 }`,
               }}
             >
@@ -72,7 +72,7 @@ export function ModuleImpact({
                   >
                     #{mod.rank}
                   </span>
-                  <span className="text-sm font-bold text-[#dcdce6]">{mod.label}</span>
+                  <span className="text-sm font-bold text-[#0f172a]">{mod.label}</span>
                   <span
                     className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
                     style={{
@@ -87,7 +87,7 @@ export function ModuleImpact({
                 <div className="flex items-center gap-3">
                   <ImpactArrow before={mod.before} after={mod.after} />
                   <span
-                    className="rounded-md px-2.5 py-0.5 text-[13px] font-extrabold text-emerald-500"
+                    className="rounded-md px-2.5 py-0.5 text-[13px] font-extrabold text-success"
                     style={{
                       fontFamily: "'DM Mono', monospace",
                       background: 'rgba(34, 197, 94, 0.08)',
@@ -101,11 +101,11 @@ export function ModuleImpact({
                 {mod.jobsUnblocked.map((job) => (
                   <span
                     key={job.id}
-                    className="inline-flex items-center gap-1 rounded bg-white/[0.03] px-2 py-0.5 text-[10px] text-[#6a6a7e]"
+                    className="inline-flex items-center gap-1 rounded bg-page px-2 py-0.5 text-[10px] text-[#334155]"
                   >
                     {job.personaEmoji ? `${job.personaEmoji} ` : ''}
                     {job.title}
-                    <span className="text-[9px] text-emerald-500" style={{ fontFamily: "'DM Mono', monospace" }}>
+                    <span className="text-[9px] text-success" style={{ fontFamily: "'DM Mono', monospace" }}>
                       {job.before}→{job.after}%
                     </span>
                   </span>

@@ -21,12 +21,12 @@ export default function RepoInput({ onSubmit, loading }: Props) {
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://github.com/owner/repo"
-        className="flex-1 px-4 py-3 rounded-xl glass text-sky-white placeholder-sky-muted focus:outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/30 transition-all text-sm font-mono"
+        className="flex-1 px-4 py-3 rounded-xl glass text-text placeholder-text-faint focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all text-sm font-mono"
       />
       <button
         type="submit"
         disabled={loading || !url.trim()}
-        className="px-5 py-3 rounded-xl bg-gold hover:bg-gold-dim disabled:opacity-40 disabled:cursor-not-allowed text-midnight font-semibold text-sm flex items-center gap-2 transition-all btn-glow"
+        className="px-5 py-3 rounded-xl bg-brand hover:bg-brand-hov disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm flex items-center gap-2 transition-all shadow-cta"
       >
         {loading ? <Loader size={16} className="animate-spin" /> : <ArrowRight size={16} />}
         Analyze

@@ -27,28 +27,28 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-midnight flex items-center justify-center px-6 py-16">
-          <div className="w-full max-w-md rounded-2xl border border-sky-border bg-red-500/10 p-8 text-center space-y-6">
+        <div className="min-h-screen bg-page flex items-center justify-center px-6 py-16">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-danger-bg p-8 text-center space-y-6">
             <div className="flex justify-center">
-              <div className="rounded-full bg-red-500/10 p-4 border border-red-400/20">
-                <AlertTriangle className="h-10 w-10 text-red-600" aria-hidden />
+              <div className="rounded-full bg-danger-bg p-4 border border-danger-border">
+                <AlertTriangle className="h-10 w-10 text-danger" aria-hidden />
               </div>
             </div>
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold text-sky-white">Something went wrong</h1>
-              <p className="text-sm text-sky-muted leading-relaxed">{FRIENDLY_MESSAGE}</p>
+              <h1 className="text-xl font-semibold text-text">Something went wrong</h1>
+              <p className="text-sm text-text-muted leading-relaxed">{FRIENDLY_MESSAGE}</p>
             </div>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => this.setState({ hasError: false, error: null })}
-                className="px-5 py-2.5 rounded-lg bg-gold text-midnight text-sm font-semibold hover:bg-gold-dim transition-colors"
+                className="px-5 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors"
               >
                 Try again
               </button>
               <a
                 href="/"
-                className="px-5 py-2.5 rounded-lg border border-sky-border text-sm font-medium text-gold hover:text-gold-dim hover:border-gold/30 transition-colors text-center"
+                className="px-5 py-2.5 rounded-lg border border-line text-sm font-medium text-brand hover:text-brand-hov hover:border-brand transition-colors text-center"
               >
                 Go home
               </a>
