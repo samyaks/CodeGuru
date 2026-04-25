@@ -236,7 +236,8 @@ function normalizeFromMapEnvelope(data: Record<string, unknown>): ProductMapData
  */
 export async function fetchProductMap(projectId: string): Promise<ProductMapData | null> {
   const res = await authFetch(`${API}/product-map/${projectId}`);
-  if (res.status === 404) return null;
+  // 404 here usually means the *project* doesn't exist (not just \"no map\").
+  // \"No map\" returns 200 with { map: null }.
   const data = (await handleApiResponse(res)) as Record<string, unknown>;
   return normalizeFromMapEnvelope(data);
 }
