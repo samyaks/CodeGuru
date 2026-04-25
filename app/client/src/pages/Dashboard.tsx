@@ -213,9 +213,10 @@ function ProjectCard({ project }: { project: Project }) {
   const displayDate = project.updated_at || project.created_at;
 
   return (
+    <div className="bg-navy border border-sky-border/50 rounded-xl hover:border-gold/30 transition-colors group">
     <Link
       to={`/projects/${project.id}`}
-      className="block bg-navy border border-sky-border/50 rounded-xl p-5 hover:border-gold/30 transition-colors group"
+      className="block p-5"
     >
       {/* Top: name + status */}
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -271,6 +272,15 @@ function ProjectCard({ project }: { project: Project }) {
         </span>
       </div>
     </Link>
+    <div className="px-5 pb-3 -mt-1 border-t border-sky-border/40">
+      <Link
+        to={`/projects/${project.id}/map`}
+        className="text-xs font-medium text-rose-400/90 hover:text-rose-400 transition-colors"
+      >
+        Product map →
+      </Link>
+    </div>
+    </div>
   );
 }
 

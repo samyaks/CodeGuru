@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, AlertCircle, Rocket, ClipboardList,
-  ExternalLink, Loader2, Trash2, Lightbulb, Star, GitFork,
+  ExternalLink, Loader2, Trash2, Lightbulb, Star, GitFork, Map,
 } from 'lucide-react';
 import Header from '../components/Header';
 import FeaturesSummary from '../components/FeaturesSummary';
@@ -291,7 +291,7 @@ export default function ProjectView() {
             )}
 
             {/* Action buttons */}
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
               <button
                 onClick={() => {
                   if (!user) {
@@ -323,6 +323,19 @@ export default function ProjectView() {
                   <div className="text-xs text-sky-muted">See all steps and prompts.</div>
                 </div>
               </Link>
+
+              <Link
+                to={`/projects/${id}/map`}
+                className="p-5 rounded-xl bg-navy border border-sky-border hover:bg-navy-mid transition-all text-left flex items-center gap-4 md:col-span-2 xl:col-span-1"
+              >
+                <Map size={22} className="text-rose-400 flex-shrink-0" />
+                <div>
+                  <div className="font-semibold text-sky-white">Product map</div>
+                  <div className="text-xs text-sky-muted">
+                    Jobs & personas vs your code — readiness by what users need.
+                  </div>
+                </div>
+              </Link>
             </div>
           </div>
         )}
@@ -345,6 +358,13 @@ export default function ProjectView() {
                     ? 'Your app looks ready to deploy. You can ship it now or review the details below.'
                     : `Your app is ${score}% of the way there. We've identified what's missing and built you a plan.`}
                 </p>
+                <Link
+                  to={`/projects/${id}/map`}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-lg px-4 py-2 bg-rose-500/5 transition-colors"
+                >
+                  <Map size={16} />
+                  Product map — score by jobs
+                </Link>
               </div>
             )}
 
