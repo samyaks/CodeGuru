@@ -208,6 +208,29 @@ function normalizeMapPayload(raw: Record<string, unknown>): ProductMapData {
 }
 
 /**
+ * Server sends `{ map: { id, projectId, scores, ... }, personas, jobs, entities, edges }`.
+ * Merging is required — `map` alone does not include graph arrays.
+ */
+function normalizeFromMapEnvelope(data: Record<string, unknown>): ProductMapData | null {
+  if (data.map === null) return null;
+
+  if (data.map && typeof data.map === 'object' && !Array.isArray(data.map)) {
+    const inner = data.map as Record<string, unknown>;
+    return normalizeMapPayload({
+      ...inner,
+      personas: data.personas ?? inner.personas,
+      jobs: data.jobs ?? inner.jobs,
+      entities: data.entities ?? inner.entities,
+      edges: data.edges ?? inner.edges,
+      moduleRanking: data.moduleRanking ?? data.module_ranking ?? inner.moduleRanking,
+      appScore: data.appScore ?? data.app_score ?? inner.appScore,
+    });
+  }
+
+  return normalizeMapPayload(data);
+}
+
+/**
  * GET /api/product-map/:projectId — latest map for the project.
  * Returns null if 404 (no map yet).
  */
@@ -215,10 +238,7 @@ export async function fetchProductMap(projectId: string): Promise<ProductMapData
   const res = await authFetch(`${API}/product-map/${projectId}`);
   if (res.status === 404) return null;
   const data = (await handleApiResponse(res)) as Record<string, unknown>;
-  if (data.map && typeof data.map === 'object') {
-    return normalizeMapPayload(data.map as Record<string, unknown>);
-  }
-  return normalizeMapPayload(data);
+  return normalizeFromMapEnvelope(data);
 }
 
 /**
@@ -278,8 +298,5 @@ export async function createProductMap(
     body: JSON.stringify(body),
   });
   const data = (await handleApiResponse(res)) as Record<string, unknown>;
-  if (data.map && typeof data.map === 'object') {
-    return normalizeMapPayload(data.map as Record<string, unknown>);
-  }
-  return normalizeMapPayload(data);
+  return normalizeFromMapEnvelope(data) ?? normalizeMapPayload(data);
 }
