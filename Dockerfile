@@ -48,8 +48,9 @@ COPY --from=builder /app/packages/github ./packages/github
 COPY --from=builder /app/packages/railway ./packages/railway
 COPY --from=builder /app/packages/sse ./packages/sse
 
-COPY --from=builder /app/app/package.json ./app/package.json
-COPY --from=builder /app/app/server ./app/server
+# Builder never copies server sources; pull them from build context.
+COPY app/package.json ./app/package.json
+COPY app/server/ ./app/server/
 COPY --from=builder /app/.client-dist-artifact ./app/client/dist
 
 ENV NODE_ENV=production
