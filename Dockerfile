@@ -27,7 +27,10 @@ COPY packages/ packages/
 RUN cd packages/annotate && npm run build:lib
 
 COPY app/client/ app/client/
+# Move built SPA out of app/client before deleting that tree (prune drops the
+# workspace); production copies from this path only.
 RUN npm run build --prefix app/client \
+  && mv app/client/dist /app/.client-dist-artifact \
   && rm -rf app/client \
   && npm prune --omit=dev \
   && rm -rf node_modules/@takeoff packages/annotate \
@@ -47,7 +50,7 @@ COPY --from=builder /app/packages/sse ./packages/sse
 
 COPY --from=builder /app/app/package.json ./app/package.json
 COPY --from=builder /app/app/server ./app/server
-COPY --from=builder /app/app/client/dist ./app/client/dist
+COPY --from=builder /app/.client-dist-artifact ./app/client/dist
 
 ENV NODE_ENV=production
 ENV PORT=3001
