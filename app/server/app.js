@@ -156,7 +156,9 @@ app.use((err, req, res, _next) => {
     return res.status(401).json({ error: 'Invalid or expired token', code: 'UNAUTHORIZED' });
   }
 
-  console.error(`[UnhandledError] ${req.method} ${req.originalUrl}:`, err);
+  console.error(
+    `[UnhandledError] ${req.method} ${req.originalUrl}\n  name=${err.name}\n  code=${err.code}\n  message=${err.message}\n  stack=${err.stack}`
+  );
   const message = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
   res.status(500).json({ error: message, code: 'INTERNAL_ERROR' });
 });

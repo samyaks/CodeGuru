@@ -5,12 +5,35 @@ const crypto = require('crypto');
 
 let pool;
 
+function describeDbUrl(connectionString) {
+  try {
+    const u = new URL(connectionString);
+    const direct = /\.supabase\.co$/.test(u.hostname);
+    const pooler = /\.pooler\.supabase\.com$/.test(u.hostname);
+    return {
+      host: u.hostname,
+      port: u.port,
+      user: u.username,
+      database: (u.pathname || '/').replace(/^\//, ''),
+      kind: direct ? 'DIRECT (IPv6-only — will fail on Railway)'
+        : pooler ? 'POOLER (IPv4 — Railway-compatible)'
+        : 'OTHER',
+    };
+  } catch (_e) {
+    return { host: '<unparseable>', port: '?', user: '?', database: '?', kind: 'UNPARSEABLE' };
+  }
+}
+
 function getDb() {
   if (pool) return pool;
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error('DATABASE_URL is not set — cannot connect to Postgres');
   }
+  const info = describeDbUrl(connectionString);
+  console.log(
+    `[db] Initializing pg pool: host=${info.host} port=${info.port} user=${info.user} database=${info.database} kind=${info.kind}`
+  );
   pool = new Pool({
     connectionString,
     ssl: { rejectUnauthorized: false },
