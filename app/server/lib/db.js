@@ -490,6 +490,7 @@ const commitReviews = {
 
 const BUILD_ENTRIES_ALLOWED = new Set([
   'title', 'content', 'metadata', 'is_public', 'updated_at', 'sort_order', 'entry_type',
+  'source_commit_sha', 'approval_status',
 ]);
 const BUILD_ENTRIES_BOOL = new Set(['is_public']);
 
@@ -498,12 +499,15 @@ const buildEntries = {
     const prepared = {
       is_public: false,
       sort_order: 0,
+      source_commit_sha: null,
+      approval_status: null,
       ...entry,
     };
     await getDb().query(
       `INSERT INTO build_entries
-        (id, project_id, user_id, entry_type, title, content, metadata, is_public, created_at, sort_order)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        (id, project_id, user_id, entry_type, title, content, metadata, is_public,
+         created_at, sort_order, source_commit_sha, approval_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         prepared.id,
         prepared.project_id,
@@ -515,6 +519,8 @@ const buildEntries = {
         toBool(prepared.is_public),
         prepared.created_at,
         prepared.sort_order ?? 0,
+        prepared.source_commit_sha ?? null,
+        prepared.approval_status ?? null,
       ]
     );
     return entry;
@@ -537,6 +543,24 @@ const buildEntries = {
   },
   async findById(id) {
     const { rows } = await getDb().query('SELECT * FROM build_entries WHERE id = $1', [id]);
+    return rows[0] || null;
+  },
+  async findBySourceCommitSha(projectId, sha) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM build_entries
+         WHERE project_id = $1 AND source_commit_sha = $2
+         ORDER BY created_at DESC LIMIT 1`,
+      [projectId, sha]
+    );
+    return rows[0] || null;
+  },
+  async findPendingBySourceCommitSha(projectId, sha) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM build_entries
+         WHERE project_id = $1 AND source_commit_sha = $2 AND approval_status = 'pending'
+         ORDER BY created_at DESC LIMIT 1`,
+      [projectId, sha]
+    );
     return rows[0] || null;
   },
   async update(id, fields) {

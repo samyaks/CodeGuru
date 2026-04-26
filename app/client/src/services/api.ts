@@ -349,6 +349,8 @@ export interface BuildEntry {
   created_at: string;
   updated_at: string | null;
   sort_order: number;
+  source_commit_sha: string | null;
+  approval_status: 'pending' | 'approved' | 'dismissed' | null;
 }
 
 export interface ProjectWithEntries extends Project {
@@ -403,6 +405,29 @@ export async function fetchCommitReviewDetail(projectId: string, sha: string): P
   const res = await authFetch(`${API_BASE}/projects/${projectId}/commit-reviews/${sha}`);
   if (!res.ok) return null;
   return res.json();
+}
+
+export async function approveCommitContext(projectId: string, sha: string): Promise<BuildEntry> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commits/${sha}/approve-context`, { method: 'POST' });
+  return handleApiResponse<BuildEntry>(res);
+}
+
+export async function dismissCommitContext(projectId: string, sha: string): Promise<BuildEntry> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commits/${sha}/dismiss-context`, { method: 'POST' });
+  return handleApiResponse<BuildEntry>(res);
+}
+
+export async function updateCommitContext(
+  projectId: string,
+  sha: string,
+  fields: { title?: string; content?: string },
+): Promise<BuildEntry> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commits/${sha}/context`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  return handleApiResponse<BuildEntry>(res);
 }
 
 // Webhook

@@ -142,7 +142,12 @@ router.post('/generate-context', generateLimit, asyncHandler(async (req, res) =>
 
   checkProjectAccess(project, req);
 
-  const entries = await buildEntries.findByProjectId(projectId);
+  const allEntries = await buildEntries.findByProjectId(projectId);
+  // Pending and dismissed drafts must not leak into .context.md — only
+  // approved entries (and legacy/manual entries with NULL approval_status) count.
+  const entries = allEntries.filter(
+    (e) => e.approval_status == null || e.approval_status === 'approved'
+  );
   if (entries.length === 0) {
     throw AppError.badRequest('No build entries found. Add some entries before generating context.');
   }

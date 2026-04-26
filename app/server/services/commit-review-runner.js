@@ -1,7 +1,9 @@
+const { v4: uuidv4 } = require('uuid');
 const github = require('./github');
-const { commitReviews } = require('../lib/db');
+const { commitReviews, deployments, buildEntries } = require('../lib/db');
 const { detectDeploymentInPR } = require('./deployment');
 const reviewer = require('./reviewer');
+const { generateCommitContextDraft } = require('./commit-context-generator');
 const { broadcast } = require('../lib/sse');
 
 const MAX_FILES = parseInt(process.env.MAX_COMMIT_REVIEW_FILES, 10) || 40;
@@ -109,6 +111,49 @@ async function runCommitReviewJob({
     commitSha: afterSha,
     verdict: report.verdict,
   });
+
+  // Draft a Build Story entry from the commit + AI review. Wrapped in try/catch
+  // so a context-draft failure never marks the (already-completed) review as
+  // failed. Skipped entirely if a draft (in any status — pending/approved/
+  // dismissed) already exists for this commit, so retries don't generate dupes
+  // or overturn a user's dismiss.
+  try {
+    const project = await deployments.findById(projectId);
+    if (project && project.user_id) {
+      const existingDraft = await buildEntries.findBySourceCommitSha(projectId, afterSha);
+      if (existingDraft) {
+        console.log(`commit-context draft for ${afterSha} already exists (id=${existingDraft.id}, status=${existingDraft.approval_status}) — skipping regeneration`);
+      } else {
+        const draft = await generateCommitContextDraft({
+          project,
+          commitTitle,
+          commitBody,
+          files,
+          aiReport: report,
+        });
+        await buildEntries.create({
+          id: uuidv4(),
+          project_id: projectId,
+          user_id: project.user_id,
+          entry_type: 'note',
+          title: draft.title,
+          content: draft.content,
+          metadata: null,
+          is_public: false,
+          source_commit_sha: afterSha,
+          approval_status: 'pending',
+          created_at: new Date().toISOString(),
+        });
+        broadcast(projectId, {
+          type: 'commit-context',
+          status: 'drafted',
+          commitSha: afterSha,
+        });
+      }
+    }
+  } catch (err) {
+    console.error(`commit-context draft for ${commitReviewId} failed:`, err.message);
+  }
 }
 
 async function runCommitReviewJobSafe(ctx) {

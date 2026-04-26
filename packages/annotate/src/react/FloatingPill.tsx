@@ -21,8 +21,8 @@ export default function FloatingPill() {
   const positionStyle = isRight ? { right: 16 } : { left: 16 };
   const openCount = session.pins.filter((p) => !p.resolved).length;
 
-  // Collapsed dot in clean mode
-  if (mode === "clean" && !expanded) {
+  // Collapsed dot until the user explicitly opens it
+  if (!expanded) {
     return (
       <div
         onClick={() => setExpanded(true)}

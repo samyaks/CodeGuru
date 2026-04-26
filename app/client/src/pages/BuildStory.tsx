@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Terminal,
@@ -40,6 +40,9 @@ import {
   deleteBuildEntry,
   generateContextFromStory,
   generateSocialSummary,
+  approveCommitContext,
+  dismissCommitContext,
+  updateCommitContext,
   type BuildEntry,
   type ProjectWithEntries,
   type CommitReviewListItem,
@@ -54,11 +57,14 @@ type TimelineItem =
 type FilterMode = 'all' | 'commits' | 'entries';
 
 function mergeTimeline(entries: BuildEntry[], commits: GitCommit[]): TimelineItem[] {
+  const visibleEntries = entries.filter(
+    (e) => e.approval_status == null || e.approval_status === 'approved'
+  );
   const items: TimelineItem[] = [
-    ...entries.map((e) => ({ kind: 'entry' as const, data: e, date: e.created_at })),
+    ...visibleEntries.map((e) => ({ kind: 'entry' as const, data: e, date: e.created_at })),
     ...commits.map((c) => ({ kind: 'commit' as const, data: c, date: c.date })),
   ];
-  return items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
 interface BuildStoryProps {
@@ -194,11 +200,15 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
     let cancelled = false;
     const load = async () => {
       try {
-        const rows = await fetchCommitReviews(projectId);
+        const [rows, freshEntries] = await Promise.all([
+          fetchCommitReviews(projectId),
+          fetchBuildStory(projectId).catch(() => null),
+        ]);
         if (cancelled) return;
         const m: Record<string, CommitReviewListItem> = {};
         for (const r of rows) m[r.commit_sha] = r;
         setCommitReviewBySha(m);
+        if (freshEntries) setEntries(freshEntries);
       } catch {
         /* ignore — e.g. not logged in */
       }
@@ -231,6 +241,23 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
     ? timeline
     : timeline.filter((item) => item.kind === (filter === 'commits' ? 'commit' : 'entry'));
   const isLoading = loading || commitsLoading;
+
+  const pendingDraftBySha = useMemo(() => {
+    const m: Record<string, BuildEntry> = {};
+    for (const e of entries) {
+      if (e.source_commit_sha && e.approval_status === 'pending') {
+        m[e.source_commit_sha] = e;
+      }
+    }
+    return m;
+  }, [entries]);
+
+  const handleDraftResolved = useCallback((updated: BuildEntry) => {
+    setEntries((prev) => {
+      const exists = prev.some((e) => e.id === updated.id);
+      return exists ? prev.map((e) => (e.id === updated.id ? updated : e)) : [updated, ...prev];
+    });
+  }, []);
 
   const handleCreate = useCallback(async () => {
     if (!addForm.content.trim()) return;
@@ -531,6 +558,8 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                   isLast={isLast}
                   projectId={projectId}
                   commitReview={commitReviewBySha[item.data.sha]}
+                  pendingDraft={pendingDraftBySha[item.data.sha]}
+                  onDraftResolved={handleDraftResolved}
                 />
               );
             }
@@ -773,19 +802,89 @@ function CommitCard({
   isLast,
   projectId,
   commitReview,
+  pendingDraft,
+  onDraftResolved,
 }: {
   commit: GitCommit;
   isLast: boolean;
   projectId: string;
   commitReview?: CommitReviewListItem;
+  pendingDraft?: BuildEntry;
+  onDraftResolved: (updated: BuildEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [fullReport, setFullReport] = useState<Record<string, unknown> | null>(null);
 
+  const [draftMode, setDraftMode] = useState<'view' | 'editing'>('view');
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [draftSaving, setDraftSaving] = useState<null | 'approve' | 'dismiss' | 'save'>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
   useEffect(() => {
     setFullReport(null);
   }, [commit.sha]);
+
+  // Reset edit state whenever the underlying draft changes (or disappears).
+  useEffect(() => {
+    setDraftMode('view');
+    setDraftError(null);
+  }, [pendingDraft?.id]);
+
+  const handleApproveDraft = async () => {
+    if (!pendingDraft) return;
+    setDraftSaving('approve');
+    setDraftError(null);
+    try {
+      const updated = await approveCommitContext(projectId, commit.sha);
+      onDraftResolved(updated);
+    } catch (err) {
+      setDraftError(err instanceof Error ? err.message : 'Failed to approve draft');
+    } finally {
+      setDraftSaving(null);
+    }
+  };
+
+  const handleDismissDraft = async () => {
+    if (!pendingDraft) return;
+    setDraftSaving('dismiss');
+    setDraftError(null);
+    try {
+      const updated = await dismissCommitContext(projectId, commit.sha);
+      onDraftResolved(updated);
+    } catch (err) {
+      setDraftError(err instanceof Error ? err.message : 'Failed to dismiss draft');
+    } finally {
+      setDraftSaving(null);
+    }
+  };
+
+  const handleStartEditDraft = () => {
+    if (!pendingDraft) return;
+    setEditTitle(pendingDraft.title || '');
+    setEditContent(pendingDraft.content);
+    setDraftMode('editing');
+    setDraftError(null);
+  };
+
+  const handleSaveEditDraft = async () => {
+    if (!pendingDraft || !editContent.trim()) return;
+    setDraftSaving('save');
+    setDraftError(null);
+    try {
+      const updated = await updateCommitContext(projectId, commit.sha, {
+        title: editTitle,
+        content: editContent,
+      });
+      onDraftResolved(updated);
+      setDraftMode('view');
+    } catch (err) {
+      setDraftError(err instanceof Error ? err.message : 'Failed to save draft');
+    } finally {
+      setDraftSaving(null);
+    }
+  };
 
   const handleExpand = async () => {
     if (expanded) {
@@ -888,6 +987,118 @@ function CommitCard({
               )}
             </div>
           )}
+
+          {pendingDraft ? (
+            <div className="mt-3 bg-brand-tint/40 border border-brand-tint-border rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles size={13} className="text-brand" />
+                <span className="text-[11px] font-semibold text-brand uppercase tracking-wide">
+                  AI draft
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning-bg text-warning border border-warning-border">
+                  Pending
+                </span>
+              </div>
+
+              {draftMode === 'view' ? (
+                <>
+                  {pendingDraft.title && (
+                    <p className="text-sm font-semibold text-text mb-1">
+                      {pendingDraft.title}
+                    </p>
+                  )}
+                  <p className="text-xs text-text-soft whitespace-pre-wrap break-words">
+                    {pendingDraft.content}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    <button
+                      onClick={handleApproveDraft}
+                      disabled={draftSaving !== null}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold hover:bg-brand-hov transition-colors disabled:opacity-50"
+                    >
+                      {draftSaving === 'approve' ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Check size={12} />
+                      )}
+                      Approve
+                    </button>
+                    <button
+                      onClick={handleStartEditDraft}
+                      disabled={draftSaving !== null}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-line text-text-soft hover:text-text hover:bg-surface transition-colors disabled:opacity-50"
+                    >
+                      <Pencil size={12} />
+                      Edit
+                    </button>
+                    <button
+                      onClick={handleDismissDraft}
+                      disabled={draftSaving !== null}
+                      className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-danger transition-colors disabled:opacity-50"
+                    >
+                      {draftSaving === 'dismiss' ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <X size={12} />
+                      )}
+                      Dismiss
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Title (optional)"
+                    className="w-full px-2.5 py-1.5 rounded-md bg-page border border-line text-xs text-text placeholder-text-disabled focus:outline-none focus:border-brand"
+                  />
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={3}
+                    placeholder="What did this commit change?"
+                    className="w-full px-2.5 py-1.5 rounded-md bg-page border border-line text-xs text-text placeholder-text-disabled focus:outline-none focus:border-brand resize-y"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSaveEditDraft}
+                      disabled={draftSaving !== null || !editContent.trim()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-brand text-white text-xs font-semibold hover:bg-brand-hov transition-colors disabled:opacity-50"
+                    >
+                      {draftSaving === 'save' && <Loader2 size={12} className="animate-spin" />}
+                      Save
+                    </button>
+                    <button
+                      onClick={() => { setDraftMode('view'); setDraftError(null); }}
+                      disabled={draftSaving !== null}
+                      className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:text-text transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {draftError && (
+                <div className="mt-2 flex items-start justify-between gap-2 px-2 py-1.5 rounded-md bg-danger-bg border border-danger-border text-[11px] text-danger">
+                  <span className="flex-1 min-w-0">{draftError}</span>
+                  <button
+                    onClick={() => setDraftError(null)}
+                    className="flex-shrink-0 underline"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : commitReview && (commitReview.status === 'pending' || commitReview.status === 'in_progress') ? (
+            <div className="mt-3 text-xs text-text-muted italic flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              AI is drafting context…
+            </div>
+          ) : null}
 
           <button
             onClick={handleExpand}

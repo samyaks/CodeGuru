@@ -107,6 +107,78 @@ router.get('/:id/commit-reviews/:sha', readLimit, asyncHandler(async (req, res) 
   res.json(row);
 }));
 
+router.post('/:id/commits/:sha/approve-context', writeLimit, asyncHandler(async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Login required', code: 'UNAUTHORIZED' });
+  }
+
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  const entry = await buildEntries.findPendingBySourceCommitSha(project.id, req.params.sha);
+  if (!entry) throw AppError.notFound('No pending context draft for this commit');
+  if (entry.user_id !== req.user.id) throw AppError.forbidden('Forbidden');
+
+  await buildEntries.update(entry.id, {
+    approval_status: 'approved',
+    updated_at: new Date().toISOString(),
+  });
+  const updated = await buildEntries.findById(entry.id);
+  res.json(updated);
+}));
+
+router.post('/:id/commits/:sha/dismiss-context', writeLimit, asyncHandler(async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Login required', code: 'UNAUTHORIZED' });
+  }
+
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  const entry = await buildEntries.findPendingBySourceCommitSha(project.id, req.params.sha);
+  if (!entry) throw AppError.notFound('No pending context draft for this commit');
+  if (entry.user_id !== req.user.id) throw AppError.forbidden('Forbidden');
+
+  await buildEntries.update(entry.id, {
+    approval_status: 'dismissed',
+    updated_at: new Date().toISOString(),
+  });
+  const updated = await buildEntries.findById(entry.id);
+  res.json(updated);
+}));
+
+router.patch('/:id/commits/:sha/context', writeLimit, asyncHandler(async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Login required', code: 'UNAUTHORIZED' });
+  }
+
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+  checkProjectAccess(project, req);
+
+  const entry = await buildEntries.findPendingBySourceCommitSha(project.id, req.params.sha);
+  if (!entry) throw AppError.notFound('No pending context draft for this commit');
+  if (entry.user_id !== req.user.id) throw AppError.forbidden('Forbidden');
+
+  const { title, content } = req.body || {};
+  if (content !== undefined && (typeof content !== 'string' || content.trim().length === 0)) {
+    throw AppError.badRequest('content must be a non-empty string');
+  }
+
+  const updates = {
+    approval_status: 'approved',
+    updated_at: new Date().toISOString(),
+  };
+  if (title !== undefined) updates.title = title;
+  if (content !== undefined) updates.content = content;
+
+  await buildEntries.update(entry.id, updates);
+  const updated = await buildEntries.findById(entry.id);
+  res.json(updated);
+}));
+
 router.get('/:id/webhook', readLimit, asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
