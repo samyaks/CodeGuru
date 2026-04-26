@@ -368,6 +368,68 @@ export async function fetchProjectDetail(id: string): Promise<ProjectWithEntries
   return handleApiResponse<ProjectWithEntries>(res);
 }
 
+export interface CommitReviewListItem {
+  id: string;
+  project_id: string;
+  commit_sha: string;
+  before_sha: string | null;
+  ref: string | null;
+  pusher_login: string | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+  report_summary: string | null;
+  report_verdict: string | null;
+  report_stats: {
+    totalFindings?: number;
+    critical?: number;
+    warnings?: number;
+    info?: number;
+  } | null;
+}
+
+export interface CommitReviewDetailRow extends CommitReviewListItem {
+  ai_report: Record<string, unknown> | null;
+}
+
+export async function fetchCommitReviews(projectId: string): Promise<CommitReviewListItem[]> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commit-reviews`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchCommitReviewDetail(projectId: string, sha: string): Promise<CommitReviewDetailRow | null> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/commit-reviews/${sha}`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// Webhook
+
+export interface WebhookStatus {
+  connected: boolean;
+  hookId?: string;
+  hookUrl?: string;
+}
+
+export async function fetchWebhookStatus(projectId: string): Promise<WebhookStatus> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/webhook`);
+  if (!res.ok) return { connected: false };
+  return res.json();
+}
+
+export async function connectWebhook(projectId: string): Promise<{ ok: boolean; needsReauth?: boolean; alreadyExists?: boolean; error?: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/webhook/connect`, { method: 'POST' });
+  return res.json();
+}
+
+export async function disconnectWebhook(projectId: string): Promise<{ ok: boolean }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/webhook/connect`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to disconnect webhook');
+  return res.json();
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const res = await authFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
   await handleApiResponse<{ deleted: boolean }>(res);

@@ -1,8 +1,9 @@
 const express = require('express');
-const { deployments, buildEntries } = require('../lib/db');
+const { deployments, buildEntries, commitReviews } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const railway = require('@codeguru/railway');
 const github = require('../services/github');
+const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../services/github-webhook-manager');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { checkProjectAccess } = require('../lib/helpers');
@@ -85,6 +86,75 @@ router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
   res.json(detail);
 }));
 
+router.get('/:id/commit-reviews', readLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  const rows = await commitReviews.listByProject(req.params.id, { limit: 80, offset: 0 });
+  res.json(rows);
+}));
+
+router.get('/:id/commit-reviews/:sha', readLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  const row = await commitReviews.findByProjectAndSha(req.params.id, req.params.sha);
+  if (!row) throw AppError.notFound('Commit review not found');
+  res.json(row);
+}));
+
+router.get('/:id/webhook', readLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  const status = await getWebhookStatus(req.params.id);
+  res.json(status);
+}));
+
+router.post('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  if (!project.owner || !project.repo || project.repo_url?.startsWith('local://')) {
+    throw AppError.badRequest('Webhook connect is only available for GitHub-linked projects');
+  }
+
+  const userToken = req.cookies?.['gh-provider-token'] || null;
+  const result = await connectWebhook({
+    projectId: project.id,
+    owner: project.owner,
+    repo: project.repo,
+    userToken,
+  });
+
+  const status = result.needsReauth ? 403 : result.ok ? 200 : 400;
+  res.status(status).json(result);
+}));
+
+router.delete('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  const userToken = req.cookies?.['gh-provider-token'] || null;
+  const result = await disconnectWebhook({
+    projectId: project.id,
+    owner: project.owner,
+    repo: project.repo,
+    userToken,
+  });
+  res.json(result);
+}));
+
 router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ error: 'Login required to delete a project', code: 'UNAUTHORIZED' });
@@ -101,6 +171,13 @@ router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
     } catch (railwayErr) {
       console.warn(`Failed to delete Railway project ${project.railway_project_id}:`, railwayErr.message);
     }
+  }
+
+  // Best-effort webhook cleanup
+  if (project.owner && project.repo && !project.repo_url?.startsWith('local://')) {
+    const userToken = req.cookies?.['gh-provider-token'] || null;
+    disconnectWebhook({ projectId: project.id, owner: project.owner, repo: project.repo, userToken })
+      .catch((err) => console.warn(`webhook cleanup on delete ${project.id}:`, err.message));
   }
 
   await deployments.delete(req.params.id);

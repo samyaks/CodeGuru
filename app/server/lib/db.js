@@ -389,6 +389,101 @@ const deployments = {
     );
     return rows[0] ? rows[0].count : 0;
   },
+  /** GitHub-linked projects only (excludes folder uploads). */
+  async findByGithubRepo(owner, repo) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM deployments
+       WHERE LOWER(owner) = LOWER($1) AND LOWER(repo) = LOWER($2)
+         AND repo_url NOT LIKE 'local://%'
+       ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
+      [owner, repo]
+    );
+    return rows;
+  },
+};
+
+// ── Commit reviews (webhook-triggered per push head) ──────────────
+
+const commitReviews = {
+  async create(row) {
+    const {
+      id, project_id, commit_sha, before_sha, ref, pusher_login, status = 'pending',
+    } = row;
+    const { rows } = await getDb().query(
+      `INSERT INTO commit_reviews (id, project_id, commit_sha, before_sha, ref, pusher_login, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       ON CONFLICT (project_id, commit_sha) DO NOTHING
+       RETURNING id`,
+      [id, project_id, commit_sha, before_sha || null, ref || null, pusher_login || null, status]
+    );
+    return rows[0] ? row : null; // null means a duplicate — already exists
+  },
+  async findByProjectAndSha(projectId, commitSha) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM commit_reviews WHERE project_id = $1 AND commit_sha = $2',
+      [projectId, commitSha]
+    );
+    return rows[0] || null;
+  },
+  async findById(id) {
+    const { rows } = await getDb().query('SELECT * FROM commit_reviews WHERE id = $1', [id]);
+    return rows[0] || null;
+  },
+  async listByProject(projectId, { limit = 50, offset = 0 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT id, project_id, commit_sha, before_sha, ref, pusher_login, status, error,
+              created_at, completed_at,
+              ai_report->>'summary' AS report_summary,
+              ai_report->>'verdict' AS report_verdict,
+              ai_report->'stats' AS report_stats
+       FROM commit_reviews WHERE project_id = $1
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [projectId, limit, offset]
+    );
+    return rows;
+  },
+  async resetToPending(id) {
+    await getDb().query(
+      `UPDATE commit_reviews
+       SET status = 'pending', error = NULL, ai_report = NULL, completed_at = NULL
+       WHERE id = $1`,
+      [id]
+    );
+  },
+  async markInProgress(id) {
+    await getDb().query(
+      `UPDATE commit_reviews SET status = 'in_progress', updated_at = now() WHERE id = $1`,
+      [id]
+    );
+  },
+  async markCompleted(id, aiReport) {
+    await getDb().query(
+      `UPDATE commit_reviews SET status = 'completed', ai_report = $2::jsonb, error = NULL, completed_at = now()
+       WHERE id = $1`,
+      [id, JSON.stringify(aiReport)]
+    );
+  },
+  async markFailed(id, errorMessage) {
+    await getDb().query(
+      `UPDATE commit_reviews SET status = 'failed', error = $2, completed_at = now() WHERE id = $1`,
+      [id, errorMessage]
+    );
+  },
+  async resetStaleInProgress(olderThanMs = 10 * 60 * 1000) {
+    const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+    const { rows } = await getDb().query(
+      `UPDATE commit_reviews cr
+       SET status = 'pending', error = 'recovered from stale in_progress',
+           completed_at = NULL, updated_at = now()
+       FROM deployments d
+       WHERE cr.project_id = d.id
+         AND cr.status = 'in_progress'
+         AND COALESCE(cr.updated_at, cr.created_at) < $1
+       RETURNING cr.id, cr.project_id, d.owner, d.repo, cr.commit_sha, cr.before_sha, cr.ref`,
+      [cutoff]
+    );
+    return rows;
+  },
 };
 
 // ── Build Entries ─────────────────────────────────────────────────
@@ -482,6 +577,13 @@ const projectServices = {
       [projectId]
     );
     return rows;
+  },
+  async findByProjectAndType(projectId, serviceType) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_services WHERE project_id = $1 AND service_type = $2 LIMIT 1',
+      [projectId, serviceType]
+    );
+    return rows[0] || null;
   },
   async update(id, data) {
     const sets = [];
@@ -1116,5 +1218,6 @@ module.exports = {
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
   analyses, deployments, buildEntries, projectServices, projectEvents,
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
+  commitReviews,
   productMap,
 };

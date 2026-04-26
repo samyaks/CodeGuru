@@ -12,6 +12,7 @@ const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
 const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = require('../services/suggestion-rules');
 const { runAISuggestions } = require('../services/suggestion-ai');
+const { connectWebhook } = require('../services/github-webhook-manager');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -128,6 +129,20 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
       console.error(`runTakeoff ${id} unhandled:`, err);
     });
   });
+
+  // Auto-connect webhook for GitHub-linked projects when the user has a GH token
+  const ghToken = req.cookies?.['gh-provider-token'] || null;
+  if (ghToken) {
+    setImmediate(() => {
+      connectWebhook({ projectId: id, owner, repo, userToken: ghToken })
+        .then((result) => {
+          if (!result.ok) {
+            console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId: id, reason: result.error }));
+          }
+        })
+        .catch((err) => console.warn(`webhook auto-connect ${id}:`, err.message));
+    });
+  }
 
   res.status(201).json({ projectId: id, slug, status: 'pending' });
 }));

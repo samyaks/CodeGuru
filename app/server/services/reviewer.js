@@ -1,6 +1,7 @@
 const { broadcast } = require('../lib/sse');
 const { buildPRReviewPrompt } = require('../prompts/pr-review');
 const { buildRepoReviewPrompt } = require('../prompts/repo-review');
+const { buildCommitReviewPrompt } = require('../prompts/commit-review');
 const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const MAX_TOKENS = 6144;
 
@@ -18,6 +19,12 @@ async function reviewPR(reviewId, { owner, repo, prNumber, prMeta, prFiles, depl
 async function reviewRepo(reviewId, { owner, repo, files, deployInfo, deployFiles }) {
   const prompt = buildRepoReviewPrompt({ owner, repo, files, deployInfo, deployFiles });
   return streamReview(reviewId, prompt);
+}
+
+/** broadcastId is usually projectId so Takeoff SSE clients receive progress. */
+async function reviewCommit(broadcastId, payload) {
+  const prompt = buildCommitReviewPrompt(payload);
+  return streamReview(broadcastId, prompt);
 }
 
 async function streamReview(reviewId, { system, user }) {
@@ -91,4 +98,4 @@ function extractFileComments(report) {
   return map;
 }
 
-module.exports = { reviewPR, reviewRepo, extractFileSeverities, extractFileComments };
+module.exports = { reviewPR, reviewRepo, reviewCommit, extractFileSeverities, extractFileComments };

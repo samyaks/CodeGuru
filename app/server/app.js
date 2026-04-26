@@ -18,6 +18,9 @@ const fixPromptRoutes = require('./routes/fix-prompts');
 const projectAnalyticsRoutes = require('./routes/project-analytics');
 const collectRoutes = require('./routes/collect');
 const productMapRoutes = require('./routes/product-map');
+const githubWebhookRoutes = require('./routes/github-webhook');
+const { recoverStaleCommitReviews } = require('./routes/github-webhook');
+const { createRateLimit } = require('./lib/rate-limit');
 const { getDb, closeDb } = require('./lib/db');
 const { requestLogger } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
@@ -45,6 +48,9 @@ app.use(cors({
 }));
 app.use((req, res, next) => {
   if (req.path === '/api/collect') return next();
+  if (req.path === '/api/github/webhook' && req.method === 'POST') {
+    return express.raw({ type: 'application/json' })(req, res, next);
+  }
   express.json()(req, res, next);
 });
 app.use(cookieParser());
@@ -92,8 +98,29 @@ app.post('/auth/token', express.json(), async (req, res) => {
 // Public routes
 app.use(healthRoutes);
 app.use(collectRoutes);
+app.use('/api/github/webhook', githubWebhookRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
+
+// GitHub re-auth with admin:repo_hook scope (for webhook auto-connect)
+const reconnectRateLimit = createRateLimit({ windowMs: 60000, max: 5, message: 'Too many reconnect attempts. Please try again in a minute.' });
+app.get('/auth/github/reconnect', reconnectRateLimit, (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Auth not configured' });
+  const redirectUrl = process.env.SUPABASE_REDIRECT_URL;
+  supabase.auth.signInWithOAuth({
+    provider: 'github',
+    options: {
+      redirectTo: redirectUrl,
+      scopes: 'repo admin:repo_hook',
+      queryParams: { prompt: 'consent' },
+    },
+  }).then(({ data, error }) => {
+    if (error || !data?.url) {
+      return res.status(500).json({ error: error?.message || 'OAuth init failed' });
+    }
+    res.redirect(data.url);
+  }).catch((err) => res.status(500).json({ error: err.message }));
+});
 
 // Routes with optional/required auth depending on Supabase config
 if (supabase) {
@@ -194,6 +221,10 @@ async function start() {
   getDb();
   console.log('Database pool initialized (lazy connect on first query)');
 
+  recoverStaleCommitReviews().catch((err) =>
+    console.error('[startup] recoverStaleCommitReviews failed:', err.message)
+  );
+
   validateEnv();
 
   server = app.listen(PORT, () => {
@@ -201,6 +232,7 @@ async function start() {
     const baseUrl = process.env.API_URL || `http://localhost:${PORT}`;
     console.log(`Health: ${baseUrl}/health`);
     console.log(`API: ${baseUrl}/api/takeoff`);
+    console.log(`GitHub webhook (push → commit review): POST ${baseUrl}/api/github/webhook`);
     if (supabase) {
       console.log('Auth: Supabase connected');
     } else {

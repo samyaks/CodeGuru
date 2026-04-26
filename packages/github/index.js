@@ -158,6 +158,113 @@ async function fetchCommitDetail(owner, repo, sha) {
   };
 }
 
+/**
+ * Full commit payload including per-file patches (for single-commit review).
+ */
+async function fetchCommitWithPatches(owner, repo, sha) {
+  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`);
+  const data = await res.json();
+  return {
+    sha: data.sha,
+    message: data.commit?.message || '',
+    title: (data.commit?.message || '').split('\n')[0].trim(),
+    files: (data.files || []).map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      additions: f.additions || 0,
+      deletions: f.deletions || 0,
+      patch: f.patch || null,
+    })),
+    stats: data.stats,
+    parents: (data.parents || []).map((p) => p.sha),
+  };
+}
+
+/**
+ * Compare two commits (e.g. before...after from a push). Returns GitHub compare JSON.
+ */
+async function fetchCompare(owner, repo, base, head) {
+  const basehead = `${base}...${head}`;
+  const res = await githubFetch(`/repos/${owner}/${repo}/compare/${basehead}`);
+  return res.json();
+}
+
+/**
+ * List webhooks on a repo (requires admin:repo_hook scope).
+ */
+async function listRepoWebhooks(owner, repo, userToken) {
+  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/hooks?per_page=100`, {
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'CodeGuru-Reviewer',
+      'Authorization': `Bearer ${userToken}`,
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    const err = new Error(`GitHub list webhooks ${res.status}: ${body}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/**
+ * Create a push webhook on a repo using a user-supplied token.
+ * Requires admin:repo_hook scope.
+ * Returns the created hook object (id, ping_url, etc.).
+ */
+async function createRepoWebhook(owner, repo, userToken, hookUrl, secret) {
+  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/hooks`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'CodeGuru-Reviewer',
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${userToken}`,
+    },
+    body: JSON.stringify({
+      name: 'web',
+      active: true,
+      events: ['push'],
+      config: {
+        url: hookUrl,
+        content_type: 'json',
+        secret,
+        insecure_ssl: '0',
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    const err = new Error(`GitHub create webhook ${res.status}: ${body}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/**
+ * Delete a webhook by ID from a repo using a user-supplied token.
+ */
+async function deleteRepoWebhook(owner, repo, userToken, hookId) {
+  const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/hooks/${hookId}`, {
+    method: 'DELETE',
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'CodeGuru-Reviewer',
+      'Authorization': `Bearer ${userToken}`,
+    },
+  });
+  if (!res.ok && res.status !== 404) {
+    const body = await res.text();
+    const err = new Error(`GitHub delete webhook ${res.status}: ${body}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
 module.exports = {
   parseRepoUrl,
   parsePRUrl,
@@ -172,4 +279,9 @@ module.exports = {
   fetchRepoPulls,
   fetchCommits,
   fetchCommitDetail,
+  fetchCommitWithPatches,
+  fetchCompare,
+  createRepoWebhook,
+  deleteRepoWebhook,
+  listRepoWebhooks,
 };

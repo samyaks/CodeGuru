@@ -23,11 +23,18 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
+  Webhook,
+  RefreshCw,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
   fetchBuildStory,
   fetchProjectDetail,
+  fetchCommitReviews,
+  fetchCommitReviewDetail,
+  fetchWebhookStatus,
+  connectWebhook,
+  disconnectWebhook,
   createBuildEntry,
   updateBuildEntry,
   deleteBuildEntry,
@@ -35,6 +42,8 @@ import {
   generateSocialSummary,
   type BuildEntry,
   type ProjectWithEntries,
+  type CommitReviewListItem,
+  type WebhookStatus,
 } from '../services/api';
 import { useCommits, type GitCommit } from '../hooks/useCommits';
 
@@ -129,6 +138,78 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
   const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
 
   const { commits, loading: commitsLoading, reason: commitsReason } = useCommits(projectId);
+
+  const [commitReviewBySha, setCommitReviewBySha] = useState<Record<string, CommitReviewListItem>>({});
+  const [webhookStatus, setWebhookStatus] = useState<WebhookStatus | null>(null);
+  const [webhookWorking, setWebhookWorking] = useState(false);
+
+  // Derive a stable boolean so the effect fires when project loads, not on
+  // every project object reference change.
+  const isGitHubProject = !!(
+    project?.owner &&
+    project?.repo &&
+    !project?.repo_url?.startsWith('local://')
+  );
+
+  useEffect(() => {
+    if (!projectId || !isGitHubProject) return;
+    fetchWebhookStatus(projectId).then(setWebhookStatus).catch(() => {});
+  }, [projectId, isGitHubProject]);
+
+  const handleConnectWebhook = useCallback(async () => {
+    setWebhookWorking(true);
+    try {
+      const result = await connectWebhook(projectId);
+      if (result.needsReauth) {
+        window.location.href = '/auth/github/reconnect';
+        return;
+      }
+      if (result.ok || result.alreadyExists) {
+        const updated = await fetchWebhookStatus(projectId);
+        setWebhookStatus(updated);
+      } else {
+        setError(result.error || 'Failed to connect webhook');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect webhook');
+    } finally {
+      setWebhookWorking(false);
+    }
+  }, [projectId]);
+
+  const handleDisconnectWebhook = useCallback(async () => {
+    setWebhookWorking(true);
+    try {
+      await disconnectWebhook(projectId);
+      setWebhookStatus({ connected: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect webhook');
+    } finally {
+      setWebhookWorking(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || commits.length === 0) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const rows = await fetchCommitReviews(projectId);
+        if (cancelled) return;
+        const m: Record<string, CommitReviewListItem> = {};
+        for (const r of rows) m[r.commit_sha] = r;
+        setCommitReviewBySha(m);
+      } catch {
+        /* ignore — e.g. not logged in */
+      }
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [projectId, commits.length]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -323,6 +404,39 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
         </div>
       )}
 
+      {/* Webhook status banner */}
+      {isGitHubProject && webhookStatus !== null && (
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm ${
+          webhookStatus.connected
+            ? 'bg-success-bg border-success-border text-success'
+            : 'bg-surface-2 border-line text-text-muted'
+        }`}>
+          <Webhook size={15} className="shrink-0" />
+          <span className="flex-1 min-w-0">
+            {webhookStatus.connected
+              ? 'Commit review active — every push to this repo is automatically reviewed'
+              : 'Commit review not connected — enable it to auto-review every push'}
+          </span>
+          {webhookStatus.connected ? (
+            <button
+              onClick={handleDisconnectWebhook}
+              disabled={webhookWorking}
+              className="shrink-0 text-xs text-text-muted hover:text-danger transition-colors disabled:opacity-50"
+            >
+              {webhookWorking ? <Loader2 size={12} className="animate-spin" /> : 'Disconnect'}
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectWebhook}
+              disabled={webhookWorking}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-brand text-white text-xs font-medium hover:bg-brand-hov transition-colors disabled:opacity-50"
+            >
+              {webhookWorking ? <Loader2 size={12} className="animate-spin" /> : <><RefreshCw size={11} />Connect</>}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Add Entry button / form */}
       {!showAddForm ? (
         <button
@@ -416,6 +530,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                   commit={item.data}
                   isLast={isLast}
                   projectId={projectId}
+                  commitReview={commitReviewBySha[item.data.sha]}
                 />
               );
             }
@@ -653,9 +768,24 @@ function EntryFormCard({
   );
 }
 
-function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: boolean; projectId: string }) {
+function CommitCard({
+  commit,
+  isLast,
+  projectId,
+  commitReview,
+}: {
+  commit: GitCommit;
+  isLast: boolean;
+  projectId: string;
+  commitReview?: CommitReviewListItem;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [fullReport, setFullReport] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    setFullReport(null);
+  }, [commit.sha]);
 
   const handleExpand = async () => {
     if (expanded) {
@@ -672,6 +802,14 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
         // silently fail — files just won't show
       } finally {
         setLoadingFiles(false);
+      }
+    }
+    if (commitReview?.status === 'completed' && !fullReport) {
+      try {
+        const row = await fetchCommitReviewDetail(projectId, commit.sha);
+        if (row?.ai_report) setFullReport(row.ai_report);
+      } catch {
+        /* ignore */
       }
     }
     setExpanded(true);
@@ -717,6 +855,40 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
             <span>{timeAgo}</span>
           </div>
 
+          {commitReview && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+              {(commitReview.status === 'pending' || commitReview.status === 'in_progress') && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-tint text-brand border border-brand-tint-border">
+                  <Loader2 size={11} className="animate-spin" />
+                  AI review…
+                </span>
+              )}
+              {commitReview.status === 'failed' && (
+                <span className="px-2 py-0.5 rounded-md bg-danger-bg text-danger border border-danger-border" title={commitReview.error || ''}>
+                  Review failed
+                </span>
+              )}
+              {commitReview.status === 'completed' && commitReview.report_verdict && (
+                <span
+                  className={`px-2 py-0.5 rounded-md border font-medium ${
+                    commitReview.report_verdict === 'approve'
+                      ? 'bg-success-bg text-success border-success-border'
+                      : commitReview.report_verdict === 'request_changes'
+                        ? 'bg-warning-bg text-warning border-warning-border'
+                        : 'bg-surface-2 text-text-muted border-line'
+                  }`}
+                >
+                  {commitReview.report_verdict.replace(/_/g, ' ')}
+                </span>
+              )}
+              {commitReview.status === 'completed' && commitReview.report_stats?.critical != null && commitReview.report_stats.critical > 0 && (
+                <span className="text-danger font-medium">
+                  {commitReview.report_stats.critical} critical
+                </span>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleExpand}
             className="mt-2 flex items-center gap-1 text-xs text-text-muted hover:text-text transition-colors"
@@ -732,6 +904,29 @@ function CommitCard({ commit, isLast, projectId }: { commit: GitCommit; isLast: 
               ? `${commit.filesChanged.length} file${commit.filesChanged.length !== 1 ? 's' : ''} changed`
               : 'Show files'}
           </button>
+
+          {expanded && fullReport && typeof fullReport.summary === 'string' && (
+            <p className="mt-3 text-xs text-text-soft leading-relaxed border-t border-line pt-3">
+              {fullReport.summary as string}
+            </p>
+          )}
+
+          {expanded && fullReport && Array.isArray(fullReport.findings) && (fullReport.findings as unknown[]).length > 0 && (
+            <ul className="mt-2 space-y-2 text-xs">
+              {(fullReport.findings as { title?: string; description?: string; severity?: string; file?: string }[]).map((f, i) => (
+                <li key={i} className="border border-line rounded-lg p-2 bg-page">
+                  <span className="font-medium text-text">{f.title}</span>
+                  {f.file && <span className="text-text-muted font-mono ml-1">· {f.file}</span>}
+                  {f.severity && (
+                    <span className={`ml-2 text-[10px] uppercase ${f.severity === 'critical' ? 'text-danger' : f.severity === 'warning' ? 'text-warning' : 'text-text-muted'}`}>
+                      {f.severity}
+                    </span>
+                  )}
+                  {f.description && <p className="text-text-soft mt-1">{f.description}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
 
           {expanded && commit.filesChanged && (
             <div className="mt-2 space-y-1">
