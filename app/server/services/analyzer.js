@@ -289,9 +289,12 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
 
   if (deployInfo.detected) {
     gaps.deployment.exists = true;
-    gaps.deployment.platform = deployInfo.hosting[0]?.platform
-      || deployInfo.containers[0]?.platform
-      || null;
+    const hostingPlatforms = [...new Set(deployInfo.hosting.map((h) => h.platform))];
+    const containerPlatforms = [...new Set(deployInfo.containers.map((c) => c.platform))];
+    gaps.deployment.platform = hostingPlatforms.length > 0
+      ? hostingPlatforms.join(', ')
+      : containerPlatforms[0] || null;
+    gaps.deployment.platforms = hostingPlatforms.length > 0 ? hostingPlatforms : containerPlatforms;
     gaps.deployment.hasCI = deployInfo.cicd.length > 0;
   }
 
@@ -688,9 +691,12 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
 
   if (deployInfo.detected) {
     gaps.deployment.exists = true;
-    gaps.deployment.platform = deployInfo.hosting[0]?.platform
-      || deployInfo.containers[0]?.platform
-      || null;
+    const hostingPlatforms = [...new Set(deployInfo.hosting.map((h) => h.platform))];
+    const containerPlatforms = [...new Set(deployInfo.containers.map((c) => c.platform))];
+    gaps.deployment.platform = hostingPlatforms.length > 0
+      ? hostingPlatforms.join(', ')
+      : containerPlatforms[0] || null;
+    gaps.deployment.platforms = hostingPlatforms.length > 0 ? hostingPlatforms : containerPlatforms;
     gaps.deployment.hasCI = deployInfo.cicd.length > 0;
   }
 
