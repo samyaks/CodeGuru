@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build @takeoff/annotate
+        run: npm run build:lib --prefix packages/annotate
+
       - name: Build client
         run: npm run build --prefix app/client
 
