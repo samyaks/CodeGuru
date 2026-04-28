@@ -1,17 +1,18 @@
 const RAILWAY_API = 'https://backboard.railway.com/graphql/v2';
 
-function getToken() {
+function getToken(overrideToken) {
+  if (overrideToken) return overrideToken;
   const token = process.env.RAILWAY_API_TOKEN;
   if (!token) throw new Error('RAILWAY_API_TOKEN is not set');
   return token;
 }
 
-async function railwayFetch(query, variables = {}) {
+async function railwayFetch(query, variables = {}, token) {
   const res = await fetch(RAILWAY_API, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getToken()}`,
+      'Authorization': `Bearer ${getToken(token)}`,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -66,7 +67,7 @@ async function deleteProject(projectId) {
   );
 }
 
-async function getProject(projectId) {
+async function getProject(projectId, token) {
   const data = await railwayFetch(
     `query($id: String!) {
       project(id: $id) {
@@ -76,7 +77,8 @@ async function getProject(projectId) {
         environments { edges { node { id name } } }
       }
     }`,
-    { id: projectId }
+    { id: projectId },
+    token
   );
   return data.project;
 }
@@ -138,7 +140,7 @@ async function triggerDeploy(serviceId, environmentId) {
   return data.serviceInstanceDeploy;
 }
 
-async function getDeployment(deploymentId) {
+async function getDeployment(deploymentId, token) {
   const data = await railwayFetch(
     `query($id: String!) {
       deployment(id: $id) {
@@ -150,12 +152,13 @@ async function getDeployment(deploymentId) {
         meta
       }
     }`,
-    { id: deploymentId }
+    { id: deploymentId },
+    token
   );
   return data.deployment;
 }
 
-async function getLatestDeployment(serviceId, environmentId) {
+async function getLatestDeployment(serviceId, environmentId, token) {
   const data = await railwayFetch(
     `query($input: DeploymentListInput!) {
       deployments(first: 1, input: $input) {
@@ -170,25 +173,27 @@ async function getLatestDeployment(serviceId, environmentId) {
         }
       }
     }`,
-    { input: { serviceId, environmentId } }
+    { input: { serviceId, environmentId } },
+    token
   );
   const edges = data.deployments?.edges || [];
   return edges.length > 0 ? edges[0].node : null;
 }
 
-async function listDeployments(serviceId, environmentId, first = 10) {
+async function listDeployments(serviceId, environmentId, first = 10, token) {
   const data = await railwayFetch(
     `query($first: Int!, $input: DeploymentListInput!) {
       deployments(first: $first, input: $input) {
-        edges { node { id status createdAt updatedAt } }
+        edges { node { id status createdAt updatedAt canRollback } }
       }
     }`,
-    { first, input: { serviceId, environmentId } }
+    { first, input: { serviceId, environmentId } },
+    token
   );
   return (data.deployments?.edges || []).map((e) => e.node);
 }
 
-async function getDeploymentLogs(deploymentId, { limit = 500 } = {}) {
+async function getDeploymentLogs(deploymentId, { limit = 500 } = {}, token) {
   const data = await railwayFetch(
     `query($deploymentId: String!, $limit: Int) {
       deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
@@ -197,12 +202,13 @@ async function getDeploymentLogs(deploymentId, { limit = 500 } = {}) {
         severity
       }
     }`,
-    { deploymentId, limit }
+    { deploymentId, limit },
+    token
   );
   return data.deploymentLogs || [];
 }
 
-async function getBuildLogs(deploymentId, { limit = 500 } = {}) {
+async function getBuildLogs(deploymentId, { limit = 500 } = {}, token) {
   const data = await railwayFetch(
     `query($deploymentId: String!, $limit: Int) {
       buildLogs(deploymentId: $deploymentId, limit: $limit) {
@@ -210,7 +216,8 @@ async function getBuildLogs(deploymentId, { limit = 500 } = {}) {
         message
       }
     }`,
-    { deploymentId, limit }
+    { deploymentId, limit },
+    token
   );
   return data.buildLogs || [];
 }
@@ -275,6 +282,129 @@ async function addCustomDomain(serviceId, environmentId, domain) {
     { input: { serviceId, environmentId, domain } }
   );
   return data.customDomainCreate;
+}
+
+// ── OAuth-mode helpers ──
+
+async function listProjects(token) {
+  const data = await railwayFetch(
+    `query {
+      me {
+        projects {
+          edges {
+            node {
+              id
+              name
+              services {
+                edges {
+                  node {
+                    id
+                    name
+                    repoTriggers {
+                      edges {
+                        node {
+                          repository
+                          branch
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              environments {
+                edges { node { id name } }
+              }
+            }
+          }
+        }
+      }
+    }`,
+    {},
+    token
+  );
+
+  const projects = (data?.me?.projects?.edges || []).map((edge) => {
+    const node = edge.node;
+    const services = (node.services?.edges || []).map((sEdge) => {
+      const sNode = sEdge.node;
+      const repos = (sNode.repoTriggers?.edges || []).map((r) => ({
+        repository: r.node.repository,
+        branch: r.node.branch,
+      }));
+      return { id: sNode.id, name: sNode.name, repos };
+    });
+    const envEdges = node.environments?.edges || [];
+    const productionEnv = envEdges.find((e) => e.node.name === 'production') || envEdges[0];
+    return {
+      id: node.id,
+      name: node.name,
+      services,
+      environmentId: productionEnv?.node?.id || null,
+      environments: envEdges.map((e) => ({ id: e.node.id, name: e.node.name })),
+    };
+  });
+
+  return projects;
+}
+
+function normalizeRepoName(s) {
+  if (!s) return '';
+  return String(s).toLowerCase()
+    .replace(/^https?:\/\/github\.com\//, '')
+    .replace(/^git@github\.com:/, '')
+    .replace(/\.git$/, '')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+async function findProjectByRepo(token, repoFullName) {
+  const projects = await listProjects(token);
+  const target = normalizeRepoName(repoFullName);
+  for (const project of projects) {
+    for (const service of project.services) {
+      for (const repo of service.repos) {
+        if (repo.repository && normalizeRepoName(repo.repository) === target) {
+          return {
+            project,
+            service,
+            environmentId: project.environmentId,
+            branch: repo.branch || 'main',
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+const ACTIVE_DOMAIN_STATUSES = new Set(['ACTIVE', 'OK', 'VERIFIED', 'COMPLETE']);
+
+async function getServiceDomains(projectId, serviceId, environmentId, token) {
+  try {
+    const data = await railwayFetch(
+      `query($projectId: String!, $serviceId: String!, $environmentId: String!) {
+        domains(projectId: $projectId, serviceId: $serviceId, environmentId: $environmentId) {
+          serviceDomains { domain }
+          customDomains { domain status }
+        }
+      }`,
+      { projectId, serviceId, environmentId },
+      token
+    );
+    const serviceDomains = (data?.domains?.serviceDomains || []).map((d) => d.domain).filter(Boolean);
+    const customDomains = (data?.domains?.customDomains || [])
+      .filter((d) => !d.status || ACTIVE_DOMAIN_STATUSES.has(String(d.status).toUpperCase()))
+      .map((d) => d.domain)
+      .filter(Boolean);
+    const allDomains = [...customDomains, ...serviceDomains];
+    const primary = allDomains[0] || null;
+    return {
+      domain: primary,
+      url: primary ? `https://${primary}` : null,
+      allDomains,
+    };
+  } catch (err) {
+    return { domain: null, url: null, allDomains: [] };
+  }
 }
 
 // ── Polling helper ──
@@ -414,6 +544,11 @@ module.exports = {
   // Domains
   addRailwayDomain,
   addCustomDomain,
+
+  // ── OAuth-mode helpers ──
+  listProjects,
+  findProjectByRepo,
+  getServiceDomains,
 
   // High-level
   deployFromRepo,

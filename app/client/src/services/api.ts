@@ -630,3 +630,77 @@ export async function refreshSuggestions(projectId: string) {
   });
   return handleApiResponse<{ ok: boolean; message: string }>(res);
 }
+
+// Railway OAuth status
+
+export type RailwayDeploymentStatus =
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'CRASHED'
+  | 'BUILDING'
+  | 'DEPLOYING'
+  | 'QUEUED'
+  | 'WAITING'
+  | 'INITIALIZING'
+  | 'REMOVED'
+  | 'SKIPPED'
+  | string;
+
+export interface RailwayDeployment {
+  id: string;
+  status: RailwayDeploymentStatus;
+  createdAt: string;
+  updatedAt: string;
+  canRollback?: boolean;
+}
+
+export type RailwayStatusResponse =
+  | { connected: false }
+  | { connected: true; matched: false; message: string }
+  | {
+      connected: true;
+      matched: true;
+      project: { id: string; name: string | null };
+      service: { id: string };
+      environment: { id: string };
+      latestDeployment: RailwayDeployment | null;
+      recentDeployments: RailwayDeployment[];
+      domain: string | null;
+      url: string | null;
+      liveUrl: string | null;
+    };
+
+export async function fetchRailwayStatus(analysisId: string): Promise<RailwayStatusResponse> {
+  const res = await authFetch(`${API_BASE}/railway/status/${analysisId}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Railway status fetch failed' }));
+    throw new Error(body.error || 'Railway status fetch failed');
+  }
+  return res.json();
+}
+
+export function railwayConnectUrl(analysisId: string): string {
+  return `${API_BASE}/railway/connect?analysisId=${encodeURIComponent(analysisId)}`;
+}
+
+export async function disconnectRailway(analysisId: string): Promise<{ ok: boolean }> {
+  const res = await authFetch(`${API_BASE}/railway/disconnect/${analysisId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Disconnect failed' }));
+    throw new Error(body.error || 'Disconnect failed');
+  }
+  return res.json();
+}
+
+export async function relookupRailwayProject(analysisId: string): Promise<RailwayStatusResponse> {
+  const res = await authFetch(`${API_BASE}/railway/relookup/${analysisId}`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Lookup failed' }));
+    throw new Error(body.error || 'Lookup failed');
+  }
+  return res.json();
+}

@@ -19,6 +19,7 @@ const projectAnalyticsRoutes = require('./routes/project-analytics');
 const collectRoutes = require('./routes/collect');
 const productMapRoutes = require('./routes/product-map');
 const githubWebhookRoutes = require('./routes/github-webhook');
+const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
 const { createRateLimit } = require('./lib/rate-limit');
 const { getDb, closeDb } = require('./lib/db');
@@ -101,6 +102,8 @@ app.use(collectRoutes);
 app.use('/api/github/webhook', githubWebhookRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
+app.use('/api/railway', railwayRouter);
+app.use('/auth/railway', railwayCallbackRouter);
 
 // GitHub re-auth with admin:repo_hook scope (for webhook auto-connect)
 const reconnectRateLimit = createRateLimit({ windowMs: 60000, max: 5, message: 'Too many reconnect attempts. Please try again in a minute.' });

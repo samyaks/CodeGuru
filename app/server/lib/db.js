@@ -882,6 +882,8 @@ const ANALYSES_ALLOWED_COLUMNS = new Set([
   'file_count', 'tree_total_bytes', 'tree_estimated_tokens', 'tree_truncated',
   'ingested_file_count', 'ingested_bytes', 'ingested_tokens',
   'llm_call_count', 'llm_input_tokens', 'llm_output_tokens', 'llm_cost_usd',
+  'railway_access_token', 'railway_refresh_token', 'railway_token_expires_at',
+  'railway_project_id', 'railway_service_id', 'railway_environment_id',
 ]);
 const ANALYSES_BOOL = new Set(['tree_truncated']);
 

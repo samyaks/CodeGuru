@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { FileText, Download, Loader, Copy, Check, AlertTriangle, CheckCircle, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import Header from '../components/Header';
 import { fetchAnalysis } from '../services/api';
+import RailwayStatus from '../components/RailwayStatus';
 
 interface ContextFile {
   path: string;
@@ -24,6 +25,8 @@ interface AnalysisData {
 
 export default function Results() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const railwayFlag = searchParams.get('railway') as 'connected' | 'no-match' | 'denied' | null;
   const [data, setData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +141,14 @@ export default function Results() {
             </div>
           )}
         </div>
+
+        {(() => {
+          const railwayDetected = data.analysis?.deployInfo?.hosting?.some(
+            (h: { platform: string }) => h.platform === 'Railway'
+          );
+          if (!railwayDetected && !railwayFlag) return null;
+          return <RailwayStatus analysisId={data.id} initialFlag={railwayFlag} />;
+        })()}
 
         {contextFiles.length > 0 && (
           <div className="flex justify-end">

@@ -13,6 +13,7 @@ const DEPLOY_PATTERNS = [
   { pattern: /^fly\.toml$/, category: 'hosting', platform: 'Fly.io' },
   { pattern: /^render\.ya?ml$/, category: 'hosting', platform: 'Render' },
   { pattern: /^railway\.json$/, category: 'hosting', platform: 'Railway' },
+  { pattern: /^railway\.toml$/, category: 'hosting', platform: 'Railway' },
   { pattern: /^app\.ya?ml$/, category: 'hosting', platform: 'Google App Engine' },
   { pattern: /^Procfile$/, category: 'hosting', platform: 'Heroku' },
   { pattern: /^appspec\.ya?ml$/, category: 'hosting', platform: 'AWS CodeDeploy' },
