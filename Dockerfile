@@ -14,6 +14,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY packages/annotate/package.json packages/annotate/package.json
+COPY packages/analytics/package.json packages/analytics/package.json
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/github/package.json packages/github/package.json
 COPY packages/sse/package.json packages/sse/package.json
@@ -43,6 +44,7 @@ WORKDIR /app
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/analytics ./packages/analytics
 COPY --from=builder /app/packages/auth ./packages/auth
 COPY --from=builder /app/packages/github ./packages/github
 COPY --from=builder /app/packages/railway ./packages/railway
