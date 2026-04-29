@@ -19,21 +19,22 @@ what the app is, what constraints exist, and what architectural decisions matter
 - `packages/auth/` — Supabase auth wrapper with OAuth (GitHub, Google),
   email/password, Express middleware (requireAuth, optionalAuth), cookie
   management. Well-structured. Use this as-is for our own auth.
-- `code-reviewer/server/services/github.js` — GitHub API service with
-  fetchRepoTree, fetchFileContent, fetchRepoMeta, parseRepoUrl, rate limit
-  handling. This is the foundation for reading repos. Copy and adapt.
+- `packages/github/` — GitHub API service with fetchRepoTree, fetchFileContent,
+  fetchRepoMeta, parseRepoUrl, rate-limit handling, truncation tracking, and
+  fetchCommits. Originally migrated from the legacy `code-reviewer` prototype
+  and extended. `app/server/services/github.js` is a one-line re-export shim.
 
-### Reference but don't extend:
-- `codebase-analyzer/` — Has the right UX flow (paste URL → analyze → results)
-  but the analysis is fake — it sends the repo name to Claude and asks it to
-  guess. We need to REPLACE this with real file reading + context generation.
-- `code-visualizer-mvp/` — The old collaborative workspace concept. The PRD
-  in PRD_CURRENT_STATE.md has useful background but the code is outdated.
-- `code-reviewer/` — Has auth integration, dashboard pages, streaming. Good
-  reference for how to wire up the auth package and SSE.
+### Legacy / archived (NOT in the working tree)
+The following directories were removed from `main` and now live on the
+`archive/legacy-snapshot` git branch:
+- `_archived/code-reviewer/` — original PR/repo-review prototype.
+- `_archived/codebase-analyzer/` — fake-analysis prototype (replaced by `app/server/services/analyzer.js`).
+- `_archived/fastapi-project/` — abandoned Python stub.
+- `code-visualizer-mvp/workspace-app/`, `workspace-prototype/`, `knowledge-graph-extension/` — old collaborative workspace experiments.
 
-### Ignore:
-- `fastapi-project/` — Abandoned Python skeleton, not relevant.
+Do NOT reintroduce these into the live tree. The file scanner in
+`app/server/services/analyzer.js` skips any path containing `_archived` or
+`legacy` even if they reappear on disk.
 
 ## What to build — the new unified app
 
@@ -46,7 +47,7 @@ codeguru/
 │   ├── server/
 │   │   ├── app.js           ← Express server, port 3001
 │   │   ├── services/
-│   │   │   ├── github.js    ← COPY from code-reviewer/server/services/github.js
+│   │   │   ├── github.js    ← One-line re-export of `@codeguru/github` (packages/github)
 │   │   │   ├── analyzer.js  ← NEW: reads repo files, builds codebase model
 │   │   │   └── context-generator.js ← NEW: generates .context.md via Claude
 │   │   ├── routes/
@@ -55,7 +56,7 @@ codeguru/
 │   │   │   └── analyze.js   ← NEW: trigger analysis, stream results
 │   │   └── lib/
 │   │       ├── db.js        ← Supabase for persistence
-│   │       └── sse.js       ← SSE helper (copy from code-reviewer/server/lib/sse.js)
+│   │       └── sse.js       ← One-line re-export of `@codeguru/sse` (packages/sse)
 │   └── client/
 │       ├── src/
 │       │   ├── App.tsx
@@ -220,7 +221,7 @@ See SPEC.md in the updateai-cli project for the full spec. The key sections:
 - Real-time progress via SSE
 - Show steps: "Reading repo structure..." → "Analyzing tech stack..." →
   "Detecting capabilities..." → "Generating context files..."
-- Stream the analysis as it happens (like current codebase-analyzer does)
+- Stream the analysis as it happens (the same SSE-driven progress pattern the legacy codebase-analyzer prototype used)
 
 #### Results.tsx
 This is the most important page. It shows:
@@ -248,7 +249,8 @@ Use the existing `packages/auth` package. The app works without auth
 - Analyzing private repos (using their GitHub token)
 - Re-analyzing when code changes
 
-Wire up auth exactly like code-reviewer/server/app.js does it.
+Wire up auth via `app/server/app.js`, which already mounts the same Supabase
+session middleware the legacy code-reviewer prototype used.
 
 ### Database (Supabase)
 
@@ -300,8 +302,7 @@ Follow this sequence. Each step should be working before moving to the next.
 - Create the `app/` directory structure above
 - Set up root package.json with workspaces: ["packages/*", "app"]
 - Copy `packages/auth` as-is
-- Copy `code-reviewer/server/services/github.js` → `app/server/services/github.js`
-- Copy `code-reviewer/server/lib/sse.js` → `app/server/lib/sse.js`
+- (Done) `app/server/services/github.js` and `app/server/lib/sse.js` are already migrated from the legacy code-reviewer prototype.
 - Set up Express server with health check
 - Set up React client with Tailwind (CRA or Vite, either works)
 - Verify: server starts, client starts, health check returns 200

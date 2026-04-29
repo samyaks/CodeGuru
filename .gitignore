@@ -15,3 +15,10 @@ build/
 
 # Deployment artifacts (built by CI or Docker, not committed)
 app/client/dist/
+
+# Legacy / archived directories. The originals were moved to the
+# archive/legacy-snapshot branch. These globs only affect *untracked* files —
+# they hide accidental local re-creations from `git status` / `git add .`.
+# (They do NOT block the files that already-tracked branches contain.)
+_archived/
+legacy/

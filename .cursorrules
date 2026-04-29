@@ -15,8 +15,15 @@ build plan, architecture, and step-by-step instructions.
 
 ## Existing code to reuse
 - `packages/auth/` — Supabase auth. Import as `@codeguru/auth`. Don't modify it.
-- `code-reviewer/server/services/github.js` — GitHub API wrapper. Copy to app/server/services/
-- `code-reviewer/server/lib/sse.js` — SSE helper. Copy to app/server/lib/
+- `packages/github/` — GitHub API wrapper (originally migrated from the legacy code-reviewer prototype, then extended). `app/server/services/github.js` is a one-line re-export shim.
+- `packages/sse/` — SSE helper (originally migrated from the legacy code-reviewer prototype). `app/server/lib/sse.js` is a one-line re-export shim.
+
+## Legacy code
+The original `_archived/{code-reviewer,codebase-analyzer,fastapi-project}` and
+`code-visualizer-mvp/{workspace-app,workspace-prototype,knowledge-graph-extension}`
+directories have been removed from main. They live on the `archive/legacy-snapshot`
+git branch for reference only — do NOT copy code from them or re-introduce them
+into the working tree. The active app lives entirely under `app/` and `packages/`.
 
 ## When generating code
 - Always check CONTEXT.md for the expected file structure before creating files
@@ -34,7 +41,7 @@ When generating .context.md file content (either in the app or as examples):
 - Decisions should include rationale and who/when
 
 ## Don't
-- Don't use the fastapi-project code — it's abandoned
+- Don't restore the `_archived/` or `code-visualizer-mvp/{workspace-app,workspace-prototype,knowledge-graph-extension}` directories — they live on `archive/legacy-snapshot` and are not part of the live app.
 - Don't build the Chrome extension yet
 - Don't add authentication to the analyze endpoint — it should work without login
 - Don't try to clone repos — use GitHub API to read files

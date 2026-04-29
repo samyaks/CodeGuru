@@ -114,17 +114,19 @@ codeguru/
 │           ├── services/        ← api.ts (HTTP client)
 │           └── types/           ← SSE message types
 │
-├── code-reviewer/               ← Legacy: standalone review app (reference only)
-├── codebase-analyzer/           ← Legacy: prototype analyzer (fake analysis)
-├── code-visualizer-mvp/         ← Legacy: workspace/graph experiments
-└── fastapi-project/             ← Abandoned Python stub
+└── (legacy directories removed — see `archive/legacy-snapshot` branch)
 ```
 
 **Workspace graph:**
 - Root `package.json` declares `workspaces: ["packages/*", "app"]`
 - `app` depends on `@codeguru/auth`, `@codeguru/github`, `@codeguru/sse` (resolved via workspaces)
 - `app/client` is a nested package under `app` (not a separate workspace member)
-- Legacy directories (`code-reviewer`, `codebase-analyzer`, `code-visualizer-mvp`) are **outside** the workspace graph
+- The original `_archived/{code-reviewer,codebase-analyzer,fastapi-project}` and
+  `code-visualizer-mvp/{workspace-app,workspace-prototype,knowledge-graph-extension}`
+  directories were removed from `main` and now live on the
+  `archive/legacy-snapshot` branch. The file scanner in
+  `app/server/services/analyzer.js` skips any path containing `_archived` or
+  `legacy` even if those dirs reappear locally.
 
 ### 2. Backend — Express Server
 
@@ -355,14 +357,23 @@ Client navigates to /results/:id
   → Renders context files, completion %, gaps, copy/download
 ```
 
-### 7. Legacy / Prototype Code (Not in Production Path)
+### 7. Legacy / Prototype Code (archived off `main`)
 
-| Directory | What It Is | Status |
-|-----------|-----------|--------|
-| `code-reviewer/` | Standalone PR/repo review app (Express + CRA). Supabase auth mandatory. Local copies of github/sse/db services. | Reference — patterns migrated to `app/` |
-| `codebase-analyzer/` | Prototype that sends repo name to Claude and asks it to guess the architecture (no real file reading). | Superseded by `app/server/services/analyzer.js` |
-| `code-visualizer-mvp/` | Collaborative workspace experiments: Next.js app, static prototype, Chrome extension with Supabase + TipTap + Yjs. | Shelved — premature for current roadmap |
-| `fastapi-project/` | Abandoned Python/FastAPI stub. | Ignored per project rules |
+These directories used to live in `main` but were removed during the
+legacy-cleanup refactor. They are preserved on the `archive/legacy-snapshot`
+branch and listed in `.dockerignore`/`.gitignore` so they cannot creep back
+into builds. The active app (`app/`, `packages/`) does not depend on any of
+them; the file scanner in `app/server/services/analyzer.js` also skips any
+path containing `_archived` or `legacy` as a safety net.
+
+| Directory (now on `archive/legacy-snapshot`) | What It Was | Replaced By |
+|----------------------------------------------|-------------|-------------|
+| `_archived/code-reviewer/` | Standalone PR/repo review app (Express + CRA). | Patterns migrated to `app/server/{services,lib}/` |
+| `_archived/codebase-analyzer/` | Prototype that asked Claude to guess the architecture from the repo name only. | `app/server/services/analyzer.js` (real file reading) |
+| `_archived/fastapi-project/` | Abandoned Python/FastAPI stub. | — (never finished) |
+| `code-visualizer-mvp/workspace-app/` | Next.js workspace experiment. | — |
+| `code-visualizer-mvp/workspace-prototype/` | Static workspace prototype. | — |
+| `code-visualizer-mvp/knowledge-graph-extension/` | Chrome extension w/ Supabase + TipTap + Yjs. | — |
 
 ---
 
