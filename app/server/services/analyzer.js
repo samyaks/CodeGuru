@@ -84,11 +84,29 @@ const PRIORITY_PATH_PATTERNS = [
   /(?:^|\/)index\.(tsx?|jsx?|js)$/,
 ];
 
+// Build artifacts and tooling directories. Always skipped — these are never
+// part of source code regardless of repo conventions.
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.output',
   '__pycache__', '.cache', 'coverage', '.turbo', '.vercel', 'vendor',
   '.svelte-kit', 'target', 'out', '.expo',
 ]);
+
+// Archived / legacy directory-name pattern. Any path *segment* matching this
+// regex is treated as archived. Examples that match: `_archived`, `archived`,
+// `_archived-2024`, `legacy`, `legacy-old`, `_legacy`, `deprecated_v1`.
+//
+// Conservative on purpose: a segment named `archive` (without the `d`) is NOT
+// matched, because that's a common feature name (e.g. "archive a project").
+// Likewise `legacy.js` (a file) and `legacydata` (no separator) are not
+// matched — only segments that start with `archived|legacy|_legacy|deprecated`
+// followed by end-of-segment or a `[-_]` separator.
+const ARCHIVED_SEGMENT_RE = /^(?:_?archived|_?legacy|deprecated)(?:[-_].*)?$/i;
+
+// Escape hatch: set CODEGURU_INCLUDE_ARCHIVED=1 to disable the archive filter.
+// Use this when analyzing a repo whose `legacy/` directory contains live code
+// that the user genuinely wants reflected in their readiness score.
+const INCLUDE_ARCHIVED = process.env.CODEGURU_INCLUDE_ARCHIVED === '1';
 
 const SKIP_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'webp', 'avif',
@@ -99,11 +117,21 @@ const SKIP_EXTENSIONS = new Set([
   'lock', 'map', 'min.js', 'min.css',
 ]);
 
+function isArchivedPath(filePath) {
+  if (INCLUDE_ARCHIVED) return false;
+  const parts = filePath.split('/');
+  for (const part of parts) {
+    if (ARCHIVED_SEGMENT_RE.test(part)) return true;
+  }
+  return false;
+}
+
 function shouldSkipFile(filePath) {
   const parts = filePath.split('/');
   for (const part of parts) {
     if (SKIP_DIRS.has(part)) return true;
   }
+  if (isArchivedPath(filePath)) return true;
   const ext = filePath.split('.').pop()?.toLowerCase();
   if (ext && SKIP_EXTENSIONS.has(ext)) return true;
   if (filePath.endsWith('.lock')) return true;
@@ -725,4 +753,4 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
   };
 }
 
-module.exports = { analyzeRepo, analyzeFromFiles, shouldSkipFile };
+module.exports = { analyzeRepo, analyzeFromFiles, shouldSkipFile, isArchivedPath };
