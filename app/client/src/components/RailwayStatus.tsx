@@ -137,9 +137,9 @@ export default function RailwayStatus({ analysisId, initialFlag = null }: Railwa
             <Train size={20} className="text-brand" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-text">Railway detected in this repo</h3>
+            <h3 className="text-sm font-semibold text-text">Connect Railway</h3>
             <p className="text-xs text-text-muted mt-1">
-              Connect your Railway account to see live deployment status, recent builds, and the deployed URL.
+              Link your Railway account to see live deployment status, recent builds, and the deployed URL for this repo.
             </p>
             <a
               href={railwayConnectUrl(analysisId)}

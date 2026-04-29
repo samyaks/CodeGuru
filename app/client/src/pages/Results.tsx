@@ -142,21 +142,8 @@ export default function Results() {
           )}
         </div>
 
-        {(() => {
-          const hostingHasRailway = data.analysis?.deployInfo?.hosting?.some(
-            (h: { platform: string }) => h.platform === 'Railway'
-          );
-          const deploymentGap = data.analysis?.gaps?.deployment as
-            | { platform?: string | null; platforms?: string[] }
-            | undefined;
-          const platformsHasRailway = Array.isArray(deploymentGap?.platforms)
-            && deploymentGap!.platforms!.includes('Railway');
-          const platformStringHasRailway = typeof deploymentGap?.platform === 'string'
-            && deploymentGap!.platform!.includes('Railway');
-          const railwayDetected = hostingHasRailway || platformsHasRailway || platformStringHasRailway;
-          if (!railwayDetected && !railwayFlag) return null;
-          return <RailwayStatus analysisId={data.id} initialFlag={railwayFlag} />;
-        })()}
+        <RailwayStatus analysisId={data.id} initialFlag={railwayFlag} />
+
 
         {contextFiles.length > 0 && (
           <div className="flex justify-end">
