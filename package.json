@@ -10,6 +10,8 @@
     "dev": "npm run dev --prefix app",
     "build": "npm run build --prefix app/client",
     "start": "NODE_ENV=production node app/server/app.js",
-    "typecheck": "npx tsc --noEmit --project app/client/tsconfig.json"
+    "typecheck": "npx tsc --noEmit --project app/client/tsconfig.json",
+    "audit:self": "node app/server/scripts/audit-self.js",
+    "audit:self:strict": "node app/server/scripts/audit-self.js --strict"
   }
 }
