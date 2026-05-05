@@ -96,3 +96,30 @@ export async function reopenShipped(projectId: string, itemId: string): Promise<
   return handleApiResponse<{ newGapId: string }>(res);
 }
 
+export interface BackfillSummary {
+  ok: true;
+  branch: string;
+  total: number;
+  processed: number;
+  matched: number;
+  skippedExisting: number;
+  failed: number;
+}
+
+/**
+ * Pull the project's recent GitHub commits and run them through the
+ * gap-matcher → verifier pipeline, populating the Shipped tab with
+ * historical activity. Idempotent — re-running will only process new
+ * commits.
+ */
+export async function backfillShipped(
+  projectId: string,
+  opts: { limit?: number } = {},
+): Promise<BackfillSummary> {
+  const qs = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : '';
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/shipped/backfill${qs}`, {
+    method: 'POST',
+  });
+  return handleApiResponse<BackfillSummary>(res);
+}
+

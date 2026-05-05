@@ -5,8 +5,19 @@ const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
+const github = require('../../services/github');
+const { processCommit } = require('../../services/v2/shipped-runner');
 
 const router = express.Router({ mergeParams: true });
+
+// Followup #7 (code-review H3): mutating endpoints require an authenticated
+// user even on public projects — `optionalAuth` at the mount populates
+// `req.user` when a session is present, and this middleware enforces it
+// for writes. GETs stay open so unauthenticated dashboards keep working.
+function requireUser(req, _res, next) {
+  if (!req.user) return next(AppError.unauthorized('Authentication required'));
+  return next();
+}
 
 const readLimit = createRateLimit({
   windowMs: 60_000,
@@ -19,6 +30,17 @@ const writeLimit = createRateLimit({
   max: 20,
   message: 'Too many writes. Please try again in a minute.',
 });
+
+// Stricter limit for the backfill endpoint — each call fans out to N
+// GitHub API calls + (potentially) N Anthropic verifier calls.
+const backfillLimit = createRateLimit({
+  windowMs: 5 * 60_000,
+  max: 5,
+  message: 'Backfill is rate-limited. Please wait a few minutes between runs.',
+});
+
+const BACKFILL_MAX_COMMITS = 50;
+const BACKFILL_DEFAULT_COMMITS = 20;
 
 async function loadProjectAndAuthorize(req) {
   const project = await deployments.findById(req.params.id);
@@ -54,7 +76,90 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/:itemId/reopen', writeLimit, asyncHandler(async (req, res) => {
+// POST /api/v2/projects/:id/shipped/backfill?limit=N
+//
+// Pull the last N commits from the project's GitHub repo, hand each one
+// to `processCommit`, and report how many landed in `shipped_items`. We
+// do this synchronously and return a summary, but each commit is
+// idempotent (the unique index on (project_id, commit_sha) + the
+// fast-path check in shipped-runner mean re-runs never duplicate).
+//
+// Why this exists: the v2 webhook flow only writes shipped rows for
+// *new* pushes received after the deploy. Without backfill, projects
+// that connected their repo before v2 went live see an empty Shipped
+// tab forever even though they have plenty of history.
+router.post('/backfill', requireUser, backfillLimit, asyncHandler(async (req, res) => {
+  const project = await loadProjectAndAuthorize(req);
+
+  if (!project.owner || !project.repo) {
+    throw AppError.badRequest('Project is missing owner/repo metadata.');
+  }
+  if (typeof project.repo_url === 'string' && project.repo_url.startsWith('local://')) {
+    throw AppError.badRequest('Backfill requires a GitHub-linked project (folder uploads have no commit history).');
+  }
+
+  const requested = Number.parseInt(req.query.limit, 10);
+  const perPage = Number.isFinite(requested)
+    ? Math.max(1, Math.min(BACKFILL_MAX_COMMITS, requested))
+    : BACKFILL_DEFAULT_COMMITS;
+  const branch = project.branch || 'main';
+
+  let commits;
+  try {
+    commits = await github.fetchCommits(project.owner, project.repo, { branch, perPage });
+  } catch (err) {
+    throw AppError.internal(`Could not fetch commits from GitHub: ${err.message}`);
+  }
+
+  const stats = {
+    total: commits.length,
+    processed: 0,
+    matched: 0,
+    skippedExisting: 0,
+    failed: 0,
+  };
+
+  for (const c of commits) {
+    const existing = await shippedItems.findByCommit(project.id, c.sha);
+    if (existing) {
+      stats.skippedExisting += 1;
+      continue;
+    }
+
+    let detail;
+    try {
+      detail = await github.fetchCommitDetail(project.owner, project.repo, c.sha);
+    } catch (err) {
+      console.warn(`[v2/shipped/backfill] fetchCommitDetail ${c.sha} failed: ${err.message}`);
+      stats.failed += 1;
+      continue;
+    }
+
+    const buckets = { added: [], modified: [], removed: [] };
+    for (const f of detail.files || []) {
+      const status =
+        f.status === 'added' ? 'added' :
+        f.status === 'removed' ? 'removed' : 'modified';
+      buckets[status].push(f.path);
+    }
+
+    const commitForRunner = {
+      id: c.sha,
+      message: c.message || '',
+      ...buckets,
+    };
+
+    await processCommit({ project, commit: commitForRunner, branch });
+    stats.processed += 1;
+
+    const after = await shippedItems.findByCommit(project.id, c.sha);
+    if (after) stats.matched += 1;
+  }
+
+  res.json({ ok: true, branch, ...stats });
+}));
+
+router.post('/:itemId/reopen', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
   const rows = await shippedItems.listByProjectId(req.params.id);
   const item = rows.find((r) => r.id === req.params.itemId);
@@ -69,14 +174,18 @@ router.post('/:itemId/reopen', writeLimit, asyncHandler(async (req, res) => {
   const sourceGap = await suggestions.findV2GapById(item.gap_id, req.params.id);
   if (!sourceGap) throw AppError.notFound('Source gap missing.');
 
-  const newId = crypto.createHash('sha256')
+  // Followup #5 (code-review C1): use createV2Gap so we get back the row
+  // as actually stored (id is hashed by db.js to prevent guessing). The
+  // previous code returned the pre-hash token and the follow-up
+  // setV2Status call targeted no row.
+  const seedId = crypto
+    .createHash('sha256')
     .update(`${req.params.id}:${item.id}:${Date.now()}`)
     .digest('hex')
     .slice(0, 16);
 
-  // Insert a new untriaged gap scoped to the still-failing files
-  await suggestions.createBatch([{
-    id: newId,
+  const inserted = await suggestions.createV2Gap({
+    id: seedId,
     project_id: req.params.id,
     type: sourceGap.type,
     category: sourceGap.category,
@@ -89,12 +198,16 @@ router.post('/:itemId/reopen', writeLimit, asyncHandler(async (req, res) => {
     affected_files: Array.isArray(item.partial_items) ? item.partial_items : [],
     source: 'static',
     status: 'open',
-  }]);
+    v2_status: 'untriaged',
+    v2_category: sourceGap.v2_category,
+    v2_refined_from_id: sourceGap.id,
+  });
 
-  // Mark the new row's v2 fields explicitly (createBatch doesn't set them)
-  await suggestions.setV2Status(newId, req.params.id, 'untriaged');
+  if (!inserted) {
+    throw AppError.internal('Could not reopen — failed to insert remaining gap.');
+  }
 
-  res.json({ ok: true, newGapId: newId, project: { id: project.id } });
+  res.json({ ok: true, newGapId: inserted.id, project: { id: project.id } });
 }));
 
 module.exports = router;

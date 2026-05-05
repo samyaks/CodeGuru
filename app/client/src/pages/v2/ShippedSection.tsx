@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GitCommit, Github } from 'lucide-react';
+import { GitCommit, Github, RefreshCw } from 'lucide-react';
 import { ShippedItem, EmptyState } from '../../components/v2';
-import { fetchV2Shipped, reopenShipped, type V2ShippedResponse } from '../../services/v2Api';
+import {
+  fetchV2Shipped,
+  reopenShipped,
+  backfillShipped,
+  type V2ShippedResponse,
+  type BackfillSummary,
+} from '../../services/v2Api';
 
 export interface ShippedSectionProps {
   projectId: string;
@@ -13,6 +19,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -42,9 +49,32 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
     }
   }, [projectId, reload]);
 
+  const onSync = useCallback(async () => {
+    setSyncing(true);
+    setToast(null);
+    try {
+      const summary: BackfillSummary = await backfillShipped(projectId, { limit: 30 });
+      const summaryParts = [
+        `${summary.matched} of ${summary.total} commit${summary.total === 1 ? '' : 's'} matched a gap`,
+      ];
+      if (summary.skippedExisting > 0) {
+        summaryParts.push(`${summary.skippedExisting} already on file`);
+      }
+      if (summary.failed > 0) {
+        summaryParts.push(`${summary.failed} failed`);
+      }
+      setToast(summaryParts.join(' · '));
+      await reload();
+    } catch (err) {
+      setToast(`Sync failed: ${(err as Error).message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }, [projectId, reload]);
+
   useEffect(() => {
     if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 4000);
+    const t = window.setTimeout(() => setToast(null), 5000);
     return () => window.clearTimeout(t);
   }, [toast]);
 
@@ -61,6 +91,9 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
   }
   if (!data) return null;
 
+  const hasRepo = !!data.repo;
+  const isEmpty = data.items.length === 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -70,29 +103,49 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
         </p>
       </div>
 
-      <div className="bg-white border border-stone-200 rounded-lg p-4 flex items-center gap-3">
+      <div className="bg-white border border-stone-200 rounded-lg p-4 flex items-center gap-3 flex-wrap">
         <Github className="w-4 h-4 text-stone-500" />
         <span className="text-sm text-stone-700">
-          {data.repo ? (
+          {hasRepo ? (
             <>Connected to <span className="font-mono text-stone-900">{data.repo}</span></>
           ) : (
             'No GitHub repo connected'
           )}
         </span>
-        {data.repo ? (
-          <span className="ml-auto flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            Listening for commits
+        {hasRepo ? (
+          <span className="ml-auto flex items-center gap-3">
+            <span className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              Listening for commits
+            </span>
+            <button
+              type="button"
+              onClick={onSync}
+              disabled={syncing}
+              title="Pull recent commits from GitHub and match them to your gaps"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-700 hover:text-stone-900 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing…' : 'Sync recent commits'}
+            </button>
           </span>
         ) : null}
       </div>
 
-      {data.items.length === 0 ? (
-        <EmptyState
-          icon={GitCommit}
-          title="Nothing shipped yet"
-          description="Accept a gap, commit your work, and it'll appear here verified."
-        />
+      {isEmpty ? (
+        hasRepo ? (
+          <EmptyState
+            icon={GitCommit}
+            title="Nothing shipped yet"
+            description="New commits matching an open gap will land here automatically. To pull in the last few commits from before today, click 'Sync recent commits' above."
+          />
+        ) : (
+          <EmptyState
+            icon={GitCommit}
+            title="No GitHub repo connected"
+            description="Connect a GitHub repo so Takeoff can match your commits to open gaps."
+          />
+        )
       ) : (
         <div className="space-y-3" aria-busy={busyId !== null}>
           {data.items.map((item) => (
