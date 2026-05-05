@@ -22,6 +22,7 @@ import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 import StyleGuideV2 from './pages/v2/StyleGuide';
+import ProjectV2 from './pages/v2/Project';
 
 function NavigateToProject() {
   const { id } = useParams();
@@ -70,6 +71,7 @@ export default function App() {
 
             {/* v2 (Takeoff) — additive routes, do not affect v1 */}
             <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
+            <Route path="/v2/projects/:id" element={<ProjectV2 />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
