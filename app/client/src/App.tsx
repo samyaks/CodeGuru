@@ -21,6 +21,7 @@ import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
+import StyleGuideV2 from './pages/v2/StyleGuide';
 
 function NavigateToProject() {
   const { id } = useParams();
@@ -66,6 +67,9 @@ export default function App() {
             <Route path="/review/:id/progress" element={<ReviewProgress />} />
             <Route path="/review/:id" element={<ReviewReport />} />
             <Route path="/fix/:shortId" element={<FixPrompt />} />
+
+            {/* v2 (Takeoff) — additive routes, do not affect v1 */}
+            <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

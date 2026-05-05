@@ -1,0 +1,23 @@
+/* v2 (Takeoff) design tokens.
+ *
+ * The v2 prototype at docs/v2-reference/takeoff-prototype.jsx uses bare
+ * Tailwind stone-/red-/amber-/emerald- classes which already work out of the
+ * box with Tailwind 4. This file adds only what stock Tailwind doesn't give:
+ *   - explicit serif/sans stacks used by the prototype's `sansFont` /
+ *     `serifFont` style constants
+ *   - convenience utilities for the in-progress amber ring + animated pulse
+ */
+
+@theme {
+  --font-v2-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-v2-serif: ui-serif, Georgia, Cambria, serif;
+}
+
+.v2-font-sans { font-family: var(--font-v2-sans); }
+.v2-font-serif { font-family: var(--font-v2-serif); }
+
+@keyframes v2-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.v2-animate-pulse { animation: v2-pulse 1.5s ease-in-out infinite; }
