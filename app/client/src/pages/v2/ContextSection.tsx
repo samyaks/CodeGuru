@@ -18,6 +18,7 @@ import {
   type GapInfo,
   type ReadinessCategory,
 } from '../../services/api';
+import { clampScore } from '../../services/productMapApi';
 
 export interface ContextSectionProps {
   projectId: string;
@@ -97,9 +98,9 @@ function GapRow({ gapKey, gap }: { gapKey: string; gap: GapInfo }) {
 
 function ReadinessRow({ name, cat }: { name: string; cat: ReadinessCategory }) {
   // `services/readiness-scorer.js` returns each category score as a 0..100
-  // integer (e.g. `frontendScore = hasUI ? (hasRouting ? 100 : 70) : 0`).
-  // No `* 100` needed — that was the "9400%" rendering bug.
-  const pct = Math.max(0, Math.min(100, Math.round(cat.score)));
+  // integer. `clampScore` is the shared guard against re-introducing the
+  // "9400%" bug or NaN-leak from a malformed payload.
+  const pct = clampScore(cat.score) ?? 0;
   const tone =
     cat.status === 'ready'
       ? 'text-emerald-700'

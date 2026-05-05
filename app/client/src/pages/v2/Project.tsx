@@ -4,7 +4,7 @@ import {
   AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Users, Zap,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
-import { fetchProductMap, type ProductMapData } from '../../services/productMapApi';
+import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
 import {
   TabBar, MetadataLabel, EmptyState, ChatDrawer,
 } from '../../components/v2';
@@ -116,16 +116,16 @@ export default function ProjectV2() {
     if (!productMap) return [] as Array<{ id: string; name: string; emoji: string; readiness: number }>;
     const personaScores = productMap.scores?.persona ?? {};
     // Backend `services/job-scorer.js` already returns 0..100 integers;
-    // multiplying by 100 here was the source of the "8700%" rendering bug.
-    const fallback = typeof productMap.scores?.app === 'number' ? productMap.scores.app : 50;
+    // `clampScore` is the shared guard against the "8700%" / "NaN%" bugs.
+    const appFallback = clampScore(productMap.scores?.app);
     return productMap.personas.map((p) => {
-      const raw = personaScores[p.id];
-      const score = typeof raw === 'number' ? raw : fallback;
+      const direct = clampScore(personaScores[p.id]);
+      const readiness = direct ?? appFallback ?? 50;
       return {
         id: p.id,
         name: p.name,
         emoji: p.emoji ?? '📌',
-        readiness: Math.max(0, Math.min(100, Math.round(score))),
+        readiness,
       };
     });
   }, [productMap]);

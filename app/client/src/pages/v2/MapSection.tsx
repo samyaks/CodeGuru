@@ -19,6 +19,8 @@ import {
   addJob,
   removeJob,
   setJobPriority,
+  parsePriority,
+  clampScore,
   type ProductMapData,
 } from '../../services/productMapApi';
 
@@ -58,15 +60,16 @@ interface PersonaJobs {
 }
 
 // Backend `services/job-scorer.js#buildScoresObject` already rounds scores
-// to 0..100 integers (`Math.round((total/length) * 100)` etc.). Don't
-// multiply by 100 again — that's how we ended up rendering "8700%".
+// to 0..100 integers; `clampScore` (in productMapApi.ts) is the single
+// guard against `NaN` / `Infinity` / stringified-numbers / out-of-range
+// values. Don't multiply scores by 100 here — that's how we ended up
+// rendering "8700%".
 function readinessFor(personaId: string, data: ProductMapData): number {
   const personaScores = data.scores?.persona ?? {};
-  const raw = personaScores[personaId];
-  const score = typeof raw === 'number'
-    ? raw
-    : (typeof data.scores?.app === 'number' ? data.scores.app : 50);
-  return Math.max(0, Math.min(100, Math.round(score)));
+  const direct = clampScore(personaScores[personaId]);
+  if (direct !== null) return direct;
+  const fallback = clampScore(data.scores?.app);
+  return fallback ?? 50;
 }
 
 // Mirrors `services/job-scorer.js#getEntityStatus` so the UI labels for
@@ -95,19 +98,34 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
   // Build the per-job list of "needs" (entities the job depends on) with
   // a normalized built/partial/missing status. Sorting puts unbuilt items
   // first so the user sees what's still to do.
+  //
+  // A `needs` edge whose `toId` doesn't resolve to an entity is treated as
+  // a dangling/missing dependency. The backend `scoreJob` counts these as
+  // 0-contribution toward the percent (`getEntityStatus` returns 0 when
+  // `!entity`); dropping them on the client made the summary disagree
+  // with the percent (e.g. "1/1 built · 100%" while score said 50%).
+  // Render them as a synthetic missing need so counts and percent agree.
   const needsByJob = new Map<string, JobNeed[]>();
   for (const edge of data.edges ?? []) {
     if (!edge || edge.type !== 'needs') continue;
     if (!edge.fromId || !edge.toId) continue;
     const ent = entityIndex.get(edge.toId);
-    if (!ent) continue;
     const list = needsByJob.get(edge.fromId) ?? [];
-    list.push({
-      id: ent.id,
-      label: ent.label || ent.key || 'Component',
-      module: ent.module ?? null,
-      status: classifyEntityStatus(ent.status),
-    });
+    if (ent) {
+      list.push({
+        id: ent.id,
+        label: ent.label || ent.key || 'Component',
+        module: ent.module ?? null,
+        status: classifyEntityStatus(ent.status),
+      });
+    } else {
+      list.push({
+        id: edge.toId,
+        label: 'Unknown component',
+        module: null,
+        status: 'missing',
+      });
+    }
     needsByJob.set(edge.fromId, list);
   }
   for (const list of needsByJob.values()) {
@@ -124,16 +142,13 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
     const builtCount = needs.filter((n) => n.status === 'built').length;
     const partialCount = needs.filter((n) => n.status === 'partial').length;
     const missingCount = needs.filter((n) => n.status === 'missing').length;
-    const rawScore = jobScores[job.id];
-    const score = typeof rawScore === 'number'
-      ? Math.max(0, Math.min(100, Math.round(rawScore)))
-      : 0;
+    const score = clampScore(jobScores[job.id]) ?? 0;
 
     const list = jobsByPersona.get(job.personaId) ?? [];
     list.push({
       id: job.id,
       title: job.title,
-      priority: (job.priority as Priority) ?? 'medium',
+      priority: parsePriority(job.priority),
       score,
       needs,
       builtCount,
@@ -555,10 +570,19 @@ interface JobRowProps {
 }
 
 function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
-  // Auto-expand jobs with missing pieces so "what's not built yet" is
+  // Auto-expand jobs that still have work, so "what's not built yet" is
   // visible without a click. Built-out jobs collapse by default to keep
   // the persona card scannable.
-  const [expanded, setExpanded] = useState(job.missingCount > 0 || job.partialCount > 0);
+  //
+  // `userOverride` lets the user manually toggle and have that decision
+  // stick across refetches (e.g. after a priority edit or a regenerate).
+  // Without it, the expand state would freeze at the value computed on
+  // mount and disagree with the new counts. With it, we re-derive from
+  // the latest counts whenever the user hasn't expressed a preference.
+  const autoExpanded = job.missingCount > 0 || job.partialCount > 0;
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
+  const expanded = userOverride ?? autoExpanded;
+  const toggleExpanded = () => setUserOverride(!expanded);
   const tone = scoreTone(job.score);
   const totalNeeds = job.needs.length;
   const hasNeeds = totalNeeds > 0;
@@ -580,7 +604,7 @@ function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
 
         <button
           type="button"
-          onClick={() => hasNeeds && setExpanded((v) => !v)}
+          onClick={() => { if (hasNeeds) toggleExpanded(); }}
           disabled={!hasNeeds}
           className="flex-1 min-w-0 flex items-center gap-2 text-left disabled:cursor-default"
           aria-expanded={hasNeeds ? expanded : undefined}

@@ -26,9 +26,31 @@ export interface ProductIntentExtraction {
   jobs: ProductIntentJob[];
 }
 
-function parsePriority(p: unknown): 'high' | 'medium' | 'low' {
+/**
+ * Coerce an unknown value into one of the priority enum members. Anything
+ * that isn't `'high'` or `'low'` falls back to `'medium'` — exported so
+ * UI consumers (e.g. `<select>` controllers in `MapSection`) don't end up
+ * with an out-of-enum value that has no matching `<option>`.
+ */
+export function parsePriority(p: unknown): 'high' | 'medium' | 'low' {
   const s = typeof p === 'string' ? p : 'medium';
   return s === 'high' || s === 'low' ? s : 'medium';
+}
+
+/**
+ * Coerce + clamp a readiness score to the 0..100 integer range used by
+ * `services/job-scorer.js` and `services/readiness-scorer.js`. Returns
+ * `null` for non-finite inputs so callers can decide on a fallback (some
+ * sites want `0`, others want a persona/app default).
+ *
+ * Lives here (next to `ProductMapData`) so every UI surface that reads
+ * `scores.{app,job,persona}` clamps the same way and we don't reintroduce
+ * the "8700%" or "NaN%" bugs in a future tab.
+ */
+export function clampScore(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 function normalizeExtractionPayload(raw: Record<string, unknown>): ProductIntentExtraction {
