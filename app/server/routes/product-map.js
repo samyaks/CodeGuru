@@ -146,9 +146,30 @@ router.post(
   asyncHandler(async (req, res) => {
     try {
       const { projectId } = req.params;
-      const { analysisId, description } = req.body || {};
-      if (!analysisId) {
-        return res.status(400).json({ error: 'analysisId is required in body', code: 'BAD_REQUEST' });
+      const { analysisId = null, description: bodyDescription } = req.body || {};
+
+      // For takeoff (deployment) projects there's no `analyses` row, so
+      // analysisId is optional. We also accept a missing description and
+      // synthesize one from the project's features_summary / repo
+      // description so the v2 Map tab can call this endpoint to bootstrap
+      // a map for an existing project without re-asking the user.
+      let description = typeof bodyDescription === 'string' ? bodyDescription.trim() : '';
+      if (!description) {
+        const project = await deployments.findById(projectId);
+        if (!project) {
+          return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });
+        }
+        description =
+          (typeof project.features_summary === 'string' && project.features_summary.trim()) ||
+          (typeof project.description === 'string' && project.description.trim()) ||
+          '';
+      }
+      if (!description) {
+        return res.status(400).json({
+          error:
+            'description is required (or run an analysis first so features_summary is populated)',
+          code: 'BAD_REQUEST',
+        });
       }
       const result = await createProductMap(projectId, analysisId, description, { req });
       res.status(201).json({

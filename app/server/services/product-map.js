@@ -27,17 +27,24 @@ function buildCodebaseModel(analysis) {
 }
 
 async function loadCodebaseModel(projectId, analysisId) {
+  // analysisId is optional. The legacy `/analyze` flow has an `analyses`
+  // row; the takeoff flow stores the codebase model under
+  // `deployments.analysis_data` instead. We accept either.
   const [analysis, deployment] = await Promise.all([
-    analyses.findById(analysisId),
+    analysisId ? analyses.findById(analysisId) : Promise.resolve(null),
     deployments.findById(projectId),
   ]);
-  if (!analysis) {
-    throw AppError.notFound('Analysis not found');
+  if (!analysis && !deployment) {
+    throw AppError.notFound('Project not found');
   }
 
-  const fromAnalysis = buildCodebaseModel(analysis);
-  if (fromAnalysis) return fromAnalysis;
+  if (analysis) {
+    const fromAnalysis = buildCodebaseModel(analysis);
+    if (fromAnalysis) return fromAnalysis;
+  }
 
+  // Fall back to the deployment's analysis_data (takeoff projects, or any
+  // analysis whose payload didn't survive the buildCodebaseModel shape check).
   const ad = deployment?.analysis_data
     ? (typeof deployment.analysis_data === 'string'
       ? safeParseJson(deployment.analysis_data, {})
@@ -46,7 +53,7 @@ async function loadCodebaseModel(projectId, analysisId) {
 
   return {
     meta: {
-      name: deployment?.repo || analysis.repo,
+      name: deployment?.repo || analysis?.repo || ad.meta?.name,
       description: deployment?.description || ad.meta?.description,
     },
     stack: deployment?.stack_info || ad.stack || {},

@@ -13,6 +13,7 @@ const { describeFeatures } = require('../services/features-describer');
 const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = require('../services/suggestion-rules');
 const { runAISuggestions } = require('../services/suggestion-ai');
 const { connectWebhook } = require('../services/github-webhook-manager');
+const productMapSvc = require('../services/product-map');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -413,6 +414,17 @@ async function runPipeline(id, codebaseModel, userId, label) {
 
   console.log(JSON.stringify({ event: 'pipeline_complete', projectId: id, label, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
 
+  // Stage 3b: Product-map auto-extraction (async, non-blocking).
+  // The v1 onboarding wizard was removed in the v2 migration, so without
+  // this hook the v2 Map tab stays empty forever. We use featuresSummary
+  // (or the GitHub repo description) as the seed for Claude's
+  // persona/jobs extraction.
+  setImmediate(() => {
+    autoCreateProductMap(id, codebaseModel, featuresSummary).catch((err) => {
+      console.error(`[takeoff] auto product-map for ${id} failed (non-fatal):`, err.message);
+    });
+  });
+
   // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
   try {
     const aiSuggestions = await runAISuggestions({
@@ -434,6 +446,37 @@ async function runPipeline(id, codebaseModel, userId, label) {
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
   }
+}
+
+// Build a product-map (personas + jobs + entity graph) for a freshly-analyzed
+// project. Skips silently when:
+//   - a map already exists (idempotent),
+//   - we don't have a strong description signal (would produce garbage personas),
+//   - Claude or the persistence layer fails (logged as non-fatal).
+async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
+  // Don't overwrite an existing map.
+  try {
+    const existing = await productMapSvc.getMapByProject(projectId);
+    if (existing && existing.map) {
+      console.log(`[takeoff] product-map already exists for ${projectId}, skipping auto-extract`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`[takeoff] product-map existence check failed for ${projectId}: ${err.message}`);
+  }
+
+  const description = (featuresSummary && String(featuresSummary).trim())
+    || (codebaseModel?.meta?.description && String(codebaseModel.meta.description).trim())
+    || null;
+
+  if (!description) {
+    console.log(`[takeoff] no description available for ${projectId}; skipping auto product-map`);
+    return;
+  }
+
+  console.log(`[takeoff] auto-creating product-map for ${projectId} (description ${description.length} chars)`);
+  const result = await productMapSvc.createProductMap(projectId, null, description);
+  console.log(`[takeoff] auto product-map created for ${projectId}: ${result.personas.length} personas, ${result.jobs.length} jobs`);
 }
 
 router.get('/:id', asyncHandler(async (req, res) => {
