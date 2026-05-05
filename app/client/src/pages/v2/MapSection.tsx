@@ -27,11 +27,16 @@ interface PersonaJobs {
   readiness: number;
 }
 
+// Backend `services/job-scorer.js#buildScoresObject` already rounds scores
+// to 0..100 integers (`Math.round((total/length) * 100)` etc.). Don't
+// multiply by 100 again — that's how we ended up rendering "8700%".
 function readinessFor(personaId: string, data: ProductMapData): number {
   const personaScores = data.scores?.persona ?? {};
   const raw = personaScores[personaId];
-  if (typeof raw === 'number') return Math.round(raw * 100);
-  return Math.round((data.scores?.app ?? 0.5) * 100);
+  const score = typeof raw === 'number'
+    ? raw
+    : (typeof data.scores?.app === 'number' ? data.scores.app : 50);
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 function shapePersonas(data: ProductMapData): PersonaJobs[] {

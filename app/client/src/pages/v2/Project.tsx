@@ -115,14 +115,19 @@ export default function ProjectV2() {
   const personas = useMemo(() => {
     if (!productMap) return [] as Array<{ id: string; name: string; emoji: string; readiness: number }>;
     const personaScores = productMap.scores?.persona ?? {};
-    return productMap.personas.map((p) => ({
-      id: p.id,
-      name: p.name,
-      emoji: p.emoji ?? '📌',
-      readiness: typeof personaScores[p.id] === 'number'
-        ? Math.round(personaScores[p.id]! * 100)
-        : Math.round(((productMap.scores?.app ?? 0.5) * 100)),
-    }));
+    // Backend `services/job-scorer.js` already returns 0..100 integers;
+    // multiplying by 100 here was the source of the "8700%" rendering bug.
+    const fallback = typeof productMap.scores?.app === 'number' ? productMap.scores.app : 50;
+    return productMap.personas.map((p) => {
+      const raw = personaScores[p.id];
+      const score = typeof raw === 'number' ? raw : fallback;
+      return {
+        id: p.id,
+        name: p.name,
+        emoji: p.emoji ?? '📌',
+        readiness: Math.max(0, Math.min(100, Math.round(score))),
+      };
+    });
   }, [productMap]);
 
   const stack = useMemo(() => {
