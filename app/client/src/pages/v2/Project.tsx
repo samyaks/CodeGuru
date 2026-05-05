@@ -9,6 +9,7 @@ import {
   TabBar, MetadataLabel, EmptyState, ChatDrawer,
 } from '../../components/v2';
 import type { ChatMessage } from '../../components/v2';
+import GapsSection from './GapsSection';
 
 const TABS = ['gaps', 'map', 'context', 'shipped'] as const;
 type TabId = (typeof TABS)[number];
@@ -146,6 +147,7 @@ export default function ProjectV2() {
   }
 
   const placeholder = PLACEHOLDERS[activeTab];
+  const showRealGaps = activeTab === 'gaps' && !!id;
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
@@ -195,7 +197,11 @@ export default function ProjectV2() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <div className="lg:col-span-3">
-            <EmptyState icon={placeholder.icon} title={placeholder.title} />
+            {showRealGaps ? (
+              <GapsSection projectId={id!} />
+            ) : (
+              <EmptyState icon={placeholder.icon} title={placeholder.title} />
+            )}
           </div>
 
           <aside className="space-y-5">

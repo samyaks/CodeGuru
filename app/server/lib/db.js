@@ -873,6 +873,105 @@ const suggestions = {
       },
     };
   },
+
+  // ── v2 (Gap) methods ───────────────────────────────────────────
+  // These all read/write the suggestions table but use the v2_* columns added
+  // by migration 010_v2_gap_fields.sql so v1 endpoints keep working.
+
+  async findV2GapsByProjectId(projectId, { v2Status } = {}) {
+    const params = [projectId];
+    let where = 'project_id = $1';
+    if (v2Status) {
+      params.push(v2Status);
+      where += ` AND v2_status = $${params.length}`;
+    }
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions
+        WHERE ${where}
+        ORDER BY CASE priority
+          WHEN 'critical' THEN 0
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          WHEN 'low' THEN 3
+          ELSE 4
+        END, created_at DESC`,
+      params
+    );
+    return rows;
+  },
+
+  async findV2GapById(id, projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM suggestions WHERE id = $1 AND project_id = $2',
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  async setV2Status(id, projectId, v2Status, extra = {}) {
+    const sets = ['v2_status = $1'];
+    const params = [v2Status, id, projectId];
+    let idx = 3;
+    if (extra.rejectedReason !== undefined) {
+      idx += 1;
+      sets.push(`v2_rejected_reason = $${idx}`);
+      params.push(extra.rejectedReason);
+    }
+    if (extra.committedAt !== undefined) {
+      idx += 1;
+      sets.push(`v2_committed_at = $${idx}`);
+      params.push(extra.committedAt);
+    }
+    if (extra.verification !== undefined) {
+      idx += 1;
+      sets.push(`verification = $${idx}`);
+      params.push(extra.verification);
+    }
+    const { rows } = await getDb().query(
+      `UPDATE suggestions SET ${sets.join(', ')}
+        WHERE id = $2 AND project_id = $3
+        RETURNING *`,
+      params
+    );
+    return rows[0] || null;
+  },
+
+  async setCursorPrompt(id, projectId, cursorPrompt) {
+    const { rows } = await getDb().query(
+      `UPDATE suggestions SET cursor_prompt = $1
+        WHERE id = $2 AND project_id = $3
+        RETURNING *`,
+      [cursorPrompt, id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  async refineV2Gap(id, projectId, { title, description, cursorPrompt, refinedFromId }) {
+    const sets = [];
+    const params = [];
+    let idx = 0;
+    if (title !== undefined) { idx += 1; sets.push(`title = $${idx}`); params.push(title); }
+    if (description !== undefined) { idx += 1; sets.push(`description = $${idx}`); params.push(description); }
+    if (cursorPrompt !== undefined) { idx += 1; sets.push(`cursor_prompt = $${idx}`); params.push(cursorPrompt); }
+    if (refinedFromId !== undefined) {
+      idx += 1; sets.push(`v2_refined_from_id = $${idx}`); params.push(refinedFromId);
+    }
+    // Refine always returns a gap to "untriaged"
+    idx += 1; sets.push(`v2_status = $${idx}`); params.push('untriaged');
+
+    if (sets.length === 0) return await this.findV2GapById(id, projectId);
+
+    params.push(id, projectId);
+    const idIdx = idx + 1;
+    const projectIdx = idx + 2;
+    const { rows } = await getDb().query(
+      `UPDATE suggestions SET ${sets.join(', ')}
+        WHERE id = $${idIdx} AND project_id = $${projectIdx}
+        RETURNING *`,
+      params
+    );
+    return rows[0] || null;
+  },
 };
 
 // ── Analyses ──────────────────────────────────────────────────────
