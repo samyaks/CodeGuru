@@ -43,7 +43,7 @@ const MAX_FILE_BYTES = 256 * 1024;
 const WALK_SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.output',
   '__pycache__', '.cache', 'coverage', '.turbo', '.vercel', 'vendor',
-  '.svelte-kit', 'target', 'out', '.expo',
+  '.svelte-kit', 'target', 'out', '.expo', 'archive',
 ]);
 
 // Dotfiles we *do* care about even though they start with `.`.

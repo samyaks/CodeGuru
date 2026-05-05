@@ -48,6 +48,7 @@ const PRIORITY_FILES = [
   /^\.cursorrules$/,
   /^CLAUDE\.md$/i,
   /^\.context\.md$/,
+  /^\.scanignore$/,
   /next\.config\./,
   /nuxt\.config\./,
   /vite\.config\./,
@@ -86,10 +87,14 @@ const PRIORITY_PATH_PATTERNS = [
 
 // Build artifacts and tooling directories. Always skipped — these are never
 // part of source code regardless of repo conventions.
+//
+// `archive` is included so retired-but-tracked code (e.g. anything moved to
+// `archive/` during the v2 migration) doesn't show up in module counts or
+// readiness scores.
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.output',
   '__pycache__', '.cache', 'coverage', '.turbo', '.vercel', 'vendor',
-  '.svelte-kit', 'target', 'out', '.expo',
+  '.svelte-kit', 'target', 'out', '.expo', 'archive',
 ]);
 
 // Archived / legacy directory-name pattern. Any path *segment* matching this
@@ -126,7 +131,73 @@ function isArchivedPath(filePath) {
   return false;
 }
 
-function shouldSkipFile(filePath) {
+// Compile a single `.scanignore` line into a regex. Supports `*` (any
+// characters except `/`), `**` (any characters including `/`), and
+// directory-suffix patterns ending in `/`. Lines starting with `#` and
+// blank lines are dropped by the caller.
+function compileIgnorePattern(raw) {
+  const pattern = raw.trim();
+  if (!pattern) return null;
+
+  const isDir = pattern.endsWith('/');
+  const stripped = isDir ? pattern.slice(0, -1) : pattern;
+
+  let escaped = '';
+  let i = 0;
+  while (i < stripped.length) {
+    const c = stripped[i];
+    if (c === '*') {
+      if (stripped[i + 1] === '*') {
+        escaped += '.*';
+        i += 2;
+      } else {
+        escaped += '[^/]*';
+        i += 1;
+      }
+    } else if (/[.+^${}()|[\]\\]/.test(c)) {
+      escaped += '\\' + c;
+      i += 1;
+    } else {
+      escaped += c;
+      i += 1;
+    }
+  }
+
+  // Match either the exact path or the directory prefix (so `archive/` matches
+  // every file under it).
+  const body = isDir ? `${escaped}(/.*)?` : escaped;
+  // Allow the pattern to match at any depth if it doesn't already start with a
+  // slash or `**/`.
+  const anchored = stripped.startsWith('/') ? `^${body.slice(2)}$` : `^(.*/)?${body}$`;
+  try {
+    return new RegExp(anchored);
+  } catch {
+    return null;
+  }
+}
+
+function parseScanIgnore(text) {
+  return String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+    .map(compileIgnorePattern)
+    .filter(Boolean);
+}
+
+async function loadScanIgnorePatterns(owner, repo, branch, tree) {
+  const entry = tree.find((f) => f.type === 'blob' && f.path === '.scanignore');
+  if (!entry) return [];
+  try {
+    const r = await github.fetchFileContent(owner, repo, '.scanignore', branch);
+    if (!r || !r.content) return [];
+    return parseScanIgnore(r.content);
+  } catch {
+    return [];
+  }
+}
+
+function shouldSkipFile(filePath, extraPatterns = []) {
   const parts = filePath.split('/');
   for (const part of parts) {
     if (SKIP_DIRS.has(part)) return true;
@@ -136,6 +207,9 @@ function shouldSkipFile(filePath) {
   if (ext && SKIP_EXTENSIONS.has(ext)) return true;
   if (filePath.endsWith('.lock')) return true;
   if (filePath.endsWith('.min.js') || filePath.endsWith('.min.css')) return true;
+  for (const re of extraPatterns) {
+    if (re.test(filePath)) return true;
+  }
   return false;
 }
 
@@ -173,7 +247,8 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
 
   const treeTruncated = !!tree._truncated;
 
-  const allFiles = tree.filter((f) => f.type === 'blob' && !shouldSkipFile(f.path));
+  const extraIgnore = await loadScanIgnorePatterns(owner, repo, branch, tree);
+  const allFiles = tree.filter((f) => f.type === 'blob' && !shouldSkipFile(f.path, extraIgnore));
   send({ phase: 'tree-done', message: `Found ${allFiles.length} files`, fileCount: allFiles.length });
 
   const sorted = allFiles
@@ -585,8 +660,11 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
 
   const contentMap = new Map(fileEntries.map(f => [f.path, f.content]));
 
+  const scanIgnoreEntry = fileEntries.find((f) => f.path === '.scanignore');
+  const extraIgnore = scanIgnoreEntry ? parseScanIgnore(scanIgnoreEntry.content) : [];
+
   const allFiles = unfilteredFiles
-    .filter(f => !shouldSkipFile(f.path))
+    .filter(f => !shouldSkipFile(f.path, extraIgnore))
     .map((f) => {
       const content = contentMap.get(f.path);
       return { ...f, size: content ? content.length : 0 };
@@ -753,4 +831,11 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
   };
 }
 
-module.exports = { analyzeRepo, analyzeFromFiles, shouldSkipFile, isArchivedPath };
+module.exports = {
+  analyzeRepo,
+  analyzeFromFiles,
+  shouldSkipFile,
+  isArchivedPath,
+  parseScanIgnore,
+  compileIgnorePattern,
+};

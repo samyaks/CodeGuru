@@ -19,11 +19,15 @@ build plan, architecture, and step-by-step instructions.
 - `packages/sse/` — SSE helper (originally migrated from the legacy code-reviewer prototype). `app/server/lib/sse.js` is a one-line re-export shim.
 
 ## Legacy code
-The original `_archived/{code-reviewer,codebase-analyzer,fastapi-project}` and
-`code-visualizer-mvp/{workspace-app,workspace-prototype,knowledge-graph-extension}`
-directories have been removed from main. They live on the `archive/legacy-snapshot`
-git branch for reference only — do NOT copy code from them or re-introduce them
-into the working tree. The active app lives entirely under `app/` and `packages/`.
+- `_archived/{code-reviewer,codebase-analyzer,fastapi-project}` were removed from
+  `main` and live on the `archive/legacy-snapshot` git branch only.
+- `code-visualizer-mvp/` was moved into `archive/code-visualizer-mvp/` during the
+  v2 migration (Phase 0). It is git-tracked but ignored by the analyzer
+  (`SKIP_DIRS` includes `archive`) and not part of the live app.
+- v2 migration reference materials live under `docs/v2-reference/`. Read
+  `docs/v2-reference/repo-corrections.md` before running any v2-migration phase.
+- Do NOT copy code from any of the above into the active tree.
+- The active app lives entirely under `app/` and `packages/`.
 
 ## When generating code
 - Always check CONTEXT.md for the expected file structure before creating files
@@ -41,7 +45,8 @@ When generating .context.md file content (either in the app or as examples):
 - Decisions should include rationale and who/when
 
 ## Don't
-- Don't restore the `_archived/` or `code-visualizer-mvp/{workspace-app,workspace-prototype,knowledge-graph-extension}` directories — they live on `archive/legacy-snapshot` and are not part of the live app.
+- Don't restore the `_archived/` directories — they live on `archive/legacy-snapshot` and are not part of the live app.
+- Don't move anything out of `archive/` back into the active tree without an explicit ask.
 - Don't build the Chrome extension yet
 - Don't add authentication to the analyze endpoint — it should work without login
 - Don't try to clone repos — use GitHub API to read files

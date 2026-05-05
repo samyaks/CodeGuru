@@ -24,17 +24,17 @@ what the app is, what constraints exist, and what architectural decisions matter
   fetchCommits. Originally migrated from the legacy `code-reviewer` prototype
   and extended. `app/server/services/github.js` is a one-line re-export shim.
 
-### Legacy / archived (NOT in the working tree)
-The following directories were removed from `main` and now live on the
-`archive/legacy-snapshot` git branch:
-- `_archived/code-reviewer/` — original PR/repo-review prototype.
-- `_archived/codebase-analyzer/` — fake-analysis prototype (replaced by `app/server/services/analyzer.js`).
-- `_archived/fastapi-project/` — abandoned Python stub.
-- `code-visualizer-mvp/workspace-app/`, `workspace-prototype/`, `knowledge-graph-extension/` — old collaborative workspace experiments.
+### Legacy / archived (out of scanning scope)
+- `_archived/{code-reviewer,codebase-analyzer,fastapi-project}` were removed from
+  `main` and now live on the `archive/legacy-snapshot` git branch only.
+- `archive/code-visualizer-mvp/` — moved into `archive/` during the v2 migration
+  (Phase 0). Still git-tracked, but the analyzer's `SKIP_DIRS` includes
+  `archive` so it's invisible to module-counting and readiness scoring.
 
-Do NOT reintroduce these into the live tree. The file scanner in
-`app/server/services/analyzer.js` skips any path containing `_archived` or
-`legacy` even if they reappear on disk.
+Do NOT reintroduce any of these into the live tree. The file scanner in
+`app/server/services/analyzer.js` skips paths under `archive/`, paths matching
+`_archived|legacy|deprecated`, and patterns listed in a repo's optional
+`.scanignore` file.
 
 ## What to build — the new unified app
 
