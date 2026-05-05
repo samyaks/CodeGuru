@@ -26,7 +26,9 @@ async function processCommit({ project, commit, branch }) {
     const projectId = project.id;
     if (!commit?.id) return;
 
-    // Avoid double-processing the same commit per project
+    // Fast-path: skip if we've already recorded this commit for this project.
+    // The unique index on (project_id, commit_sha) is the durable guarantee;
+    // this just avoids redundant work + Anthropic calls under repeat deliveries.
     const existing = await shippedItems.findByCommit(projectId, commit.id);
     if (existing) return;
 
@@ -37,29 +39,25 @@ async function processCommit({ project, commit, branch }) {
       files,
     };
 
-    // Look for in-progress + untriaged gaps to match against
+    // Followup #3: only `untriaged` and `in_progress` gaps are candidates.
+    // Including `shipped` would re-match the same gap on every subsequent
+    // push and create duplicate verifier runs.
     const candidateRows = await suggestions.findV2GapsByProjectId(projectId);
     const openGaps = candidateRows
-      .filter((r) => r.v2_status === 'in_progress' || r.v2_status === 'untriaged' || r.v2_status === 'shipped')
+      .filter((r) => r.v2_status === 'in_progress' || r.v2_status === 'untriaged')
       .map(toGap);
 
     const match = matchCommitToGap(enrichedCommit, openGaps);
 
-    // Below threshold → record an item with no gap link, leave verification pending
+    // Followup #1: below threshold → log and bail. Don't pollute the Shipped
+    // tab with rows that have no associated gap; the user can't action them
+    // and they crowd out real work. The webhook_events archive still has the
+    // raw payload if we ever need to debug "why didn't this match".
     if (!match || match.confidence < MIN_CONFIDENCE) {
-      await shippedItems.create({
-        project_id: projectId,
-        gap_id: null,
-        commit_sha: commit.id,
-        commit_message: enrichedCommit.message,
-        branch,
-        files_changed: files,
-        files_changed_count: files.length,
-        verification: 'pending',
-        verification_detail: 'No matching gap with sufficient confidence — leave open for manual review.',
-        match_confidence: match?.confidence ?? null,
-        match_strategy: match?.strategy ?? null,
-      });
+      console.log(
+        `[v2/shipped-runner] no high-confidence gap match for commit ${commit.id} on project ${projectId}` +
+          (match ? ` (best: ${match.strategy} @ ${match.confidence})` : '')
+      );
       return;
     }
 

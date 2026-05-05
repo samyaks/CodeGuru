@@ -62,7 +62,12 @@ async function classifyWithClaude({ gap, commit }) {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('verifier: no JSON in response');
   const parsed = JSON.parse(jsonMatch[0]);
-  const verification = parsed.verification === 'verified' ? 'verified' : 'partial';
+  // Followup #2 / code-review H2: explicit allowlist. Any other value
+  // (including a literal "pending", "unknown", or a malformed shape) maps
+  // to 'pending' — the fail-safe contract documented in the file header
+  // and in services/v2/.context.md.
+  const v = parsed.verification;
+  const verification = v === 'verified' || v === 'partial' ? v : 'pending';
   const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
   const partialItems = Array.isArray(parsed.partialItems)
     ? parsed.partialItems.filter((s) => typeof s === 'string')

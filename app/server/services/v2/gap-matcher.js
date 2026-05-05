@@ -38,12 +38,21 @@ function keywords(text) {
   return tokenize(text).filter((t) => !STOPWORDS.has(t));
 }
 
+// Followup #8 (code-review M4): require at least 7 chars of ref AND exactly
+// one matching candidate. A 3-char fragment like "fix" against 16-char gap
+// ids produces a flood of false-positive starts/ends-with hits.
+const MIN_REF_LENGTH = 7;
 function tryRefMatch(commit, openGaps) {
   const ref = extractGapRef(commit.message);
   if (!ref) return null;
-  const match = openGaps.find((g) => g.id === ref || g.id.endsWith(ref) || g.id.startsWith(ref));
-  if (!match) return null;
-  return { gapId: match.id, confidence: 1.0, strategy: 'commit_ref' };
+  if (ref === '') return null;
+  // Exact-id hit always wins regardless of length.
+  const exact = openGaps.find((g) => g.id === ref);
+  if (exact) return { gapId: exact.id, confidence: 1.0, strategy: 'commit_ref' };
+  if (ref.length < MIN_REF_LENGTH) return null;
+  const partials = openGaps.filter((g) => g.id.endsWith(ref) || g.id.startsWith(ref));
+  if (partials.length !== 1) return null;
+  return { gapId: partials[0].id, confidence: 1.0, strategy: 'commit_ref' };
 }
 
 function tryFileOverlapMatch(commit, openGaps) {

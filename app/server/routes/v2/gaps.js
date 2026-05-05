@@ -9,6 +9,36 @@ const { generateCursorPrompt } = require('../../services/v2/gap-prompt-generator
 
 const router = express.Router({ mergeParams: true });
 
+// Followup #7 (code-review H3): mutating endpoints require an authenticated
+// user even on public projects. GETs stay open via `optionalAuth` at the
+// mount; this guard runs only for writes (`accept`, `reject`, `restore`,
+// `refine`, `mark-committed`).
+function requireUser(req, _res, next) {
+  if (!req.user) return next(AppError.unauthorized('Authentication required'));
+  return next();
+}
+
+// Followup #6: the API stores v2_status in snake_case but the v2 frontend
+// emits kebab-case (`in-progress`). Accept either casing here so the
+// frontend's status filter actually narrows results.
+const ALLOWED_V2_STATUS = new Set([
+  'untriaged',
+  'in_progress',
+  'shipped',
+  'rejected',
+]);
+function normalizeV2Status(raw) {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') return undefined;
+  const normalized = raw.replace(/-/g, '_');
+  if (!ALLOWED_V2_STATUS.has(normalized)) {
+    throw AppError.badRequest(
+      `Unknown ?status= value "${raw}". Allowed: untriaged, in-progress, shipped, rejected.`
+    );
+  }
+  return normalized;
+}
+
 const readLimit = createRateLimit({
   windowMs: 60_000,
   max: 60,
@@ -41,7 +71,7 @@ function pruneInternalFields(gap) {
 
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
-  const v2Status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  const v2Status = normalizeV2Status(req.query.status);
   const rows = await suggestions.findV2GapsByProjectId(req.params.id, { v2Status });
   const mapped = rows.map(toGap);
   const grouped = groupGaps(mapped);
@@ -52,7 +82,7 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   });
 }));
 
-router.post('/:gapId/accept', writeLimit, asyncHandler(async (req, res) => {
+router.post('/:gapId/accept', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
   const row = await suggestions.findV2GapById(req.params.gapId, req.params.id);
   if (!row) throw AppError.notFound('Gap not found');
@@ -75,7 +105,7 @@ router.post('/:gapId/accept', writeLimit, asyncHandler(async (req, res) => {
   res.json({ gap: pruneInternalFields(toGap(updated)) });
 }));
 
-router.post('/:gapId/reject', writeLimit, asyncHandler(async (req, res) => {
+router.post('/:gapId/reject', requireUser, writeLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
   const reason = typeof req.body?.reason === 'string' ? req.body.reason : null;
   const updated = await suggestions.setV2Status(
@@ -85,7 +115,7 @@ router.post('/:gapId/reject', writeLimit, asyncHandler(async (req, res) => {
   res.json({ gap: pruneInternalFields(toGap(updated)) });
 }));
 
-router.post('/:gapId/restore', writeLimit, asyncHandler(async (req, res) => {
+router.post('/:gapId/restore', requireUser, writeLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
   const updated = await suggestions.setV2Status(
     req.params.gapId, req.params.id, 'untriaged', { rejectedReason: null }
@@ -94,7 +124,7 @@ router.post('/:gapId/restore', writeLimit, asyncHandler(async (req, res) => {
   res.json({ gap: pruneInternalFields(toGap(updated)) });
 }));
 
-router.post('/:gapId/refine', REFINE_LIMIT, asyncHandler(async (req, res) => {
+router.post('/:gapId/refine', requireUser, REFINE_LIMIT, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
   const instructions = typeof req.body?.instructions === 'string' ? req.body.instructions.trim() : '';
   if (!instructions) throw AppError.badRequest('Missing refine instructions');
@@ -123,7 +153,7 @@ router.post('/:gapId/refine', REFINE_LIMIT, asyncHandler(async (req, res) => {
   res.json({ gap: pruneInternalFields(toGap(updated)) });
 }));
 
-router.post('/:gapId/mark-committed', writeLimit, asyncHandler(async (req, res) => {
+router.post('/:gapId/mark-committed', requireUser, writeLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
   const updated = await suggestions.setV2Status(
     req.params.gapId, req.params.id, 'shipped',

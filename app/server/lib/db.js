@@ -908,6 +908,51 @@ const suggestions = {
     return rows[0] || null;
   },
 
+  // Insert a single v2 gap (e.g. from the reopen flow) and return the row
+  // as actually stored. Like createBatch this hashes the id with the
+  // project id so callers can't guess sibling ids — but unlike createBatch
+  // it returns the inserted shape so the caller can act on the real id.
+  async createV2Gap(row) {
+    if (!row || !row.project_id || !row.id) {
+      throw new Error('createV2Gap: project_id and id required');
+    }
+    const scopedId = crypto
+      .createHash('sha256')
+      .update(`${row.project_id}:${row.id}`)
+      .digest('hex')
+      .slice(0, 16);
+    const { rows } = await getDb().query(
+      `INSERT INTO suggestions
+        (id, project_id, type, category, priority, title, description,
+         evidence, effort, cursor_prompt, affected_files, source, status,
+         v2_status, v2_category, v2_refined_from_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17)
+        ON CONFLICT (id) DO NOTHING
+        RETURNING *`,
+      [
+        scopedId,
+        row.project_id,
+        row.type,
+        row.category,
+        row.priority,
+        row.title,
+        row.description,
+        toJsonb(row.evidence ?? []),
+        row.effort ?? null,
+        row.cursor_prompt ?? null,
+        toJsonb(row.affected_files ?? []),
+        row.source,
+        row.status || 'open',
+        row.v2_status ?? 'untriaged',
+        row.v2_category ?? null,
+        row.v2_refined_from_id ?? null,
+        row.created_at || new Date().toISOString(),
+      ]
+    );
+    return rows[0] || null;
+  },
+
   async setV2Status(id, projectId, v2Status, extra = {}) {
     const sets = ['v2_status = $1'];
     const params = [v2Status, id, projectId];
@@ -1341,6 +1386,9 @@ const { productMap } = require('./db-map');
 // ── v2: Shipped items ─────────────────────────────────────────────
 
 const shippedItems = {
+  // Uses ON CONFLICT (project_id, commit_sha) to make the insert idempotent
+  // under concurrent webhook deliveries. Migration 012 adds the matching
+  // unique index. Returns null when a row already existed for this commit.
   async create(item) {
     const id = item.id || crypto.randomUUID();
     const { rows } = await getDb().query(
@@ -1349,7 +1397,7 @@ const shippedItems = {
          files_changed, files_changed_count, verification, verification_detail,
          partial_items, match_confidence, match_strategy, deployed_to, deployed_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (project_id, commit_sha) DO NOTHING
         RETURNING *`,
       [
         id,
