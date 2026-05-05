@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, FileText, GitCommit, MessageCircle, Users, Zap,
+  AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Users, Zap,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import { fetchProductMap, type ProductMapData } from '../../services/productMapApi';
@@ -13,8 +13,9 @@ import GapsSection from './GapsSection';
 import ShippedSection from './ShippedSection';
 import MapSection from './MapSection';
 import ContextSection from './ContextSection';
+import SettingsSection from './SettingsSection';
 
-const TABS = ['gaps', 'map', 'context', 'shipped'] as const;
+const TABS = ['gaps', 'map', 'context', 'shipped', 'settings'] as const;
 type TabId = (typeof TABS)[number];
 
 const TAB_DEFS: Array<{ id: TabId; label: string; icon: typeof AlertOctagon }> = [
@@ -22,6 +23,7 @@ const TAB_DEFS: Array<{ id: TabId; label: string; icon: typeof AlertOctagon }> =
   { id: 'map', label: 'Map', icon: Users },
   { id: 'context', label: 'Context', icon: FileText },
   { id: 'shipped', label: 'Shipped', icon: GitCommit },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 const PLACEHOLDERS: Record<TabId, { icon: typeof AlertOctagon; title: string }> = {
@@ -29,6 +31,7 @@ const PLACEHOLDERS: Record<TabId, { icon: typeof AlertOctagon; title: string }> 
   map: { icon: Users, title: 'Personas and jobs will appear here in Phase 5' },
   context: { icon: FileText, title: 'Project context will appear here in Phase 5' },
   shipped: { icon: GitCommit, title: 'Shipped commits will appear here in Phase 4' },
+  settings: { icon: Settings, title: 'Settings will appear here.' },
 };
 
 const DEFAULT_QUICK_PROMPTS = ['priorities', 'how does verification work', 'partial commits', 'reject reasons'];
@@ -161,6 +164,7 @@ export default function ProjectV2() {
   const showRealShipped = activeTab === 'shipped' && !!id;
   const showRealMap = activeTab === 'map' && !!id;
   const showRealContext = activeTab === 'context' && !!id;
+  const showRealSettings = activeTab === 'settings' && !!id;
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
@@ -218,6 +222,8 @@ export default function ProjectV2() {
               <MapSection projectId={id!} />
             ) : showRealContext ? (
               <ContextSection projectId={id!} />
+            ) : showRealSettings ? (
+              <SettingsSection projectId={id!} />
             ) : (
               <EmptyState icon={placeholder.icon} title={placeholder.title} />
             )}
@@ -241,9 +247,26 @@ export default function ProjectV2() {
             </div>
 
             <div className="bg-white border border-stone-200 rounded-lg p-5">
-              <MetadataLabel className="mb-3">Personas</MetadataLabel>
+              <div className="flex items-center justify-between mb-3">
+                <MetadataLabel>Personas</MetadataLabel>
+                {personas.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setTab('map')}
+                    className="text-[11px] text-stone-500 hover:text-stone-900"
+                  >
+                    Edit →
+                  </button>
+                ) : null}
+              </div>
               {personas.length === 0 ? (
-                <p className="text-xs text-stone-500">No personas yet.</p>
+                <button
+                  type="button"
+                  onClick={() => setTab('map')}
+                  className="text-xs text-stone-600 hover:text-stone-900 underline-offset-2 hover:underline"
+                >
+                  No personas yet — set them up →
+                </button>
               ) : (
                 <div className="space-y-2.5">
                   {personas.map((p) => (
