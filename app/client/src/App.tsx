@@ -15,8 +15,6 @@ import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
 import EnvSetup from './pages/EnvSetup';
 import ProjectView from './pages/ProjectView';
-import ProductMap from './pages/ProductMap';
-import ProductMapOnboarding from './pages/ProductMapOnboarding';
 import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
@@ -27,6 +25,12 @@ import ProjectV2 from './pages/v2/Project';
 function NavigateToProject() {
   const { id } = useParams();
   return <Navigate to={`/projects/${id}`} replace />;
+}
+
+// Old v1 ProductMap routes are killed in Phase 5; redirect to the v2 Map tab.
+function NavigateToV2Map() {
+  const { id } = useParams();
+  return <Navigate to={`/v2/projects/${id}#map`} replace />;
 }
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -50,8 +54,9 @@ export default function App() {
 
             {/* Projects — reads are public for user_id:null projects, writes need auth */}
             <Route path="/projects/:id" element={<ProjectView />} />
-            <Route path="/projects/:id/map" element={<ProductMap />} />
-            <Route path="/projects/:id/map/onboard" element={<ProductMapOnboarding />} />
+            {/* Phase 5: v1 ProductMap wizard is replaced by the v2 Map tab. */}
+            <Route path="/projects/:id/map" element={<NavigateToV2Map />} />
+            <Route path="/projects/:id/map/onboard" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
 
             {/* Takeoff flow */}
