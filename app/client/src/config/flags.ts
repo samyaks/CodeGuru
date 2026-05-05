@@ -4,8 +4,9 @@ export interface FeatureFlags {
 }
 
 const DEFAULTS: FeatureFlags = {
-  // Phase 1: v2 lives behind an opt-in. Use `?v2=true` to try it.
-  USE_V2_PROJECT: false,
+  // Phase 6a: v2 is the default. `?v1=true` opts out for the current load
+  // (and clears the localStorage opt-in if it was set).
+  USE_V2_PROJECT: true,
 };
 
 const STORAGE_KEY = 'codeguru.v2';
@@ -41,5 +42,22 @@ export const flags: FeatureFlags = {
 };
 
 export function isV2Enabled(): boolean {
+  return flags.USE_V2_PROJECT;
+}
+
+/**
+ * Per-render flag check that re-reads `?v1=true` / `?v2=true` from the
+ * provided search string. Useful inside React components that should respond
+ * to navigation without a full reload.
+ */
+export function isV2EnabledForLocation(search: string | undefined | null): boolean {
+  if (!search) return flags.USE_V2_PROJECT;
+  try {
+    const params = new URLSearchParams(search);
+    const v1 = params.get('v1');
+    const v2 = params.get('v2');
+    if (v1 === 'true' || v1 === '1') return false;
+    if (v2 === 'true' || v2 === '1') return true;
+  } catch { /* ignore */ }
   return flags.USE_V2_PROJECT;
 }

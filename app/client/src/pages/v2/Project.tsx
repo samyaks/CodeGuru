@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertOctagon, FileText, GitCommit, MessageCircle, Users, Zap,
 } from 'lucide-react';
@@ -48,6 +48,7 @@ function readHashTab(): TabId {
 
 export default function ProjectV2() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [productMap, setProductMap] = useState<ProductMapData | null>(null);
@@ -82,6 +83,12 @@ export default function ProjectV2() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  useEffect(() => {
+    if (!loading && project && (project.status === 'analyzing' || project.status === 'pending')) {
+      navigate(`/takeoff/${id}`, { replace: true });
+    }
+  }, [loading, project, id, navigate]);
 
   const setTab = useCallback((next: string) => {
     if ((TABS as readonly string[]).includes(next)) {

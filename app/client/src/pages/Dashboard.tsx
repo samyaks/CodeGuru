@@ -257,7 +257,7 @@ function ProjectCard({ project }: { project: Project }) {
       </Link>
       <div className="px-5 py-2 border-t border-divider">
         <Link
-          to={`/projects/${project.id}/map`}
+          to={`/projects/${project.id}#map`}
           className="inline-flex items-center gap-1 text-xs font-medium text-rose hover:opacity-80 transition-opacity"
         >
           <Map size={11} />

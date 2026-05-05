@@ -14,7 +14,7 @@ import AnalysisProgress from './pages/AnalysisProgress';
 import ProductionPlan from './pages/ProductionPlan';
 import DeployProgress from './pages/DeployProgress';
 import EnvSetup from './pages/EnvSetup';
-import ProjectView from './pages/ProjectView';
+import ProjectRouter from './pages/ProjectRouter';
 import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
@@ -53,7 +53,7 @@ export default function App() {
             <Route path="/story/:slug" element={<ShareableStory />} />
 
             {/* Projects — reads are public for user_id:null projects, writes need auth */}
-            <Route path="/projects/:id" element={<ProjectView />} />
+            <Route path="/projects/:id" element={<ProjectRouter />} />
             {/* Phase 5: v1 ProductMap wizard is replaced by the v2 Map tab. */}
             <Route path="/projects/:id/map" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/map/onboard" element={<NavigateToV2Map />} />
