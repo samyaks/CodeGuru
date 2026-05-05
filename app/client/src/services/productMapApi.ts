@@ -371,6 +371,89 @@ export async function createProductMap(
 }
 
 /**
+ * Regenerate a project's product map from its features_summary /
+ * description. Used by the v2 Map tab when the project has no map yet
+ * (the v1 onboarding wizard was removed in the migration). The backend
+ * derives the description from the deployment row when not provided.
+ */
+export async function regenerateProductMap(
+  projectId: string,
+  opts: { description?: string } = {},
+): Promise<ProductMapData> {
+  const body: Record<string, unknown> = {};
+  if (opts.description && opts.description.trim()) body.description = opts.description.trim();
+  const res = await authFetch(`${API}/product-map/${projectId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = (await handleApiResponse(res)) as Record<string, unknown>;
+  return normalizeFromMapEnvelope(data) ?? normalizeMapPayload(data);
+}
+
+/**
+ * PATCH /api/product-map/:mapId — apply a single edit action against an
+ * existing map. Mirrors `app/server/services/product-map.js#updateProductMap`.
+ *
+ * Returning the parsed body lets callers refresh the map afterwards
+ * (the PATCH endpoint only returns `{ map, scores }`, not the full graph).
+ */
+export type ProductMapAction =
+  | 'confirmPersona'
+  | 'addPersona'
+  | 'removePersona'
+  | 'confirmJob'
+  | 'addJob'
+  | 'removeJob'
+  | 'setPriority'
+  | 'addEdge'
+  | 'removeEdge'
+  | 'confirmEdge';
+
+export async function patchProductMap(
+  mapId: string,
+  action: ProductMapAction,
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const res = await authFetch(`${API}/product-map/${mapId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload }),
+  });
+  return (await handleApiResponse(res)) as Record<string, unknown>;
+}
+
+export async function addPersona(
+  mapId: string,
+  persona: { name: string; emoji?: string; description?: string },
+): Promise<void> {
+  await patchProductMap(mapId, 'addPersona', persona as Record<string, unknown>);
+}
+
+export async function removePersona(mapId: string, personaId: string): Promise<void> {
+  await patchProductMap(mapId, 'removePersona', { personaId });
+}
+
+export async function addJob(
+  mapId: string,
+  payload: { personaId: string; title: string; priority?: 'high' | 'medium' | 'low' },
+): Promise<void> {
+  await patchProductMap(mapId, 'addJob', payload as Record<string, unknown>);
+}
+
+export async function removeJob(mapId: string, jobId: string): Promise<void> {
+  await patchProductMap(mapId, 'removeJob', { jobId });
+}
+
+export async function setJobPriority(
+  mapId: string,
+  jobId: string,
+  priority: 'high' | 'medium' | 'low',
+): Promise<void> {
+  await patchProductMap(mapId, 'setPriority', { jobId, priority });
+}
+
+/**
  * POST /api/product-map/extract-intent
  * Body: { description, analysisId? } — analysisId is optional; used for LLM usage tracking.
  */
