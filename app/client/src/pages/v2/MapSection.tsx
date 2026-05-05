@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Lightbulb, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  CircleDashed,
+  Lightbulb,
+  Plus,
+  Sparkles,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { EmptyState, ProgressBar } from '../../components/v2';
 import {
   fetchProductMap,
@@ -17,13 +27,33 @@ export interface MapSectionProps {
 }
 
 type Priority = 'high' | 'medium' | 'low';
+type NeedStatus = 'built' | 'partial' | 'missing';
+
+interface JobNeed {
+  id: string;
+  label: string;
+  module: string | null;
+  status: NeedStatus;
+}
+
+interface JobView {
+  id: string;
+  title: string;
+  priority: Priority;
+  /** 0..100 integer (matches `services/job-scorer.js#scoreJob`). */
+  score: number;
+  needs: JobNeed[];
+  builtCount: number;
+  partialCount: number;
+  missingCount: number;
+}
 
 interface PersonaJobs {
   id: string;
   name: string;
   emoji: string;
   description?: string;
-  jobs: { id: string; title: string; priority: Priority }[];
+  jobs: JobView[];
   readiness: number;
 }
 
@@ -39,17 +69,80 @@ function readinessFor(personaId: string, data: ProductMapData): number {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+// Mirrors `services/job-scorer.js#getEntityStatus` so the UI labels for
+// "what's not built yet" stay aligned with how the backend scores a job.
+function classifyEntityStatus(status: string): NeedStatus {
+  if (status === 'detected' || status === 'confirmed' || status === 'full') return 'built';
+  if (status === 'partial' || status === 'stub') return 'partial';
+  return 'missing';
+}
+
+const NEED_STATUS_RANK: Record<NeedStatus, number> = {
+  missing: 0,
+  partial: 1,
+  built: 2,
+};
+
 function shapePersonas(data: ProductMapData): PersonaJobs[] {
-  const jobsByPersona = new Map<string, PersonaJobs['jobs']>();
+  const jobScores = data.scores?.job ?? {};
+
+  // Index entities so we can resolve `needs` edges in O(1).
+  const entityIndex = new Map<string, ProductMapData['entities'][number]>();
+  for (const ent of data.entities ?? []) {
+    if (ent && ent.id) entityIndex.set(ent.id, ent);
+  }
+
+  // Build the per-job list of "needs" (entities the job depends on) with
+  // a normalized built/partial/missing status. Sorting puts unbuilt items
+  // first so the user sees what's still to do.
+  const needsByJob = new Map<string, JobNeed[]>();
+  for (const edge of data.edges ?? []) {
+    if (!edge || edge.type !== 'needs') continue;
+    if (!edge.fromId || !edge.toId) continue;
+    const ent = entityIndex.get(edge.toId);
+    if (!ent) continue;
+    const list = needsByJob.get(edge.fromId) ?? [];
+    list.push({
+      id: ent.id,
+      label: ent.label || ent.key || 'Component',
+      module: ent.module ?? null,
+      status: classifyEntityStatus(ent.status),
+    });
+    needsByJob.set(edge.fromId, list);
+  }
+  for (const list of needsByJob.values()) {
+    list.sort((a, b) => {
+      const r = NEED_STATUS_RANK[a.status] - NEED_STATUS_RANK[b.status];
+      if (r !== 0) return r;
+      return a.label.localeCompare(b.label);
+    });
+  }
+
+  const jobsByPersona = new Map<string, JobView[]>();
   for (const job of data.jobs) {
+    const needs = needsByJob.get(job.id) ?? [];
+    const builtCount = needs.filter((n) => n.status === 'built').length;
+    const partialCount = needs.filter((n) => n.status === 'partial').length;
+    const missingCount = needs.filter((n) => n.status === 'missing').length;
+    const rawScore = jobScores[job.id];
+    const score = typeof rawScore === 'number'
+      ? Math.max(0, Math.min(100, Math.round(rawScore)))
+      : 0;
+
     const list = jobsByPersona.get(job.personaId) ?? [];
     list.push({
       id: job.id,
       title: job.title,
       priority: (job.priority as Priority) ?? 'medium',
+      score,
+      needs,
+      builtCount,
+      partialCount,
+      missingCount,
     });
     jobsByPersona.set(job.personaId, list);
   }
+
   return data.personas.map((p) => ({
     id: p.id,
     name: p.name,
@@ -58,6 +151,13 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
     jobs: jobsByPersona.get(p.id) ?? [],
     readiness: readinessFor(p.id, data),
   }));
+}
+
+function scoreTone(score: number): { text: string; bar: string } {
+  if (score >= 80) return { text: 'text-emerald-700', bar: 'bg-emerald-500' };
+  if (score >= 50) return { text: 'text-amber-700', bar: 'bg-amber-500' };
+  if (score > 0) return { text: 'text-orange-700', bar: 'bg-orange-400' };
+  return { text: 'text-stone-500', bar: 'bg-stone-300' };
 }
 
 export function MapSection({ projectId }: MapSectionProps) {
@@ -412,33 +512,15 @@ function PersonaEditor({
           {persona.jobs.length === 0 ? (
             <p className="text-xs text-stone-400 italic">No jobs yet. Add one below.</p>
           ) : (
-            persona.jobs.map((job) => {
-              const jobIsBusy = busyId === job.id;
-              return (
-                <div key={job.id} className="flex items-center gap-2 text-sm">
-                  <select
-                    value={job.priority}
-                    onChange={(e) => onSetPriority(job.id, e.target.value as Priority)}
-                    disabled={jobIsBusy}
-                    className="text-[11px] uppercase tracking-wide font-medium border border-stone-200 rounded px-1.5 py-0.5 bg-white disabled:opacity-50"
-                  >
-                    <option value="high">High</option>
-                    <option value="medium">Med</option>
-                    <option value="low">Low</option>
-                  </select>
-                  <span className="flex-1 text-stone-700 truncate">{job.title}</span>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveJob(job.id)}
-                    disabled={jobIsBusy}
-                    title="Remove job"
-                    className="text-stone-400 hover:text-red-600 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })
+            persona.jobs.map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                busy={busyId === job.id}
+                onRemove={() => onRemoveJob(job.id)}
+                onSetPriority={(priority) => onSetPriority(job.id, priority)}
+              />
+            ))
           )}
 
           {showAddJob ? (
@@ -462,6 +544,135 @@ function PersonaEditor({
         </div>
       ) : null}
     </div>
+  );
+}
+
+interface JobRowProps {
+  job: JobView;
+  busy: boolean;
+  onRemove: () => void;
+  onSetPriority: (priority: Priority) => void;
+}
+
+function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
+  // Auto-expand jobs with missing pieces so "what's not built yet" is
+  // visible without a click. Built-out jobs collapse by default to keep
+  // the persona card scannable.
+  const [expanded, setExpanded] = useState(job.missingCount > 0 || job.partialCount > 0);
+  const tone = scoreTone(job.score);
+  const totalNeeds = job.needs.length;
+  const hasNeeds = totalNeeds > 0;
+
+  return (
+    <div className="rounded-md border border-stone-100 bg-stone-50/50 hover:border-stone-200 transition-colors">
+      <div className="flex items-center gap-2 p-2 text-sm">
+        <select
+          value={job.priority}
+          onChange={(e) => onSetPriority(e.target.value as Priority)}
+          disabled={busy}
+          className="text-[11px] uppercase tracking-wide font-medium border border-stone-200 rounded px-1.5 py-0.5 bg-white disabled:opacity-50"
+          aria-label="Job priority"
+        >
+          <option value="high">High</option>
+          <option value="medium">Med</option>
+          <option value="low">Low</option>
+        </select>
+
+        <button
+          type="button"
+          onClick={() => hasNeeds && setExpanded((v) => !v)}
+          disabled={!hasNeeds}
+          className="flex-1 min-w-0 flex items-center gap-2 text-left disabled:cursor-default"
+          aria-expanded={hasNeeds ? expanded : undefined}
+        >
+          <span className="flex-1 min-w-0 text-stone-700 truncate">{job.title}</span>
+          <span className={`text-xs font-semibold tabular-nums ${tone.text}`}>{job.score}%</span>
+          {hasNeeds ? (
+            <ChevronDown
+              className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              aria-hidden
+            />
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={busy}
+          title="Remove job"
+          className="text-stone-400 hover:text-red-600 disabled:opacity-50"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className="px-2 pb-2">
+        <div className="h-1 bg-stone-200 rounded-full overflow-hidden">
+          <div
+            className={`h-full ${tone.bar} transition-all`}
+            style={{ width: `${job.score}%` }}
+          />
+        </div>
+
+        {hasNeeds ? (
+          <p className="mt-1.5 text-[11px] text-stone-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>
+              <span className="font-medium text-stone-700">{job.builtCount}</span>
+              <span className="text-stone-400"> / {totalNeeds} built</span>
+            </span>
+            {job.partialCount > 0 ? (
+              <span className="text-amber-700">{job.partialCount} partial</span>
+            ) : null}
+            {job.missingCount > 0 ? (
+              <span className="text-orange-700">{job.missingCount} not built yet</span>
+            ) : null}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[11px] text-stone-400 italic">
+            No components mapped to this job yet — Claude couldn't link it to your codebase.
+          </p>
+        )}
+
+        {hasNeeds && expanded ? (
+          <ul className="mt-2 space-y-1 border-t border-stone-100 pt-2">
+            {job.needs.map((need) => (
+              <NeedRow key={need.id} need={need} />
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function NeedRow({ need }: { need: JobNeed }) {
+  const Icon =
+    need.status === 'built' ? CheckCircle2 : need.status === 'partial' ? CircleDashed : Circle;
+  const tone =
+    need.status === 'built'
+      ? 'text-emerald-600'
+      : need.status === 'partial'
+        ? 'text-amber-600'
+        : 'text-stone-300';
+  const labelTone = need.status === 'missing' ? 'text-stone-500' : 'text-stone-700';
+
+  return (
+    <li className="flex items-center gap-2 text-xs">
+      <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${tone}`} aria-hidden />
+      <span className={`flex-1 min-w-0 truncate ${labelTone}`}>{need.label}</span>
+      {need.module ? (
+        <span className="text-[10px] text-stone-400 truncate max-w-[40%]">· {need.module}</span>
+      ) : null}
+      {need.status === 'missing' ? (
+        <span className="text-[10px] uppercase tracking-wider text-orange-600 font-medium">
+          not built
+        </span>
+      ) : need.status === 'partial' ? (
+        <span className="text-[10px] uppercase tracking-wider text-amber-700 font-medium">
+          partial
+        </span>
+      ) : null}
+    </li>
   );
 }
 
