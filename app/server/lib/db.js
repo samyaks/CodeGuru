@@ -1338,6 +1338,108 @@ const analysisEvents = {
 
 const { productMap } = require('./db-map');
 
+// ── v2: Shipped items ─────────────────────────────────────────────
+
+const shippedItems = {
+  async create(item) {
+    const id = item.id || crypto.randomUUID();
+    const { rows } = await getDb().query(
+      `INSERT INTO shipped_items
+        (id, project_id, gap_id, commit_sha, commit_message, branch,
+         files_changed, files_changed_count, verification, verification_detail,
+         partial_items, match_confidence, match_strategy, deployed_to, deployed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (id) DO NOTHING
+        RETURNING *`,
+      [
+        id,
+        item.project_id,
+        item.gap_id ?? null,
+        item.commit_sha,
+        item.commit_message ?? null,
+        item.branch ?? null,
+        toJsonb(item.files_changed ?? []),
+        item.files_changed_count ?? 0,
+        item.verification ?? 'pending',
+        item.verification_detail ?? null,
+        item.partial_items == null ? null : toJsonb(item.partial_items),
+        item.match_confidence ?? null,
+        item.match_strategy ?? null,
+        item.deployed_to ?? null,
+        item.deployed_at ?? null,
+      ]
+    );
+    return rows[0] || null;
+  },
+
+  async listByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM shipped_items
+        WHERE project_id = $1
+        ORDER BY shipped_at DESC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  async findByCommit(projectId, commitSha) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM shipped_items WHERE project_id = $1 AND commit_sha = $2 LIMIT 1',
+      [projectId, commitSha]
+    );
+    return rows[0] || null;
+  },
+
+  async updateVerification(id, { verification, verificationDetail, partialItems }) {
+    const { rows } = await getDb().query(
+      `UPDATE shipped_items
+         SET verification = COALESCE($1, verification),
+             verification_detail = COALESCE($2, verification_detail),
+             partial_items = COALESCE($3, partial_items)
+        WHERE id = $4
+        RETURNING *`,
+      [
+        verification ?? null,
+        verificationDetail ?? null,
+        partialItems == null ? null : toJsonb(partialItems),
+        id,
+      ]
+    );
+    return rows[0] || null;
+  },
+
+  async countSinceForProject(projectId, sinceIso) {
+    const { rows } = await getDb().query(
+      'SELECT COUNT(*)::int AS n FROM shipped_items WHERE project_id = $1 AND shipped_at >= $2',
+      [projectId, sinceIso]
+    );
+    return rows[0]?.n || 0;
+  },
+};
+
+// ── v2: Webhook events archive ────────────────────────────────────
+
+const webhookEvents = {
+  async create(evt) {
+    const id = evt.id || crypto.randomUUID();
+    await getDb().query(
+      `INSERT INTO webhook_events
+        (id, delivery_id, event_type, source, project_id, payload, signature_ok)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        id,
+        evt.delivery_id ?? null,
+        evt.event_type,
+        evt.source ?? 'github',
+        evt.project_id ?? null,
+        toJsonb(evt.payload ?? {}),
+        evt.signature_ok ?? null,
+      ]
+    );
+    return { id };
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -1345,4 +1447,5 @@ module.exports = {
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
+  shippedItems, webhookEvents,
 };

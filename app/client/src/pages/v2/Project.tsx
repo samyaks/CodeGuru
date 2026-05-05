@@ -10,6 +10,7 @@ import {
 } from '../../components/v2';
 import type { ChatMessage } from '../../components/v2';
 import GapsSection from './GapsSection';
+import ShippedSection from './ShippedSection';
 
 const TABS = ['gaps', 'map', 'context', 'shipped'] as const;
 type TabId = (typeof TABS)[number];
@@ -148,6 +149,7 @@ export default function ProjectV2() {
 
   const placeholder = PLACEHOLDERS[activeTab];
   const showRealGaps = activeTab === 'gaps' && !!id;
+  const showRealShipped = activeTab === 'shipped' && !!id;
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
@@ -199,6 +201,8 @@ export default function ProjectV2() {
           <div className="lg:col-span-3">
             {showRealGaps ? (
               <GapsSection projectId={id!} />
+            ) : showRealShipped ? (
+              <ShippedSection projectId={id!} />
             ) : (
               <EmptyState icon={placeholder.icon} title={placeholder.title} />
             )}

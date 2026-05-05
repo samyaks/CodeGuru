@@ -1,8 +1,9 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, commitReviews } = require('../lib/db');
+const { deployments, commitReviews, webhookEvents } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
+const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 
 const router = express.Router();
 
@@ -155,10 +156,29 @@ router.post('/', async (req, res) => {
     const projects = await deployments.findByGithubRepo(owner, repo);
     if (!projects.length) {
       console.log(JSON.stringify({ event: 'webhook_push_no_project', owner, repo, after, deliveryId }));
+      // Still archive even if no project — useful for debugging missing connections
+      await webhookEvents.create({
+        delivery_id: deliveryId,
+        event_type: event,
+        source: 'github',
+        project_id: null,
+        payload,
+        signature_ok: true,
+      }).catch((err) => console.error('webhook_events archive failed:', err.message));
       return;
     }
     console.log(JSON.stringify({ event: 'webhook_push_received', owner, repo, after, ref, deliveryId, projectCount: projects.length }));
     for (const project of projects) {
+      // Archive the raw payload per project for replay/debugging
+      webhookEvents.create({
+        delivery_id: deliveryId,
+        event_type: event,
+        source: 'github',
+        project_id: project.id,
+        payload,
+        signature_ok: true,
+      }).catch((err) => console.error('webhook_events archive failed:', err.message));
+
       try {
         await enqueueCommitReviewForProject({
           projectId: project.id,
@@ -176,6 +196,13 @@ router.post('/', async (req, res) => {
       } catch (err) {
         console.error(`enqueueCommitReviewForProject ${project.id}:`, err.message);
       }
+
+      // v2: kick off matcher + verifier in the background — never block v1.
+      setImmediate(() => {
+        processPushV2({ project, payload }).catch((err) => {
+          console.error(`[v2/shipped] processPush failed for project ${project.id}:`, err.message);
+        });
+      });
     }
   } catch (err) {
     console.error('github webhook push handling:', err.message);

@@ -71,3 +71,28 @@ export async function refineV2Gap(
   return data.gap;
 }
 
+// ── Shipped ────────────────────────────────────────────────────────
+
+import type { ShippedItemData } from '../components/v2';
+
+export interface V2ShippedResponse {
+  repo: string | null;
+  items: Array<ShippedItemData & {
+    gapId: string | null;
+    matchConfidence: number | null;
+    matchStrategy: string | null;
+  }>;
+}
+
+export async function fetchV2Shipped(projectId: string): Promise<V2ShippedResponse> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/shipped`);
+  return handleApiResponse<V2ShippedResponse>(res);
+}
+
+export async function reopenShipped(projectId: string, itemId: string): Promise<{ newGapId: string }> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/shipped/${itemId}/reopen`, {
+    method: 'POST',
+  });
+  return handleApiResponse<{ newGapId: string }>(res);
+}
+
