@@ -34,6 +34,7 @@ const { createMessageTracked } = require('../../lib/anthropic-tracked');
 const { stripJsonFence } = require('../map-extractor');
 const { suggestions } = require('../../lib/db');
 const { productMap } = require('../../lib/db-map');
+const { CLAUDE_MODEL } = require('../../lib/constants');
 
 const CATEGORY_TO_CAPABILITY = {
   auth: 'cap:auth',
@@ -221,7 +222,10 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
         phase: 'v2.gap.link',
         targetPath: `project-${projectId}`,
         params: {
-          model: process.env.V2_GAP_LINK_MODEL || 'claude-3-5-sonnet-latest',
+          // claude-3-5-sonnet-latest was retired by Anthropic; fall
+          // back to the canonical CLAUDE_MODEL constant the rest of
+          // the app uses. V2_GAP_LINK_MODEL still overrides per-phase.
+          model: process.env.V2_GAP_LINK_MODEL || CLAUDE_MODEL,
           // 25 gaps × up to 3 links ≈ 2.2K tokens of JSON; bump to give
           // a comfortable margin so the response never truncates and
           // dumps the whole batch into the parse-failure / retry path.

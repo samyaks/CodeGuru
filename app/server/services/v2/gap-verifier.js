@@ -5,6 +5,7 @@
 // 'pending' so we never falsely mark a gap as verified.
 
 const { createMessageTracked } = require('../../lib/anthropic-tracked');
+const { CLAUDE_MODEL } = require('../../lib/constants');
 
 const VERIFY_PROMPT = `You are a software-engineering judge. Decide whether a single
 commit fully addresses, partially addresses, or fails to address a known gap.
@@ -46,7 +47,9 @@ async function classifyWithClaude({ gap, commit }) {
     phase: 'v2.gap.verify',
     targetPath: gap.id,
     params: {
-      model: process.env.V2_VERIFIER_MODEL || 'claude-3-5-sonnet-latest',
+      // claude-3-5-sonnet-latest was retired; fall back to the
+      // canonical CLAUDE_MODEL. V2_VERIFIER_MODEL still overrides.
+      model: process.env.V2_VERIFIER_MODEL || CLAUDE_MODEL,
       max_tokens: 600,
       system: VERIFY_PROMPT,
       messages: [{ role: 'user', content: JSON.stringify(userPayload) }],

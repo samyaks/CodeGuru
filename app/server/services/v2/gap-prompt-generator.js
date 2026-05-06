@@ -5,6 +5,7 @@
 // elsewhere. The result is cached on the suggestions row.
 
 const { createMessageTracked } = require('../../lib/anthropic-tracked');
+const { CLAUDE_MODEL } = require('../../lib/constants');
 
 const SYSTEM_PROMPT = `You are an expert software engineer writing Cursor prompts.
 
@@ -63,7 +64,11 @@ async function generateCursorPrompt({ project, gap, refineInstructions }) {
     phase: refineInstructions ? 'v2.gap.refine' : 'v2.gap.prompt',
     targetPath: gap.id,
     params: {
-      model: process.env.V2_CURSOR_PROMPT_MODEL || 'claude-3-5-sonnet-latest',
+      // The literal `claude-3-5-sonnet-latest` alias was retired by
+      // Anthropic, so we fall back to the canonical CLAUDE_MODEL
+      // (currently claude-sonnet-4-20250514) which is shared with the
+      // rest of the app. V2_CURSOR_PROMPT_MODEL still overrides per-phase.
+      model: process.env.V2_CURSOR_PROMPT_MODEL || CLAUDE_MODEL,
       max_tokens: 1500,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],

@@ -176,8 +176,7 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
     try {
       prompt = await generateCursorPrompt({ project, gap: target });
     } catch (err) {
-      console.error(`[v2/gaps] synthetic-prompt generation failed for ${gapId}:`, err.message);
-      throw AppError.internal('Could not generate prompt. Try again in a moment.');
+      throw upstreamPromptError(err, gapId, 'synthetic-prompt');
     }
     return res.json({ prompt });
   }
@@ -195,12 +194,41 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
         await suggestions.setCursorPrompt(gapId, req.params.id, prompt);
       }
     } catch (err) {
-      console.error(`[v2/gaps] prompt generation failed for ${gapId}:`, err.message);
-      throw AppError.internal('Could not generate prompt. Try again in a moment.');
+      throw upstreamPromptError(err, gapId, 'prompt');
     }
   }
   return res.json({ prompt });
 }));
+
+// Translate Anthropic SDK errors into actionable AppErrors. The original
+// implementation collapsed every failure to a generic 500, which made it
+// impossible to tell "model alias retired" (404 from upstream) from
+// "rate limited" (429) from "key invalid" (401) from "Claude is down"
+// (5xx) without ssh'ing into the box. We log the structured upstream
+// payload and pass enough context to the client to act.
+function upstreamPromptError(err, gapId, label) {
+  const upstreamStatus = typeof err?.status === 'number' ? err.status : null;
+  const upstreamMsg = err?.error?.error?.message || err?.message || String(err);
+  console.error(
+    `[v2/gaps] ${label} generation failed for ${gapId} ` +
+    `(upstream status=${upstreamStatus ?? 'n/a'}): ${upstreamMsg}`
+  );
+  if (upstreamStatus === 401 || upstreamStatus === 403) {
+    return AppError.internal('Prompt service is misconfigured. Check the server\'s ANTHROPIC_API_KEY.');
+  }
+  if (upstreamStatus === 404) {
+    return AppError.internal(
+      'Prompt model is no longer available. Update CLAUDE_MODEL or V2_CURSOR_PROMPT_MODEL on the server.'
+    );
+  }
+  if (upstreamStatus === 429) {
+    return AppError.tooManyRequests('Prompt service is rate-limited. Try again in a minute.');
+  }
+  if (upstreamStatus && upstreamStatus >= 500) {
+    return AppError.internal('Prompt service is temporarily unavailable. Try again in a moment.');
+  }
+  return AppError.internal('Could not generate prompt. Try again in a moment.');
+}
 
 router.post('/:gapId/accept', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
