@@ -163,10 +163,19 @@ function attachAffectedJobs(gaps, productMap) {
  * the `suggestions` table and they don't have a cached `cursor_prompt`
  * (the UI fetches one on demand via `/gaps/:id/prompt`).
  *
- * Dedupe rule: if any existing AI gap already links to the
- * (jobId, entityId) pair, skip the synthetic gap. The AI gap is more
- * specific (it has affected_files, evidence, severity) so we'd rather
- * surface that one.
+ * Dedupe rule (revised after code-review H3):
+ *   - Heuristic links carry the entity they were derived from
+ *     (`link.entityId`). For those, we suppress only the matching
+ *     `(jobId, entityId)` synthetic gap so an AI gap covering
+ *     `cap:auth` for "Sign up" doesn't also suppress the synthetic
+ *     "Build Login form for Sign up".
+ *   - Claude links don't tell us which entity they had in mind, so
+ *     we still fall back to a `(jobId, *)` wildcard for those —
+ *     accepting some over-suppression as the price of not
+ *     double-surfacing the same job under two gap sources.
+ *   - File overlap (gap.affectedFiles ∩ entity.filePath) gives us
+ *     entity-specific coverage even without a heuristic link record,
+ *     so we add those too.
  */
 function synthesizeMapGaps(productMap, existingGaps) {
   if (!productMap || !Array.isArray(productMap.jobs) || !Array.isArray(productMap.entities) || !Array.isArray(productMap.edges)) {
@@ -176,26 +185,34 @@ function synthesizeMapGaps(productMap, existingGaps) {
   const personasById = new Map(productMap.personas.map((p) => [p.id, p]));
   const entitiesById = new Map(productMap.entities.map((e) => [e.id, e]));
 
-  // (jobId, entityId) pairs already covered by an AI gap — we can match
-  // on either the persisted job link or on overlap with `affectedFiles`.
+  // file path → entityId index (single pass over entities). Was a
+  // nested loop inside the existingGaps walk before; that was O(gaps ×
+  // files × entities) and got noisy on large projects (review M8).
+  const pathToEntityId = new Map();
+  for (const e of productMap.entities) {
+    const path = e.filePath || e.file_path;
+    if (path) pathToEntityId.set(path, e.id);
+  }
+
+  // Build the suppression set. See dedupe rule in the docblock.
   const covered = new Set();
   for (const g of existingGaps) {
     const links = Array.isArray(g.jobLinks) ? g.jobLinks : [];
     const files = Array.isArray(g.affectedFiles) ? g.affectedFiles : [];
-    const fileEntities = new Set();
+
+    const fileEntityIds = [];
     for (const f of files) {
-      for (const e of productMap.entities) {
-        const path = e.filePath || e.file_path;
-        if (path && path === f) fileEntities.add(e.id);
-      }
+      const eid = pathToEntityId.get(f);
+      if (eid) fileEntityIds.push(eid);
     }
+
     for (const link of links) {
-      // Without an entity hint, conservatively cover (job, *) so we don't
-      // double-surface the same job under both an AI gap and a
-      // map gap. Synthetic gaps complement AI gaps; they're not a
-      // superset.
-      covered.add(`${link.jobId}::*`);
-      for (const eid of fileEntities) {
+      if (link.entityId) {
+        covered.add(`${link.jobId}::${link.entityId}`);
+      } else {
+        covered.add(`${link.jobId}::*`);
+      }
+      for (const eid of fileEntityIds) {
         covered.add(`${link.jobId}::${eid}`);
       }
     }
@@ -204,9 +221,14 @@ function synthesizeMapGaps(productMap, existingGaps) {
   const synthetic = [];
   for (const edge of productMap.edges) {
     if (edge.type !== 'needs') continue;
-    const job = jobsById.get(edge.fromId);
+    // Raw db rows use snake_case; `graphFromDbRow` returns camelCase.
+    // Both shapes show up here depending on caller — accept either.
+    const fromId = edge.fromId || edge.from_id;
+    const toId = edge.toId || edge.to_id;
+    if (!fromId || !toId) continue;
+    const job = jobsById.get(fromId);
     if (!job) continue;
-    const entity = entitiesById.get(edge.toId);
+    const entity = entitiesById.get(toId);
     if (!entity) continue;
     const status = String(entity.status || '').toLowerCase();
     const isBlocking = status === 'partial' || status === 'stub' || status === 'missing'
@@ -252,6 +274,7 @@ function synthesizeMapGaps(productMap, existingGaps) {
         confidence: 1,
         reason: `Job "${job.title}" has a needs edge to ${entityLabel}`,
         method: 'synthetic',
+        entityId: entity.id,
       }],
       affectedJobs: [{
         jobId: job.id,

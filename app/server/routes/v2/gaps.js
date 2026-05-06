@@ -78,6 +78,11 @@ function pruneInternalFields(gap) {
     type: _t,
     affectedFiles: _af,
     jobLinks: _jl,
+    // Synthetic-gap routing hints — kept on the in-memory shape so the
+    // POST /gaps/:id/prompt route can re-resolve the entity/job, but
+    // they're internal: don't leak to clients (review H5).
+    mapEntityId: _me,
+    mapJobId: _mj,
     ...publicFields
   } = gap;
   return publicFields;
@@ -130,9 +135,12 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   const grouped = groupGaps([...enriched, ...synthetic]);
 
   // 5. Surface persona list for the frontend filter chips. Only personas
-  //    that have at least one job are useful to filter by.
+  //    that have at least one job are useful to filter by. The optional
+  //    chaining on `map?.jobs` is essential — without it this throws
+  //    when a project has no map at all (review C2).
+  const mapJobsForFilter = map?.jobs || [];
   const personasInPlay = (map?.personas || [])
-    .filter((p) => (map.jobs || []).some((j) => (j.persona_id || j.personaId) === p.id))
+    .filter((p) => mapJobsForFilter.some((j) => (j.persona_id || j.personaId) === p.id))
     .map((p) => ({ id: p.id, name: p.name, emoji: p.emoji || '👤' }));
 
   res.json({

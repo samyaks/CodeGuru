@@ -20,11 +20,15 @@
 //      run, with per-batch chunking for large projects).
 //   3. Persist results to `suggestions.v2_job_links` (migration 013).
 //
-// Idempotency:
+// Idempotency + retry:
 //   `findUnlinkedV2GapsByProjectId` filters to rows where
 //   `v2_job_links IS NULL`. Re-running is safe — already-linked rows are
-//   left alone unless the caller passes `force: true`. To re-link after
-//   the product map changes, call with `{ force: true, reset: true }`.
+//   left alone unless the caller passes `force: true`.
+//
+//   When the Claude batch fails for a particular row we leave that
+//   row's `v2_job_links` as NULL (rather than writing `[]`) so the next
+//   linker pass picks it up and retries. A row only flips from NULL to
+//   `[]` when we've actually attempted linking and found nothing.
 
 const { createMessageTracked } = require('../../lib/anthropic-tracked');
 const { stripJsonFence } = require('../map-extractor');
@@ -58,16 +62,37 @@ function entityFilePath(entity) {
   return entity?.filePath || entity?.file_path || null;
 }
 
+// Raw rows from `db-map.getMapByProject` use snake_case (`from_id`,
+// `to_id`) because they're untransformed Postgres rows.
+// `services/product-map.js#graphFromDbRow` returns camelCase. Both
+// shapes are valid in the wild — every consumer of edges should use
+// these helpers so we don't silently drop matches when called against
+// raw rows. (The first reviewer pass missed this; see code-review C1.)
+function edgeFromId(edge) {
+  return edge?.fromId || edge?.from_id || null;
+}
+
+function edgeToId(edge) {
+  return edge?.toId || edge?.to_id || null;
+}
+
 /**
  * Heuristic: link a single gap to jobs by matching the gap's category and
  * affected_files against the product-map graph. Returns up to
  * `MAX_LINKS_PER_GAP` links sorted by confidence desc.
+ *
+ * Each link records the `entityId` it was derived from when known. The
+ * synthesizer dedupes on `(jobId, entityId)` so an AI gap covering
+ * `cap:auth` for "Sign up" doesn't suppress the synthetic
+ * "Build Login form for Sign up" — which would happen with a coarser
+ * `(jobId, *)` rule. Claude-only links can't supply `entityId` so they
+ * still take the wildcard path; that's the documented tradeoff.
  */
 function heuristicLink(suggestionRow, jobs, entities, edges) {
   const cat = String(suggestionRow.category || '').toLowerCase();
   const seen = new Map(); // jobId → JobLink
 
-  function addLink(jobId, personaId, confidence, reason) {
+  function addLink(jobId, personaId, confidence, reason, entityId) {
     if (!jobId) return;
     const existing = seen.get(jobId);
     if (existing && existing.confidence >= confidence) return;
@@ -77,6 +102,7 @@ function heuristicLink(suggestionRow, jobs, entities, edges) {
       confidence,
       reason: String(reason).slice(0, 200),
       method: 'heuristic',
+      entityId: entityId || null,
     });
   }
 
@@ -87,14 +113,16 @@ function heuristicLink(suggestionRow, jobs, entities, edges) {
     if (cap) {
       const capLabel = cap.label || cap.key || capId;
       for (const edge of edges) {
-        if (edge.type !== 'needs' || edge.toId !== capId) continue;
-        const job = jobs.find((j) => j.id === edge.fromId);
+        if (edge.type !== 'needs' || edgeToId(edge) !== capId) continue;
+        const fromId = edgeFromId(edge);
+        const job = jobs.find((j) => j.id === fromId);
         if (!job) continue;
         addLink(
           job.id,
           getPersonaId(job),
           HEURISTIC_CAPABILITY_CONFIDENCE,
           `"${suggestionRow.title}" affects ${capLabel}, which "${job.title}" needs`,
+          capId,
         );
       }
     }
@@ -115,14 +143,16 @@ function heuristicLink(suggestionRow, jobs, entities, edges) {
       if (!ent) continue;
       const entLabel = ent.label || ent.key || ent.id;
       for (const edge of edges) {
-        if (edge.type !== 'needs' || edge.toId !== ent.id) continue;
-        const job = jobs.find((j) => j.id === edge.fromId);
+        if (edge.type !== 'needs' || edgeToId(edge) !== ent.id) continue;
+        const fromId = edgeFromId(edge);
+        const job = jobs.find((j) => j.id === fromId);
         if (!job) continue;
         addLink(
           job.id,
           getPersonaId(job),
           HEURISTIC_FILE_CONFIDENCE,
           `Touches ${file}, used by ${entLabel} which "${job.title}" needs`,
+          ent.id,
         );
       }
     }
@@ -159,8 +189,17 @@ Respond with JSON only, no prose, no markdown fences:
   ]
 }`;
 
+/**
+ * Returns `{ links, attemptedGapIds }`.
+ *
+ * `attemptedGapIds` only contains the ids of gaps whose batch
+ * completed (Claude returned + we parsed JSON successfully). Gaps in
+ * a failed batch are *not* attempted, so the caller should leave
+ * their `v2_job_links` as NULL — that lets the next linker pass retry.
+ */
 async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
   const result = new Map(); // gapId → JobLink[]
+  const attemptedGapIds = new Set();
 
   const jobList = jobs.map((j) => {
     const persona = personasById.get(getPersonaId(j));
@@ -183,7 +222,10 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
         targetPath: `project-${projectId}`,
         params: {
           model: process.env.V2_GAP_LINK_MODEL || 'claude-3-5-sonnet-latest',
-          max_tokens: 2000,
+          // 25 gaps × up to 3 links ≈ 2.2K tokens of JSON; bump to give
+          // a comfortable margin so the response never truncates and
+          // dumps the whole batch into the parse-failure / retry path.
+          max_tokens: 3000,
           system: CLAUDE_SYSTEM,
           messages: [{
             role: 'user',
@@ -211,6 +253,9 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
 
     if (!parsed || !Array.isArray(parsed.links)) continue;
 
+    // Batch completed and parsed — every gap in this batch was attempted.
+    for (const g of batch) attemptedGapIds.add(g.id);
+
     const validGapIds = new Set(batch.map((g) => g.id));
     const jobIndex = new Map(jobs.map((j) => [j.id, j]));
 
@@ -229,6 +274,10 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
         confidence: Math.min(1, Math.max(0, conf)),
         reason: String(link.reason || '').slice(0, 200),
         method: 'claude',
+        // Claude doesn't tell us which entity it had in mind, so the
+        // synthesizer falls back to a (jobId, *) wildcard for these
+        // links. See `gap-mapper.js#synthesizeMapGaps`.
+        entityId: null,
       });
       result.set(link.gapId, list);
     }
@@ -239,7 +288,7 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
     result.set(gapId, list.slice(0, MAX_LINKS_PER_GAP));
   }
 
-  return result;
+  return { links: result, attemptedGapIds };
 }
 
 /**
@@ -278,11 +327,19 @@ async function linkGapsToJobs(projectId, opts = {}) {
 
   const personasById = new Map(personas.map((p) => [p.id, p]));
   const linkedById = new Map();
+  // Tracks rows we'll write to. Heuristic always writes (it's
+  // deterministic — empty heuristic + skipped Claude == "no link
+  // attempted yet", leave NULL). Claude writes only batches that
+  // completed without error.
+  const persistableIds = new Set();
 
-  // Heuristic pass — fast, no API calls.
+  // Heuristic pass — fast, no API calls. Always counts as "attempted".
   for (const row of candidates) {
     const links = heuristicLink(row, jobs, entities, edges);
-    if (links.length > 0) linkedById.set(row.id, links);
+    if (links.length > 0) {
+      linkedById.set(row.id, links);
+      persistableIds.add(row.id);
+    }
   }
 
   // Claude pass for the rest.
@@ -292,20 +349,34 @@ async function linkGapsToJobs(projectId, opts = {}) {
     if (remaining.length > 0) {
       claudeUsed = true;
       try {
-        const claudeLinks = await claudeLinkBatch(remaining, jobs, personasById, projectId);
+        const { links: claudeLinks, attemptedGapIds } = await claudeLinkBatch(
+          remaining, jobs, personasById, projectId
+        );
         for (const [gapId, links] of claudeLinks.entries()) {
           linkedById.set(gapId, links);
         }
+        // A gap is "attempted by Claude" only if its batch parsed
+        // cleanly. Failed batches stay out of `attemptedGapIds`, so
+        // the persist loop below leaves their v2_job_links NULL and
+        // the next linker pass retries them.
+        for (const id of attemptedGapIds) persistableIds.add(id);
       } catch (err) {
         console.warn(`[gap-job-linker] Claude pass failed for ${projectId}:`, err.message);
       }
     }
   }
 
-  // Persist — empty array means "we tried, no jobs apply" (still better
-  // than `null` because we won't retry on every page load).
+  // Persist. `[]` means "tried, no jobs apply" — better than `null` for
+  // those rows because we don't want to retry indefinitely. Rows not in
+  // `persistableIds` (e.g. Claude failed for them) keep `null` so the
+  // next call retries.
   let linked = 0;
+  let skippedForRetry = 0;
   for (const row of candidates) {
+    if (!persistableIds.has(row.id)) {
+      skippedForRetry += 1;
+      continue;
+    }
     const list = linkedById.get(row.id) || [];
     try {
       await suggestions.setV2JobLinks(row.id, projectId, list);
@@ -319,6 +390,7 @@ async function linkGapsToJobs(projectId, opts = {}) {
     ok: true,
     total: candidates.length,
     linked,
+    skippedForRetry,
     claudeUsed,
   };
 }
