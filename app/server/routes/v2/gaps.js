@@ -4,8 +4,15 @@ const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
-const { toGap, groupGaps } = require('../../services/v2/gap-mapper');
+const {
+  toGap,
+  groupGaps,
+  attachAffectedJobs,
+  synthesizeMapGaps,
+} = require('../../services/v2/gap-mapper');
 const { generateCursorPrompt } = require('../../services/v2/gap-prompt-generator');
+const { productMap: productMapDb } = require('../../lib/db-map');
+const { linkGapsToJobs } = require('../../services/v2/gap-job-linker');
 
 const router = express.Router({ mergeParams: true });
 
@@ -65,21 +72,126 @@ async function loadProjectAndAuthorize(req) {
 }
 
 function pruneInternalFields(gap) {
-  const { rawCategory: _r, priority: _p, type: _t, affectedFiles: _af, ...publicFields } = gap;
+  const {
+    rawCategory: _r,
+    priority: _p,
+    type: _t,
+    affectedFiles: _af,
+    jobLinks: _jl,
+    ...publicFields
+  } = gap;
   return publicFields;
 }
 
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
   const v2Status = normalizeV2Status(req.query.status);
-  const rows = await suggestions.findV2GapsByProjectId(req.params.id, { v2Status });
+  const projectId = req.params.id;
+
+  // 1. Load the persisted AI/static gaps + the project's product map in
+  //    parallel. We need the map for both display enrichment
+  //    (`affectedJobs`) and for synthesizing map-derived gaps for any
+  //    missing/partial entity not already covered by an AI gap.
+  const [rows, map] = await Promise.all([
+    suggestions.findV2GapsByProjectId(projectId, { v2Status }),
+    productMapDb.getMapByProject(projectId).catch((err) => {
+      console.warn(`[v2/gaps] product-map load failed for ${projectId}:`, err.message);
+      return null;
+    }),
+  ]);
+
   const mapped = rows.map(toGap);
-  const grouped = groupGaps(mapped);
+
+  // 2. If any gap is still un-linked AND we have a map, fire-and-forget
+  //    a background linker pass. The current response goes out without
+  //    `affectedJobs` for those rows; the next reload will see them
+  //    populated. This is the lazy backstop for projects analyzed
+  //    before migration 013 / the linker hooks landed in the pipeline.
+  const hasUnlinked = mapped.some((g) => g.jobLinks === null);
+  if (hasUnlinked && map && Array.isArray(map.jobs) && map.jobs.length > 0) {
+    setImmediate(() => {
+      linkGapsToJobs(projectId).catch((err) => {
+        console.warn(`[v2/gaps] background linker for ${projectId} failed:`, err.message);
+      });
+    });
+  }
+
+  // 3. Decorate AI gaps with display-ready persona/job info.
+  const enriched = attachAffectedJobs(mapped, map);
+
+  // 4. Synthesize map-derived "Build [Entity] for [Job]" gaps for any
+  //    needs-edge whose target entity isn't built yet. Skipped (no-op)
+  //    when ?status= filter excludes 'untriaged' since synthetic gaps
+  //    only exist as untriaged.
+  const synthetic = (v2Status && v2Status !== 'untriaged')
+    ? []
+    : synthesizeMapGaps(map, enriched);
+
+  const grouped = groupGaps([...enriched, ...synthetic]);
+
+  // 5. Surface persona list for the frontend filter chips. Only personas
+  //    that have at least one job are useful to filter by.
+  const personasInPlay = (map?.personas || [])
+    .filter((p) => (map.jobs || []).some((j) => (j.persona_id || j.personaId) === p.id))
+    .map((p) => ({ id: p.id, name: p.name, emoji: p.emoji || '👤' }));
+
   res.json({
     broken: grouped.broken.map(pruneInternalFields),
     missing: grouped.missing.map(pruneInternalFields),
     infra: grouped.infra.map(pruneInternalFields),
+    personas: personasInPlay,
   });
+}));
+
+// Lazy Cursor-prompt generator. AI gaps cache `cursor_prompt` on their
+// suggestions row; this endpoint regenerates if that's missing. For
+// synthetic map-derived gaps (id starts with `map-`), nothing is cached,
+// so we always generate. The frontend calls this only when the user
+// clicks "Get Cursor prompt" on a synthetic gap card.
+router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, res) => {
+  const project = await loadProjectAndAuthorize(req);
+  const gapId = req.params.gapId;
+
+  // Synthetic map-derived gap path. The id is unstable (encodes
+  // entityId + jobId) so we look up the entity/job from the live map
+  // each time rather than persisting.
+  if (gapId.startsWith('map-')) {
+    const map = await productMapDb.getMapByProject(req.params.id);
+    if (!map || !Array.isArray(map.entities) || !Array.isArray(map.jobs)) {
+      throw AppError.notFound('Map not available for this project');
+    }
+    const synthetic = synthesizeMapGaps(map, []);
+    const target = synthetic.find((g) => g.id === gapId);
+    if (!target) throw AppError.notFound('Synthetic gap no longer applies (entity may have been built)');
+
+    let prompt = null;
+    try {
+      prompt = await generateCursorPrompt({ project, gap: target });
+    } catch (err) {
+      console.error(`[v2/gaps] synthetic-prompt generation failed for ${gapId}:`, err.message);
+      throw AppError.internal('Could not generate prompt. Try again in a moment.');
+    }
+    return res.json({ prompt });
+  }
+
+  // AI gap path — regenerate and cache.
+  const row = await suggestions.findV2GapById(gapId, req.params.id);
+  if (!row) throw AppError.notFound('Gap not found');
+
+  let prompt = row.cursor_prompt || null;
+  if (!prompt) {
+    try {
+      const gapShape = toGap(row);
+      prompt = await generateCursorPrompt({ project, gap: gapShape });
+      if (prompt) {
+        await suggestions.setCursorPrompt(gapId, req.params.id, prompt);
+      }
+    } catch (err) {
+      console.error(`[v2/gaps] prompt generation failed for ${gapId}:`, err.message);
+      throw AppError.internal('Could not generate prompt. Try again in a moment.');
+    }
+  }
+  return res.json({ prompt });
 }));
 
 router.post('/:gapId/accept', requireUser, writeLimit, asyncHandler(async (req, res) => {

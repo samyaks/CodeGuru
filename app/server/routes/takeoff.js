@@ -14,6 +14,7 @@ const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = requir
 const { runAISuggestions } = require('../services/suggestion-ai');
 const { connectWebhook } = require('../services/github-webhook-manager');
 const productMapSvc = require('../services/product-map');
+const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -446,6 +447,21 @@ async function runPipeline(id, codebaseModel, userId, label) {
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
   }
+
+  // Stage 5: link suggestions to product-map jobs (non-blocking, async).
+  // The product map is built in a parallel `setImmediate` so it may not
+  // exist yet when we kick this off. The linker logs a `no-map` reason
+  // and bails in that case; `autoCreateProductMap` schedules a second
+  // pass once the map lands so unlinked rows still get picked up.
+  setImmediate(() => {
+    linkGapsToJobs(id).then((summary) => {
+      if (summary.linked > 0 || summary.total > 0) {
+        console.log(`[takeoff] gap-job linker for ${id}: ${JSON.stringify(summary)}`);
+      }
+    }).catch((err) => {
+      console.error(`[takeoff] gap-job linker for ${id} failed (non-fatal):`, err.message);
+    });
+  });
 }
 
 // Build a product-map (personas + jobs + entity graph) for a freshly-analyzed
@@ -477,6 +493,19 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
   console.log(`[takeoff] auto-creating product-map for ${projectId} (description ${description.length} chars)`);
   const result = await productMapSvc.createProductMap(projectId, null, description);
   console.log(`[takeoff] auto product-map created for ${projectId}: ${result.personas.length} personas, ${result.jobs.length} jobs`);
+
+  // Map just landed — link any suggestions that the Stage-5 pass skipped
+  // because the map didn't exist yet. Idempotent: rows already linked are
+  // left alone (only `v2_job_links IS NULL` rows are touched).
+  setImmediate(() => {
+    linkGapsToJobs(projectId).then((summary) => {
+      if (summary.linked > 0) {
+        console.log(`[takeoff] gap-job linker (post-map) for ${projectId}: ${JSON.stringify(summary)}`);
+      }
+    }).catch((err) => {
+      console.error(`[takeoff] gap-job linker (post-map) for ${projectId} failed (non-fatal):`, err.message);
+    });
+  });
 }
 
 router.get('/:id', asyncHandler(async (req, res) => {

@@ -991,6 +991,30 @@ const suggestions = {
     return rows[0] || null;
   },
 
+  // gap-job linking (migration 013). v2_job_links is JSONB. `null` means
+  // "not yet linked" (linker will pick it up). `[]` means "linked, no
+  // jobs apply" — final until the next regenerate.
+  async findUnlinkedV2GapsByProjectId(projectId, { limit = 100 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions
+        WHERE project_id = $1 AND v2_job_links IS NULL
+        ORDER BY created_at ASC
+        LIMIT $2`,
+      [projectId, limit]
+    );
+    return rows;
+  },
+
+  async setV2JobLinks(id, projectId, jobLinks) {
+    const { rows } = await getDb().query(
+      `UPDATE suggestions SET v2_job_links = $1::jsonb
+        WHERE id = $2 AND project_id = $3
+        RETURNING *`,
+      [toJsonb(jobLinks ?? []), id, projectId]
+    );
+    return rows[0] || null;
+  },
+
   async refineV2Gap(id, projectId, { title, description, cursorPrompt, refinedFromId }) {
     const sets = [];
     const params = [];
