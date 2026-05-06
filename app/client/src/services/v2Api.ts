@@ -7,23 +7,70 @@ function authFetch(url: string, opts: RequestInit = {}) {
   return fetch(url, { ...opts, credentials: 'include' });
 }
 
+/** A persona/job pair a gap blocks, attached server-side from the
+ *  product map + persisted `v2_job_links` (or computed for synthetic
+ *  map-derived gaps). May be `null` for the persona fields when the
+ *  gap is linked to a job whose persona has been deleted since. */
+export interface AffectedJob {
+  jobId: string;
+  jobTitle: string;
+  personaId: string | null;
+  personaName: string | null;
+  personaEmoji: string | null;
+  confidence: number | null;
+  /** 'heuristic' | 'claude' | 'synthetic'. */
+  method: string | null;
+  reason: string | null;
+}
+
 export interface V2Gap extends GapData {
   status: GapStatus;
   verification: Verification | null;
   rejectedReason: string | null;
   committedAt: string | null;
+  /** Always present in v2 responses. Empty array means "we tried, no
+   *  jobs apply". The frontend treats `[]` and `undefined` differently:
+   *  empty hides the badge row; undefined would mean "still being
+   *  linked" (we don't currently emit that, but reserve the option). */
+  affectedJobs?: AffectedJob[];
+  /** 'ai' for persisted suggestions (the default), 'map' for gaps
+   *  synthesized at request time from the product map's missing
+   *  entities. `map` gaps don't have a cached prompt. */
+  source?: 'ai' | 'map';
+}
+
+export interface GapsPersona {
+  id: string;
+  name: string;
+  emoji: string;
 }
 
 export interface V2GapsResponse {
   broken: V2Gap[];
   missing: V2Gap[];
   infra: V2Gap[];
+  /** Personas that have at least one job in the product map — used to
+   *  populate the GapsSection persona filter chips. Empty array when
+   *  the project has no map yet. */
+  personas?: GapsPersona[];
 }
 
 export async function fetchV2Gaps(projectId: string, status?: string): Promise<V2GapsResponse> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : '';
   const res = await authFetch(`${API_BASE}/projects/${projectId}/gaps${qs}`);
   return handleApiResponse<V2GapsResponse>(res);
+}
+
+/** Fetch (or generate) the Cursor prompt for a gap. AI gaps have a
+ *  cached prompt; synthetic map-derived gaps generate on demand. The UI
+ *  calls this only when the user clicks "Get prompt" on a synthetic
+ *  gap card so we don't burn Claude tokens for prompts no one reads. */
+export async function fetchGapPrompt(projectId: string, gapId: string): Promise<string> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/gaps/${gapId}/prompt`, {
+    method: 'POST',
+  });
+  const data = await handleApiResponse<{ prompt: string | null }>(res);
+  return data.prompt ?? '';
 }
 
 async function postGapAction(

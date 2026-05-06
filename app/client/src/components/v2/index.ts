@@ -20,7 +20,7 @@ export { PersonaCard } from './PersonaCard';
 export type { PersonaCardProps, PersonaCardData } from './PersonaCard';
 
 export { GapCard } from './GapCard';
-export type { GapCardProps, GapData, GapCategory, GapStatus } from './GapCard';
+export type { GapCardProps, GapData, GapCategory, GapStatus, GapAffectedJob } from './GapCard';
 
 export { ShippedItem } from './ShippedItem';
 export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedItem';

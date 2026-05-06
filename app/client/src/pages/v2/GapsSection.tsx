@@ -4,7 +4,8 @@ import { GapCard, EmptyState } from '../../components/v2';
 import type { GapStatus } from '../../components/v2';
 import {
   fetchV2Gaps, acceptV2Gap, rejectV2Gap, restoreV2Gap,
-  markGapCommitted, refineV2Gap, type V2Gap,
+  markGapCommitted, refineV2Gap, fetchGapPrompt,
+  type V2Gap, type GapsPersona,
 } from '../../services/v2Api';
 
 type Filter = 'untriaged' | 'all' | 'rejected';
@@ -17,11 +18,16 @@ export interface GapsSectionProps {
 
 export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
   const [groups, setGroups] = useState<{ broken: V2Gap[]; missing: V2Gap[]; infra: V2Gap[] }>({ broken: [], missing: [], infra: [] });
+  const [personas, setPersonas] = useState<GapsPersona[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('untriaged');
+  // `null` means "all personas". An id narrows to gaps whose
+  // affectedJobs include that persona.
+  const [personaFilter, setPersonaFilter] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -29,7 +35,8 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     setError(null);
     try {
       const data = await fetchV2Gaps(projectId);
-      setGroups(data);
+      setGroups({ broken: data.broken, missing: data.missing, infra: data.infra });
+      setPersonas(data.personas ?? []);
     } catch (err) {
       setError((err as Error).message ?? 'Failed to load gaps');
     } finally {
@@ -44,11 +51,22 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     [groups],
   );
 
+  // Status filter narrows by lifecycle (untriaged/in-progress vs rejected
+  // vs everything); persona filter narrows by which job is affected. The
+  // two compose so a user can see "what's still TODO for Tom".
   const visible = useMemo(() => {
-    if (filter === 'rejected') return allGaps.filter((g) => g.status === 'rejected');
-    if (filter === 'all') return allGaps;
-    return allGaps.filter((g) => g.status === 'untriaged' || g.status === 'in-progress');
-  }, [allGaps, filter]);
+    let v = allGaps;
+    if (filter === 'rejected') {
+      v = v.filter((g) => g.status === 'rejected');
+    } else if (filter === 'untriaged') {
+      v = v.filter((g) => g.status === 'untriaged' || g.status === 'in-progress');
+    }
+    if (personaFilter) {
+      v = v.filter((g) => Array.isArray(g.affectedJobs)
+        && g.affectedJobs.some((j) => j.personaId === personaFilter));
+    }
+    return v;
+  }, [allGaps, filter, personaFilter]);
 
   const counts = useMemo(() => {
     const inProgress = allGaps.filter((g) => g.status === 'in-progress').length;
@@ -144,6 +162,27 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     }
   }, [allGaps]);
 
+  // Lazy prompt fetch for synthetic map-derived gaps. We only call
+  // Claude when the user clicks "Get Cursor prompt" so projects with
+  // dozens of synthetic gaps don't burn tokens for prompts no one reads.
+  // The fetched prompt lives on the in-memory gap; it's regenerated on
+  // every reload (synthetic gaps don't persist in the DB).
+  const onGetPrompt = useCallback(async (id: string) => {
+    setPromptLoadingId(id);
+    try {
+      const prompt = await fetchGapPrompt(projectId, id);
+      if (!prompt) {
+        setToast('No prompt was generated. Try again in a moment.');
+        return;
+      }
+      replaceGap({ ...(allGaps.find((g) => g.id === id)!), prompt });
+    } catch (err) {
+      setToast(`Couldn't generate prompt: ${(err as Error).message}`);
+    } finally {
+      setPromptLoadingId((cur) => (cur === id ? null : cur));
+    }
+  }, [projectId, allGaps, replaceGap]);
+
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 4000);
@@ -192,11 +231,43 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
         ) : null}
       </div>
 
+      {personas.length > 0 ? (
+        <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-stone-100">
+          <span className="text-xs uppercase tracking-wider text-stone-500 font-semibold pr-1 pt-2.5">For:</span>
+          <PersonaChip active={personaFilter === null} onClick={() => setPersonaFilter(null)}>
+            All personas
+          </PersonaChip>
+          {personas.map((p) => {
+            const personaGapCount = allGaps.filter((g) => Array.isArray(g.affectedJobs)
+              && g.affectedJobs.some((j) => j.personaId === p.id)).length;
+            return (
+              <PersonaChip
+                key={p.id}
+                active={personaFilter === p.id}
+                onClick={() => setPersonaFilter((cur) => (cur === p.id ? null : p.id))}
+                emoji={p.emoji}
+                count={personaGapCount}
+              >
+                {p.name}
+              </PersonaChip>
+            );
+          })}
+        </div>
+      ) : null}
+
       {visible.length === 0 ? (
         <div className="bg-white border border-stone-200 rounded-lg p-8 text-center">
           <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
-          <p className="font-semibold text-stone-900 mb-1">{emptyTitle(filter)}</p>
-          <p className="text-sm text-stone-600">{emptyDesc(filter)}</p>
+          <p className="font-semibold text-stone-900 mb-1">
+            {personaFilter
+              ? `Nothing left for ${personas.find((p) => p.id === personaFilter)?.name ?? 'this persona'}.`
+              : emptyTitle(filter)}
+          </p>
+          <p className="text-sm text-stone-600">
+            {personaFilter
+              ? 'Their jobs are unblocked. Switch persona or clear the filter.'
+              : emptyDesc(filter)}
+          </p>
         </div>
       ) : (
         <div className="space-y-3" aria-busy={busyId !== null}>
@@ -206,12 +277,14 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
               gap={gap}
               status={gap.status}
               copied={copiedId === gap.id}
+              promptLoading={promptLoadingId === gap.id}
               onAccept={onAccept}
               onReject={onReject}
               onRestore={onRestore}
               onMarkCommitted={onMarkCommitted}
               onRefine={onRefine}
               onCopyPrompt={onCopyPrompt}
+              onGetPrompt={onGetPrompt}
             />
           ))}
         </div>
@@ -241,6 +314,35 @@ function FilterChip({
       }`}
     >
       {children} <span className={active ? 'text-stone-300' : 'text-stone-400'}>{count}</span>
+    </button>
+  );
+}
+
+function PersonaChip({
+  active, onClick, children, emoji, count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  emoji?: string;
+  count?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3 py-1.5 mt-2 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1.5 ${
+        active
+          ? 'bg-stone-100 border border-stone-400 text-stone-900'
+          : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+      }`}
+    >
+      {emoji ? <span aria-hidden>{emoji}</span> : null}
+      <span>{children}</span>
+      {typeof count === 'number' ? (
+        <span className={active ? 'text-stone-500' : 'text-stone-400'}>{count}</span>
+      ) : null}
     </button>
   );
 }
