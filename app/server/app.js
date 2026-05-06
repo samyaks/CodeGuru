@@ -21,6 +21,7 @@ const productMapRoutes = require('./routes/product-map');
 const githubWebhookRoutes = require('./routes/github-webhook');
 const v2GapsRoutes = require('./routes/v2/gaps');
 const v2ShippedRoutes = require('./routes/v2/shipped');
+const v2SecurityRoutes = require('./routes/v2/security');
 const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
 const { createRateLimit } = require('./lib/rate-limit');
@@ -139,6 +140,7 @@ if (supabase) {
   // v2 (Takeoff) — additive routes alongside v1 until Phase 6b cutover
   app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), v2GapsRoutes);
   app.use('/api/v2/projects/:id/shipped', optionalAuth(supabase), v2ShippedRoutes);
+  app.use('/api/v2/projects/:id/security-summary', optionalAuth(supabase), v2SecurityRoutes);
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
@@ -153,6 +155,7 @@ if (supabase) {
   app.use('/api/product-map', productMapRoutes);
   app.use('/api/v2/projects/:id/gaps', v2GapsRoutes);
   app.use('/api/v2/projects/:id/shipped', v2ShippedRoutes);
+  app.use('/api/v2/projects/:id/security-summary', v2SecurityRoutes);
 }
 
 // Protected routes (require auth when Supabase is configured)

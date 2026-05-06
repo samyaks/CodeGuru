@@ -29,6 +29,8 @@ const {
 } = require('../services/analyzer');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { detectBuildPlan } = require('../services/build-detector');
+const { runSecurityDetectors, listDetectorNames } = require('../services/security');
+const { computeSecurityScore } = require('../services/security/score');
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
@@ -145,6 +147,45 @@ function walk(dir, base = dir, out = []) {
   console.log('Categories:');
   for (const [key, cat] of Object.entries(readiness.categories)) {
     console.log(`  ${key.padEnd(15)} ${String(cat.score).padStart(3)}/100  ${cat.status.padEnd(8)} ${cat.detail}`);
+  }
+
+  // Security pass. Same orchestrator the takeoff pipeline uses, but
+  // here it runs in-memory only — no DB, so we score directly off the
+  // findings instead of going through `applySecurityFindings`.
+  // With no detectors registered yet (slice (a)), this is expected to
+  // print a 100/100 score; once detectors land, it becomes a real
+  // self-audit.
+  const detectorNames = listDetectorNames();
+  const { findings: securityFindings, errors: securityErrors, detectorCount } = await runSecurityDetectors({
+    stack: codebaseModel.stack,
+    structure: codebaseModel.structure,
+    fileContents: codebaseModel.fileContents,
+    fileTree: codebaseModel.fileTree,
+    gaps: codebaseModel.gaps,
+    deployInfo: codebaseModel.deployInfo,
+    features: codebaseModel.features,
+    meta: codebaseModel.meta,
+  });
+  const securityScore = computeSecurityScore(securityFindings);
+
+  console.log(`\nSecurity score: ${securityScore.score}/100  (${securityScore.totalUnaddressed} unaddressed)`);
+  console.log(`Detectors registered: ${detectorCount}${detectorNames.length ? ` (${detectorNames.join(', ')})` : ' (none — slice (a) of Phase 1)'}`);
+  if (securityErrors.length > 0) {
+    console.log(`Detector errors: ${securityErrors.length}`);
+    for (const err of securityErrors.slice(0, 3)) {
+      console.log(`  - ${err.detector}: ${err.error}`);
+    }
+  }
+  if (securityFindings.length > 0) {
+    console.log('Severity breakdown:');
+    for (const [sev, n] of Object.entries(securityScore.severityBreakdown)) {
+      console.log(`  ${sev.padEnd(8)} ${n}`);
+    }
+    console.log('Top findings:');
+    for (const f of securityFindings.slice(0, 5)) {
+      const where = f.line ? `${f.file}:${f.line}` : f.file;
+      console.log(`  [${f.severity}] ${f.detector} — ${where}`);
+    }
   }
 
   // Use the analyzer's archive matcher (single source of truth) so this

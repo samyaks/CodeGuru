@@ -12,6 +12,9 @@ const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
 const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = require('../services/suggestion-rules');
 const { runAISuggestions } = require('../services/suggestion-ai');
+const { runSecurityDetectors, listDetectorNames } = require('../services/security');
+const { applySecurityFindings } = require('../services/security/persist');
+const { computeSecurityScore } = require('../services/security/score');
 const { connectWebhook } = require('../services/github-webhook-manager');
 const productMapSvc = require('../services/product-map');
 const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
@@ -446,6 +449,68 @@ async function runPipeline(id, codebaseModel, userId, label) {
     }
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
+  }
+
+  // Stage 4b: Security detectors. Runs after AI suggestions so the
+  // upgrade path in `applySecurityFindings` can promote any overlapping
+  // AI-generated gap to security-tagged instead of producing a sibling.
+  // The score is persisted on `deployments.security_score` so the
+  // project header / listings can render without recomputing.
+  //
+  // Slice (a) of Phase 1 ships the framework with zero detectors —
+  // every project gets a 100/100 default until detectors land. This
+  // call still runs end-to-end so we exercise the persistence + score
+  // path on every analysis from day one.
+  try {
+    const { findings, errors, detectorCount } = await runSecurityDetectors({
+      stack: codebaseModel.stack,
+      structure: codebaseModel.structure,
+      fileContents: codebaseModel.fileContents,
+      fileTree: codebaseModel.fileTree,
+      gaps: codebaseModel.gaps,
+      deployInfo: codebaseModel.deployInfo,
+      features: codebaseModel.features,
+      meta: codebaseModel.meta,
+    });
+
+    const persistSummary = await applySecurityFindings(id, findings);
+
+    // Score is computed from the live DB state (not just this run's
+    // findings) because user-rejected and shipped rows must be
+    // excluded from the penalty. The unaddressed-only fetch in
+    // `findV2SecurityGapsByProjectId` does that filtering.
+    const unaddressed = await suggestions.findV2SecurityGapsByProjectId(id);
+    const scoreResult = computeSecurityScore(unaddressed);
+
+    await deployments.update(id, {
+      security_score: scoreResult.score,
+      updated_at: new Date().toISOString(),
+    });
+
+    broadcast(id, {
+      type: 'security-scored',
+      score: scoreResult.score,
+      severityBreakdown: scoreResult.severityBreakdown,
+      totalUnaddressed: scoreResult.totalUnaddressed,
+      detectorCount,
+      detectorErrors: errors.length,
+      persist: persistSummary,
+    });
+
+    console.log(JSON.stringify({
+      event: 'security_scored',
+      projectId: id,
+      score: scoreResult.score,
+      breakdown: scoreResult.severityBreakdown,
+      detectorCount,
+      detectorErrors: errors.length,
+      created: persistSummary.created,
+      upgraded: persistSummary.upgraded,
+      skipped: persistSummary.skipped,
+      timestamp: new Date().toISOString(),
+    }));
+  } catch (err) {
+    console.error(`Security analysis for ${id} failed (non-fatal):`, err.message);
   }
 
   // Stage 5: link suggestions to product-map jobs (non-blocking, async).

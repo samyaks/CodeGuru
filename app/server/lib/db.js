@@ -330,7 +330,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
   'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
-  'suggestions_count',
+  'suggestions_count', 'security_score',
 ]);
 
 const deployments = {
@@ -908,10 +908,15 @@ const suggestions = {
     return rows[0] || null;
   },
 
-  // Insert a single v2 gap (e.g. from the reopen flow) and return the row
-  // as actually stored. Like createBatch this hashes the id with the
-  // project id so callers can't guess sibling ids — but unlike createBatch
-  // it returns the inserted shape so the caller can act on the real id.
+  // Insert a single v2 gap (e.g. from the reopen flow or a security
+  // detector) and return the row as actually stored. Like createBatch
+  // this hashes the id with the project id so callers can't guess
+  // sibling ids — but unlike createBatch it returns the inserted shape
+  // so the caller can act on the real id.
+  //
+  // Security columns are accepted optionally. The DB constraint
+  // suggestions_security_severity_consistency requires is_security and
+  // security_severity to agree, so callers MUST pass both or neither.
   async createV2Gap(row) {
     if (!row || !row.project_id || !row.id) {
       throw new Error('createV2Gap: project_id and id required');
@@ -921,13 +926,20 @@ const suggestions = {
       .update(`${row.project_id}:${row.id}`)
       .digest('hex')
       .slice(0, 16);
+    const isSecurity = !!row.is_security;
+    const severity = isSecurity ? (row.security_severity || null) : null;
+    if (isSecurity && !severity) {
+      throw new Error('createV2Gap: is_security=true requires security_severity');
+    }
     const { rows } = await getDb().query(
       `INSERT INTO suggestions
         (id, project_id, type, category, priority, title, description,
          evidence, effort, cursor_prompt, affected_files, source, status,
-         v2_status, v2_category, v2_refined_from_id, created_at)
+         v2_status, v2_category, v2_refined_from_id,
+         is_security, security_severity, cwe_id, security_detector,
+         security_fingerprint, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17)
+                $14, $15, $16, $17, $18, $19, $20, $21, $22)
         ON CONFLICT (id) DO NOTHING
         RETURNING *`,
       [
@@ -947,6 +959,11 @@ const suggestions = {
         row.v2_status ?? 'untriaged',
         row.v2_category ?? null,
         row.v2_refined_from_id ?? null,
+        isSecurity,
+        severity,
+        row.cwe_id ?? null,
+        row.security_detector ?? null,
+        row.security_fingerprint ?? null,
         row.created_at || new Date().toISOString(),
       ]
     );
@@ -1011,6 +1028,93 @@ const suggestions = {
         WHERE id = $2 AND project_id = $3
         RETURNING *`,
       [toJsonb(jobLinks ?? []), id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  // ── v2 security tagging (migration 014). The security feature treats
+  // `is_security` as a lens on top of the existing category, never as a
+  // fourth category. These helpers read/write that lens; the high-level
+  // dedupe + upgrade logic lives in `services/security/persist.js`.
+
+  // List unaddressed (untriaged or in_progress) security gaps for a
+  // project, ordered by severity. Used by the score computation and the
+  // /security-summary endpoint. `addressedToo: true` returns rejected /
+  // shipped rows as well — only the report view ever needs that.
+  async findV2SecurityGapsByProjectId(projectId, { addressedToo = false } = {}) {
+    const params = [projectId];
+    let where = 'project_id = $1 AND is_security = TRUE';
+    if (!addressedToo) {
+      where += ` AND v2_status IN ('untriaged', 'in_progress')`;
+    }
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions
+        WHERE ${where}
+        ORDER BY CASE security_severity
+          WHEN 'critical' THEN 0
+          WHEN 'high'     THEN 1
+          WHEN 'medium'   THEN 2
+          WHEN 'low'      THEN 3
+          ELSE 4
+        END, created_at DESC`,
+      params
+    );
+    return rows;
+  },
+
+  // Look up an existing gap by its security fingerprint. The persistence
+  // layer uses this both for "have we already flagged this?" (skip) and
+  // as the input to the upgrade path (overlap an existing non-security
+  // gap on file path before falling back to insert).
+  async findV2GapByFingerprint(projectId, fingerprint) {
+    if (!fingerprint) return null;
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions
+        WHERE project_id = $1 AND security_fingerprint = $2
+        LIMIT 1`,
+      [projectId, fingerprint]
+    );
+    return rows[0] || null;
+  },
+
+  // Upgrade an existing (typically non-security) gap to security, or
+  // refresh detector metadata on a row that's already tagged. The DB
+  // CHECK constraint requires is_security and severity to agree, so
+  // we always set both. `severity` MUST be non-null.
+  async applySecurityFlags(id, projectId, { severity, cweId, detector, fingerprint }) {
+    if (!severity) {
+      throw new Error('applySecurityFlags: severity is required');
+    }
+    const { rows } = await getDb().query(
+      `UPDATE suggestions SET
+          is_security          = TRUE,
+          security_severity    = $1,
+          cwe_id               = COALESCE($2, cwe_id),
+          security_detector    = COALESCE($3, security_detector),
+          security_fingerprint = COALESCE($4, security_fingerprint)
+        WHERE id = $5 AND project_id = $6
+        RETURNING *`,
+      [severity, cweId ?? null, detector ?? null, fingerprint ?? null, id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  // Find a candidate gap to upgrade for a given finding, looking only at
+  // rows that aren't already security-tagged. Match heuristic: any
+  // overlap between the candidate's `affected_files` JSONB array and the
+  // finding's file path. Returns the most-recently-created hit so the
+  // upgrade lands on the freshest row.
+  async findUpgradeCandidate(projectId, filePath) {
+    if (!filePath) return null;
+    const { rows } = await getDb().query(
+      `SELECT * FROM suggestions
+        WHERE project_id = $1
+          AND is_security = FALSE
+          AND v2_status IN ('untriaged', 'in_progress')
+          AND affected_files @> $2::jsonb
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [projectId, JSON.stringify([filePath])]
     );
     return rows[0] || null;
   },

@@ -119,7 +119,16 @@ function toGap(row) {
     // and the next analysis run / page load will populate it. `[]`
     // means "linked, no jobs apply".
     jobLinks: parseJobLinks(row),
-    source: 'ai',
+    // Security tag (migration 014). `isSecurity` is the lens flag —
+    // the v2 Gaps tab and the Security report both consume it. These
+    // are PUBLIC fields and survive `pruneInternalFields` in the v2
+    // route handlers; do not move them into the rest of the
+    // pruned-internal block.
+    isSecurity:        !!row.is_security,
+    securitySeverity:  row.security_severity || null,
+    cweId:             row.cwe_id || null,
+    securityDetector:  row.security_detector || null,
+    source: row.source === 'security' ? 'security' : 'ai',
   };
 }
 
@@ -286,6 +295,13 @@ function synthesizeMapGaps(productMap, existingGaps) {
         method: 'synthetic',
         reason: null,
       }],
+      // Synthetic map gaps are never security-tagged. Keep the shape
+      // consistent with `toGap` so the v2 frontend can rely on these
+      // fields existing on every gap rather than guarding undefined.
+      isSecurity:        false,
+      securitySeverity:  null,
+      cweId:             null,
+      securityDetector:  null,
       // Marker so the UI / lazy prompt route can treat these specially.
       source: 'map',
       // Carrying the entity reference makes the prompt route's job easy.
