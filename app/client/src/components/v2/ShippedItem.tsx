@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import {
-  AlertTriangle, CheckCircle, Clock, ExternalLink, GitCommit,
+  AlertTriangle, CheckCircle, ChevronDown, ChevronUp, Clock, ExternalLink, GitCommit,
 } from 'lucide-react';
 import { Badge } from './Badge';
 
 export type Verification = 'verified' | 'partial' | 'pending';
+
+const COMMIT_MESSAGE_PREVIEW_CHARS = 25;
 
 export interface ShippedItemData {
   id: string;
@@ -39,6 +42,17 @@ export function ShippedItem({ item, onReopenAsGap, className = '' }: ShippedItem
   const meta = VERIFICATION_META[item.verification];
   const VIcon = meta.icon;
   const filesNumeric = typeof item.filesChanged === 'number' ? item.filesChanged : null;
+  const fullMessage = (item.commitMessage || '').trim();
+  // Use the first line for the inline preview so multi-line messages
+  // don't blow up the single-row layout when collapsed.
+  const firstLine = fullMessage.split('\n', 1)[0] ?? '';
+  const isLong = fullMessage.length > COMMIT_MESSAGE_PREVIEW_CHARS
+    || fullMessage.length > firstLine.length;
+  const preview = firstLine.length > COMMIT_MESSAGE_PREVIEW_CHARS
+    ? `${firstLine.slice(0, COMMIT_MESSAGE_PREVIEW_CHARS).trimEnd()}…`
+    : firstLine;
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div className={`bg-white border ${meta.border} rounded-lg p-5 ${className}`.trim()}>
       <div className="flex items-start justify-between gap-4 mb-3">
@@ -64,7 +78,26 @@ export function ShippedItem({ item, onReopenAsGap, className = '' }: ShippedItem
           <GitCommit className="w-3 h-3 text-stone-500 flex-shrink-0" />
           <span className="font-mono text-stone-700">{item.commit}</span>
           <span className="text-stone-400">·</span>
-          <span className="text-stone-600 truncate">{item.commitMessage}</span>
+          {fullMessage ? (
+            isLong ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-expanded={expanded}
+                title={expanded ? 'Hide commit message' : 'Show full commit message'}
+                className="text-stone-600 hover:text-stone-900 inline-flex items-center gap-1 min-w-0"
+              >
+                <span className="truncate">{expanded ? firstLine : preview}</span>
+                {expanded
+                  ? <ChevronUp className="w-3 h-3 flex-shrink-0" />
+                  : <ChevronDown className="w-3 h-3 flex-shrink-0" />}
+              </button>
+            ) : (
+              <span className="text-stone-600 truncate">{fullMessage}</span>
+            )
+          ) : (
+            <span className="text-stone-400 italic">no commit message</span>
+          )}
           {filesNumeric !== null ? (
             <>
               <span className="text-stone-400">·</span>
@@ -72,6 +105,11 @@ export function ShippedItem({ item, onReopenAsGap, className = '' }: ShippedItem
             </>
           ) : null}
         </div>
+        {expanded && isLong ? (
+          <pre className="mt-2 text-xs text-stone-700 whitespace-pre-wrap break-words font-mono leading-relaxed">
+            {fullMessage}
+          </pre>
+        ) : null}
       </div>
 
       <p className="text-xs text-stone-600 mb-3">
