@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Shield } from 'lucide-react';
 import { GapCard, EmptyState } from '../../components/v2';
 import type { GapStatus } from '../../components/v2';
 import {
@@ -25,6 +25,12 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
   // `null` means "all personas". An id narrows to gaps whose
   // affectedJobs include that persona.
   const [personaFilter, setPersonaFilter] = useState<string | null>(null);
+  // Security lens (Phase 2 slice b). Toggled independently of the
+  // status + persona filters and composes AND-wise with both. We
+  // don't add it to the `Filter` union because it's not a sibling of
+  // active/all/rejected — a user can be on "Active + Security" or
+  // "Rejected + Security" simultaneously.
+  const [securityOnly, setSecurityOnly] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [promptLoadingId, setPromptLoadingId] = useState<string | null>(null);
@@ -52,8 +58,12 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
   );
 
   // Status filter narrows by lifecycle (untriaged/in-progress vs rejected
-  // vs everything); persona filter narrows by which job is affected. The
-  // two compose so a user can see "what's still TODO for Tom".
+  // vs everything); persona filter narrows by which job is affected; the
+  // security lens narrows to is_security rows. All three compose AND-wise
+  // so "Active + Tom + Security" shows untriaged security gaps that
+  // block Tom's jobs. The order of clauses below doesn't change the
+  // result, only how short-circuits would help if any of them got
+  // expensive — keeping the simplest reading.
   const visible = useMemo(() => {
     let v = allGaps;
     if (filter === 'rejected') {
@@ -65,14 +75,31 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
       v = v.filter((g) => Array.isArray(g.affectedJobs)
         && g.affectedJobs.some((j) => j.personaId === personaFilter));
     }
+    if (securityOnly) {
+      v = v.filter((g) => g.isSecurity === true);
+    }
     return v;
-  }, [allGaps, filter, personaFilter]);
+  }, [allGaps, filter, personaFilter, securityOnly]);
 
   const counts = useMemo(() => {
     const inProgress = allGaps.filter((g) => g.status === 'in-progress').length;
     const untriaged  = allGaps.filter((g) => g.status === 'untriaged').length;
     const rejected   = allGaps.filter((g) => g.status === 'rejected').length;
-    return { inProgress, untriaged, rejected, total: allGaps.length };
+    // Total of `is_security` gaps drives whether the chip is visible at
+    // all. Untriaged + in-progress security count drives the "All
+    // security gaps handled" empty state — when those two hit zero, the
+    // user has triaged everything we know about.
+    const security = allGaps.filter((g) => g.isSecurity === true);
+    const securityTotal = security.length;
+    const securityActive = security.filter(
+      (g) => g.status === 'untriaged' || g.status === 'in-progress',
+    ).length;
+    const securityAccepted = security.filter((g) => g.status === 'in-progress').length;
+    const securityRejected = security.filter((g) => g.status === 'rejected').length;
+    return {
+      inProgress, untriaged, rejected, total: allGaps.length,
+      securityTotal, securityActive, securityAccepted, securityRejected,
+    };
   }, [allGaps]);
 
   const replaceGap = useCallback((updated: V2Gap) => {
@@ -223,6 +250,22 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
             Rejected
           </FilterChip>
         ) : null}
+        {/*
+          Security lens chip. Visually separated from the status chips
+          by a 4-unit margin + a left-border divider — it's a lens, not
+          a category sibling, and the spacing communicates that. Hidden
+          when the project has zero security findings to keep the
+          filter row tight on clean projects.
+        */}
+        {counts.securityTotal > 0 ? (
+          <div className="ml-4 pl-4 border-l border-stone-200">
+            <SecurityChip
+              active={securityOnly}
+              count={counts.securityTotal}
+              onClick={() => setSecurityOnly((on) => !on)}
+            />
+          </div>
+        ) : null}
         {counts.inProgress > 0 ? (
           <div className="ml-auto text-xs text-stone-500 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-500 v2-animate-pulse" />
@@ -257,16 +300,32 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
 
       {visible.length === 0 ? (
         <div className="bg-white border border-stone-200 rounded-lg p-8 text-center">
-          <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-3" />
+          {securityOnly ? (
+            <Shield className="w-8 h-8 text-emerald-500 mx-auto mb-3" aria-hidden />
+          ) : (
+            <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-3" aria-hidden />
+          )}
           <p className="font-semibold text-stone-900 mb-1">
-            {personaFilter
-              ? `Nothing left for ${personas.find((p) => p.id === personaFilter)?.name ?? 'this persona'}.`
-              : emptyTitle(filter)}
+            {securityOnly
+              ? counts.securityTotal === 0
+                ? 'No security gaps detected'
+                : counts.securityActive === 0
+                  ? 'All security gaps handled'
+                  : 'No security gaps match these filters'
+              : personaFilter
+                ? `Nothing left for ${personas.find((p) => p.id === personaFilter)?.name ?? 'this persona'}.`
+                : emptyTitle(filter)}
           </p>
           <p className="text-sm text-stone-600">
-            {personaFilter
-              ? 'Their jobs are unblocked. Switch persona or clear the filter.'
-              : emptyDesc(filter)}
+            {securityOnly
+              ? counts.securityTotal === 0
+                ? "Either you're in great shape, or detectors haven't run on this project yet. Re-run analysis to refresh."
+                : counts.securityActive === 0
+                  ? `${counts.securityAccepted} accepted, ${counts.securityRejected} rejected. Strong work.`
+                  : 'Try clearing the persona or status filter.'
+              : personaFilter
+                ? 'Their jobs are unblocked. Switch persona or clear the filter.'
+                : emptyDesc(filter)}
           </p>
         </div>
       ) : (
@@ -314,6 +373,33 @@ function FilterChip({
       }`}
     >
       {children} <span className={active ? 'text-stone-300' : 'text-stone-400'}>{count}</span>
+    </button>
+  );
+}
+
+// Security-lens chip. Distinct color treatment from FilterChip so users
+// can tell at a glance that this is a lens (composes with the active
+// status chip) rather than a sibling category. Active state uses red
+// to telegraph "you've narrowed to security findings"; inactive uses
+// the same neutral white as the status chips so it doesn't shout
+// when nothing's wrong.
+function SecurityChip({
+  active, count, onClick,
+}: { active: boolean; count: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1.5 ${
+        active
+          ? 'bg-red-50 border border-red-200 text-red-700'
+          : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+      }`}
+    >
+      <Shield className="w-3 h-3" aria-hidden />
+      <span>Security only</span>
+      <span className={active ? 'text-red-500' : 'text-stone-400'}>{count}</span>
     </button>
   );
 }
