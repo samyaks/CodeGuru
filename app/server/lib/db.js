@@ -1593,6 +1593,131 @@ const shippedItems = {
   },
 };
 
+// ── v2: Security report public share links (migration 016) ─────────
+//
+// Each row mints a short URL slug that anyone can use to view a
+// read-only copy of a project's security report. The owner can list
+// active links, revoke any of them, and create "redacted" links that
+// hide the repo URL/owner.
+//
+// Active = revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now()).
+// We keep revoked rows in place rather than deleting so a leaked URL
+// can never be re-issued — the slug is a primary key, and re-using it
+// would let an old screenshot suddenly resolve to a different project.
+
+// Slug alphabet: lowercase + digits, no ambiguous chars (no O/0/I/l).
+// 36^12 ≈ 4.7×10^18 entropy; collisions are theoretical and the
+// writer retries on the unique-violation just in case.
+const SHARE_SLUG_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
+const SHARE_SLUG_LENGTH = 12;
+
+function generateShareSlug() {
+  const bytes = crypto.randomBytes(SHARE_SLUG_LENGTH);
+  let out = '';
+  for (let i = 0; i < SHARE_SLUG_LENGTH; i++) {
+    out += SHARE_SLUG_ALPHABET[bytes[i] % SHARE_SLUG_ALPHABET.length];
+  }
+  return out;
+}
+
+const securityShares = {
+  /**
+   * Create a new share link for the given project.
+   *
+   * The slug is generated client-side and inserted with `ON CONFLICT
+   * DO NOTHING` so a (theoretical) collision returns no row instead of
+   * raising — we then retry up to 5 times before giving up. Hitting
+   * the retry path means either the alphabet/length is too small or
+   * the RNG is broken; either way it's a hard failure worth logging.
+   */
+  async create({ projectId, createdBy, redactRepo, expiresAt }) {
+    if (!projectId) throw new Error('securityShares.create: projectId required');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = generateShareSlug();
+      const { rows } = await getDb().query(
+        `INSERT INTO v2_security_shares
+          (slug, project_id, created_by, redact_repo, expires_at)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (slug) DO NOTHING
+          RETURNING *`,
+        [slug, projectId, createdBy ?? null, !!redactRepo, expiresAt ?? null]
+      );
+      if (rows[0]) return rows[0];
+    }
+    throw new Error('securityShares.create: failed to generate unique slug after 5 attempts');
+  },
+
+  /**
+   * Public-endpoint lookup. Filters on active state (not revoked, not
+   * expired) so the route layer doesn't have to know the active rule.
+   * Returns null for missing/revoked/expired slugs — the route maps
+   * those to 410 (revoked/expired) vs 404 (never existed) by checking
+   * the un-filtered table; see `findBySlug` below.
+   */
+  async findActiveBySlug(slug) {
+    if (!slug) return null;
+    const { rows } = await getDb().query(
+      `SELECT * FROM v2_security_shares
+        WHERE slug = $1
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > now())
+        LIMIT 1`,
+      [slug]
+    );
+    return rows[0] || null;
+  },
+
+  /**
+   * Raw lookup (no active filter). The public route uses this only to
+   * differentiate 410-Gone (existed but revoked/expired) from 404-Not
+   * Found (never existed) so users get an honest error message.
+   */
+  async findBySlug(slug) {
+    if (!slug) return null;
+    const { rows } = await getDb().query(
+      'SELECT * FROM v2_security_shares WHERE slug = $1 LIMIT 1',
+      [slug]
+    );
+    return rows[0] || null;
+  },
+
+  /**
+   * Active shares for a single project, newest first. Backs the share
+   * modal's "existing links" list. Bounded scan via the partial index
+   * on (project_id, created_at DESC) WHERE revoked_at IS NULL.
+   */
+  async listActiveByProjectId(projectId) {
+    if (!projectId) return [];
+    const { rows } = await getDb().query(
+      `SELECT * FROM v2_security_shares
+        WHERE project_id = $1
+          AND revoked_at IS NULL
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  /**
+   * Soft-revoke. Returns the updated row, or null if the slug was
+   * already revoked or doesn't exist (the route maps null to 404 for
+   * the latter case via a follow-up `findBySlug` check).
+   */
+  async revoke(slug) {
+    if (!slug) return null;
+    const { rows } = await getDb().query(
+      `UPDATE v2_security_shares
+          SET revoked_at = now()
+        WHERE slug = $1
+          AND revoked_at IS NULL
+        RETURNING *`,
+      [slug]
+    );
+    return rows[0] || null;
+  },
+};
+
 // ── v2: Webhook events archive ────────────────────────────────────
 
 const webhookEvents = {
@@ -1623,5 +1748,5 @@ module.exports = {
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents,
+  shippedItems, webhookEvents, securityShares,
 };

@@ -153,6 +153,82 @@ export async function fetchSecuritySummary(projectId: string): Promise<SecurityS
   return handleApiResponse<SecuritySummary>(res);
 }
 
+// ── Security report public share links (Phase 3 slice b) ───────────
+
+/** A single share link as returned by the owner endpoints. The slug
+ *  alone is enough to construct the public URL on the client; the
+ *  server never exposes a fully-rendered URL because the canonical
+ *  origin can change across environments. */
+export interface SecurityShare {
+  slug: string;
+  redactRepo: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export async function listSecurityShares(projectId: string): Promise<SecurityShare[]> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/security-shares`);
+  const data = await handleApiResponse<{ shares: SecurityShare[] }>(res);
+  return data.shares;
+}
+
+export async function createSecurityShare(
+  projectId: string,
+  options: { redactRepo?: boolean } = {},
+): Promise<SecurityShare> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/security-shares`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ redactRepo: !!options.redactRepo }),
+  });
+  const data = await handleApiResponse<{ share: SecurityShare }>(res);
+  return data.share;
+}
+
+export async function revokeSecurityShare(slug: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/security-shares/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
+  await handleApiResponse<{ revoked: boolean; alreadyRevoked: boolean }>(res);
+}
+
+/** Project metadata as it appears in a public share. When the share's
+ *  `redactRepo` is true, repo/repoUrl/framework/description are null
+ *  and `name` is replaced with an opaque "Project · {hash}" tag. The
+ *  caller doesn't need to know which mode the server returned — the
+ *  fields are simply nullable in the redacted case. */
+export interface SharedSecurityProject {
+  name: string;
+  repo: string | null;
+  repoUrl: string | null;
+  framework: string | null;
+  description: string | null;
+  lastAnalyzed: string | null;
+}
+
+/** Bundled payload returned by GET /api/v2/security-shared/:slug.
+ *  Includes the full set of security gaps grouped by category so a
+ *  shared client can render the "All security gaps" section without
+ *  hitting the auth-gated /gaps endpoint. */
+export interface SharedSecurityReport {
+  share: SecurityShare;
+  project: SharedSecurityProject;
+  score: number;
+  severityBreakdown: { critical: number; high: number; medium: number; low: number };
+  totalUnaddressed: number;
+  topRisks: SecurityTopRisk[];
+  allSecurityGaps: { broken: V2Gap[]; missing: V2Gap[]; infra: V2Gap[] };
+  detectors: string[];
+}
+
+/** No-auth fetch (no `credentials: include`). The endpoint is public,
+ *  and shipping the auth cookie on a public link would be wasted work
+ *  for the server. */
+export async function fetchSharedSecurityReport(slug: string): Promise<SharedSecurityReport> {
+  const res = await fetch(`${API_BASE}/security-shared/${encodeURIComponent(slug)}`);
+  return handleApiResponse<SharedSecurityReport>(res);
+}
+
 // ── Shipped ────────────────────────────────────────────────────────
 
 import type { ShippedItemData } from '../components/v2';

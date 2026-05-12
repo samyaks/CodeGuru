@@ -30,3 +30,6 @@ export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedI
 
 export { ChatDrawer } from './ChatDrawer';
 export type { ChatDrawerProps, ChatMessage } from './ChatDrawer';
+
+export { ShareSecurityModal } from './ShareSecurityModal';
+export type { ShareSecurityModalProps } from './ShareSecurityModal';

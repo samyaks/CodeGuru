@@ -22,6 +22,11 @@ const githubWebhookRoutes = require('./routes/github-webhook');
 const v2GapsRoutes = require('./routes/v2/gaps');
 const v2ShippedRoutes = require('./routes/v2/shipped');
 const v2SecurityRoutes = require('./routes/v2/security');
+const {
+  ownerRouter:  v2SecurityShareOwnerRoutes,
+  slugRouter:   v2SecurityShareSlugRoutes,
+  publicRouter: v2SecuritySharedPublicRoutes,
+} = require('./routes/v2/security-shares');
 const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
 const { createRateLimit } = require('./lib/rate-limit');
@@ -107,6 +112,10 @@ app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
 app.use('/api/railway', railwayRouter);
 app.use('/auth/railway', railwayCallbackRouter);
+// Public security-report share read endpoint. Mounted before the
+// authed `/api/v2/...` routes so `optionalAuth` doesn't accidentally
+// gate it. The route itself enforces the share's active-state filter.
+app.use('/api/v2/security-shared', v2SecuritySharedPublicRoutes);
 
 // GitHub re-auth with admin:repo_hook scope (for webhook auto-connect)
 const reconnectRateLimit = createRateLimit({ windowMs: 60000, max: 5, message: 'Too many reconnect attempts. Please try again in a minute.' });
@@ -141,6 +150,10 @@ if (supabase) {
   app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), v2GapsRoutes);
   app.use('/api/v2/projects/:id/shipped', optionalAuth(supabase), v2ShippedRoutes);
   app.use('/api/v2/projects/:id/security-summary', optionalAuth(supabase), v2SecurityRoutes);
+  // Share-link routes — owner endpoints require auth so anonymous
+  // visitors on a public project can't mint or revoke share links.
+  app.use('/api/v2/projects/:id/security-shares', requireAuth(supabase), v2SecurityShareOwnerRoutes);
+  app.use('/api/v2/security-shares', requireAuth(supabase), v2SecurityShareSlugRoutes);
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
@@ -156,6 +169,11 @@ if (supabase) {
   app.use('/api/v2/projects/:id/gaps', v2GapsRoutes);
   app.use('/api/v2/projects/:id/shipped', v2ShippedRoutes);
   app.use('/api/v2/projects/:id/security-summary', v2SecurityRoutes);
+  // No-Supabase deployments don't have user identities, so share-link
+  // creation/revoke runs unauthed (project rows have no user_id either,
+  // so `checkProjectAccess` is effectively a no-op for them).
+  app.use('/api/v2/projects/:id/security-shares', v2SecurityShareOwnerRoutes);
+  app.use('/api/v2/security-shares', v2SecurityShareSlugRoutes);
 }
 
 // Protected routes (require auth when Supabase is configured)

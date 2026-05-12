@@ -1,24 +1,52 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, ChevronDown, ChevronRight, ExternalLink, FileText,
-  RefreshCw, Server, Shield, Wrench, Zap,
+  AlertOctagon, ArrowRight, ChevronDown, ChevronRight, ExternalLink, EyeOff,
+  FileText, RefreshCw, Server, Share2, Shield, Wrench, Zap,
 } from 'lucide-react';
 import {
-  EmptyState, GapCard, MetadataLabel,
+  EmptyState, MetadataLabel, ShareSecurityModal,
 } from '../../components/v2';
-import type { SecuritySeverity } from '../../components/v2';
-import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
+import type { GapCategory, SecuritySeverity } from '../../components/v2';
+import { useAuth } from '../../hooks/useAuth';
+import { fetchProjectDetail } from '../../services/api';
 import {
-  fetchSecuritySummary, fetchV2Gaps,
-  type SecuritySummary, type V2Gap,
+  fetchSecuritySummary, fetchSharedSecurityReport, fetchV2Gaps,
+  type V2Gap,
 } from '../../services/v2Api';
 
-// Verdicts mirror the spec's severity bands. We use the live score
-// (recomputed on the API every request) rather than the cached column
-// so the verdict matches the breakdown shown directly below it — a
-// stale verdict + fresh breakdown would be a credibility hit on a
-// page whose entire job is to be shareable.
+// ── Types ──────────────────────────────────────────────────────────
+
+export type SecurityReportMode = 'owner' | 'shared';
+
+interface ReportData {
+  /** Display label — repo URL for owner view, possibly redacted for shared view. */
+  projectName: string;
+  /** Direct repo identifier (`owner/repo`). Null when redacted in a shared view. */
+  repo: string | null;
+  /** Optional repo URL — null when redacted. */
+  repoUrl: string | null;
+  framework: string | null;
+  description: string | null;
+  lastAnalyzed: string | null;
+  /** Project id is only set in owner mode — used for "Fix this gap" deep links. */
+  projectId: string | null;
+  score: number | null;
+  severityBreakdown: { critical: number; high: number; medium: number; low: number };
+  totalUnaddressed: number;
+  topRisks: V2Gap[];
+  allSecurityGaps: { broken: V2Gap[]; missing: V2Gap[]; infra: V2Gap[] };
+  detectors: string[];
+  /** True when the source share record was generated with redact_repo. */
+  redacted: boolean;
+}
+
+export interface SecurityReportProps {
+  mode?: SecurityReportMode;
+}
+
+// ── Pure helpers ───────────────────────────────────────────────────
+
 function verdictFor(score: number): { headline: string; tone: 'good' | 'okay' | 'warn' | 'bad' } {
   if (score >= 90) return { headline: 'Strong security posture', tone: 'good' };
   if (score >= 75) return { headline: 'Generally secure with some issues to address', tone: 'okay' };
@@ -33,10 +61,6 @@ const VERDICT_COLOR: Record<'good' | 'okay' | 'warn' | 'bad', string> = {
   bad:  'text-red-600',
 };
 
-// Severity → display config for the 4-column breakdown grid. Colors
-// match the GapCard shield (Phase 2a) so the visual language is
-// consistent across the working surface (Gaps tab) and the sharing
-// surface (this page).
 const SEVERITY_TILES: Array<{
   key: SecuritySeverity;
   label: string;
@@ -61,9 +85,42 @@ function severityRank(s: SecuritySeverity | null | undefined): number {
   }
 }
 
+const CATEGORY_META: Record<GapCategory, {
+  label: string;
+  icon: typeof AlertOctagon;
+  pillBg: string;
+  pillText: string;
+  pillBorder: string;
+}> = {
+  broken:  { label: 'Broken',                  icon: AlertOctagon, pillBg: 'bg-red-50',    pillText: 'text-red-700',    pillBorder: 'border-red-200' },
+  missing: { label: 'Missing Functionality',   icon: Wrench,       pillBg: 'bg-amber-50',  pillText: 'text-amber-800',  pillBorder: 'border-amber-200' },
+  infra:   { label: 'Missing Infrastructure',  icon: Server,       pillBg: 'bg-stone-100', pillText: 'text-stone-700',  pillBorder: 'border-stone-300' },
+};
+
+const SEVERITY_PILL: Record<SecuritySeverity, { bg: string; text: string; border: string }> = {
+  critical: { bg: 'bg-red-100',    text: 'text-red-700',    border: 'border-red-200' },
+  high:     { bg: 'bg-red-50',     text: 'text-red-600',    border: 'border-red-100' },
+  medium:   { bg: 'bg-amber-50',   text: 'text-amber-700',  border: 'border-amber-200' },
+  low:      { bg: 'bg-stone-100',  text: 'text-stone-700',  border: 'border-stone-200' },
+};
+
+function severityToneClass(s: SecuritySeverity): string {
+  switch (s) {
+    case 'critical': return 'text-red-700';
+    case 'high':     return 'text-red-500';
+    case 'medium':   return 'text-amber-700';
+    case 'low':      return 'text-stone-500';
+  }
+}
+
+function cweUrl(cwe: string): string {
+  const num = String(cwe).replace(/[^0-9]/g, '');
+  return num ? `https://cwe.mitre.org/data/definitions/${num}.html` : 'https://cwe.mitre.org/';
+}
+
 function categoryMeta(category: string) {
-  if (category === 'broken') return { label: 'Broken',                 icon: AlertOctagon };
-  if (category === 'missing') return { label: 'Missing Functionality', icon: Wrench };
+  if (category === 'broken')  return { label: 'Broken',                 icon: AlertOctagon };
+  if (category === 'missing') return { label: 'Missing Functionality',  icon: Wrench };
   return                              { label: 'Missing Infrastructure', icon: Server };
 }
 
@@ -78,86 +135,133 @@ function formatLastAnalyzed(iso: string | null): string {
   }
 }
 
-export default function SecurityReport() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+// ── Component ──────────────────────────────────────────────────────
 
-  const [project, setProject] = useState<ProjectWithEntries | null>(null);
-  const [summary, setSummary] = useState<SecuritySummary | null>(null);
-  // We fetch the full gap list separately because the summary endpoint
-  // caps `topRisks` at 5. The collapsible "All security gaps" section
-  // needs the full set, grouped by category. Filtering is done
-  // client-side rather than adding a query param to the gaps endpoint:
-  // this is a single network call instead of two and the data is
-  // already sliced into the three categories we want to render.
-  const [allGaps, setAllGaps] = useState<V2Gap[]>([]);
+export default function SecurityReport({ mode = 'owner' }: SecurityReportProps = {}) {
+  const params = useParams<{ id?: string; slug?: string }>();
+  const navigate = useNavigate();
+  const auth = useAuth();
+  const isShared = mode === 'shared';
+
+  const [data, setData] = useState<ReportData | null>(null);
+  // Tracks the in-flight project status separately from `data` so an
+  // "analyzing" project can short-circuit to the takeoff route without
+  // crashing the rest of the page.
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
+
   const [severityFilter, setSeverityFilter] = useState<SecuritySeverity | null>(null);
   const [allOpen, setAllOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+
+  // ── Data loaders ────────────────────────────────────────────────
+  //
+  // The two modes have very different data shapes upstream — owner
+  // mode hits three authed endpoints and the shared mode hits one
+  // public endpoint that bundles everything. Both adapt to the same
+  // internal `ReportData` so the render path below stays single.
 
   useEffect(() => {
-    if (!id) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setErrorCode(null);
 
-    const tasks: Array<Promise<unknown>> = [
-      fetchProjectDetail(id).then((p) => { if (!cancelled) setProject(p); }),
-      fetchSecuritySummary(id).then((s) => { if (!cancelled) setSummary(s); }),
-      fetchV2Gaps(id).then((data) => {
-        if (cancelled) return;
-        const merged = [...data.broken, ...data.missing, ...data.infra]
-          .filter((g) => g.isSecurity === true);
-        setAllGaps(merged);
-      }),
-    ];
-
-    Promise.allSettled(tasks).then((results) => {
+    async function loadOwner() {
+      const id = params.id;
+      if (!id) throw new Error('Missing project id');
+      const [project, summary, gaps] = await Promise.all([
+        fetchProjectDetail(id),
+        fetchSecuritySummary(id),
+        fetchV2Gaps(id).catch(() => ({ broken: [], missing: [], infra: [] } as { broken: V2Gap[]; missing: V2Gap[]; infra: V2Gap[] })),
+      ]);
       if (cancelled) return;
-      // The project + summary fetches are required; gap fetch is best
-      // effort (it enriches the "All security gaps" section). If the
-      // first two fail, surface the most informative error.
-      const projectFail = results[0].status === 'rejected' ? results[0].reason : null;
-      const summaryFail = results[1].status === 'rejected' ? results[1].reason : null;
-      const fail = projectFail ?? summaryFail;
-      if (fail) setError((fail as Error)?.message ?? 'Failed to load security report');
-      setLoading(false);
-    });
+      if (project.status === 'analyzing' || project.status === 'pending') {
+        setPendingStatus(project.status);
+        return;
+      }
+      const securityGaps = {
+        broken:  gaps.broken.filter((g) => g.isSecurity === true),
+        missing: gaps.missing.filter((g) => g.isSecurity === true),
+        infra:   gaps.infra.filter((g) => g.isSecurity === true),
+      };
+      setData({
+        projectName: project.repo || project.repo_url,
+        repo: project.repo || null,
+        repoUrl: project.repo_url || null,
+        framework: project.framework,
+        description: project.description,
+        lastAnalyzed: summary.lastAnalyzed ?? project.updated_at ?? null,
+        projectId: project.id,
+        score: typeof summary.score === 'number'
+          ? summary.score
+          : (typeof project.security_score === 'number' ? project.security_score : null),
+        severityBreakdown: summary.severityBreakdown,
+        totalUnaddressed: summary.totalUnaddressed,
+        topRisks: summary.topRisks,
+        allSecurityGaps: securityGaps,
+        detectors: summary.detectors,
+        redacted: false,
+      });
+    }
+
+    async function loadShared() {
+      const slug = params.slug;
+      if (!slug) throw new Error('Missing share slug');
+      const r = await fetchSharedSecurityReport(slug);
+      if (cancelled) return;
+      setData({
+        projectName: r.project.name,
+        repo: r.project.repo,
+        repoUrl: r.project.repoUrl,
+        framework: r.project.framework,
+        description: r.project.description,
+        lastAnalyzed: r.project.lastAnalyzed,
+        projectId: null,
+        score: r.score,
+        severityBreakdown: r.severityBreakdown,
+        totalUnaddressed: r.totalUnaddressed,
+        topRisks: r.topRisks,
+        allSecurityGaps: r.allSecurityGaps,
+        detectors: r.detectors,
+        redacted: r.share.redactRepo,
+      });
+    }
+
+    (isShared ? loadShared() : loadOwner())
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const e = err as { message?: string; status?: number };
+        setError(e?.message ?? 'Failed to load security report');
+        setErrorCode(typeof e?.status === 'number' ? e.status : null);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [id]);
+  }, [isShared, params.id, params.slug]);
 
-  // Treat in-flight or pending projects the same way the project
-  // workspace does — bounce to /takeoff/:id where the user can watch
-  // analysis progress instead of a permanently-empty report.
+  // Owner-mode: bounce in-flight projects to the takeoff progress page
+  // exactly like the project workspace does. Effect rather than inline
+  // navigate-during-render to satisfy React's render purity.
   useEffect(() => {
-    if (!loading && project && (project.status === 'analyzing' || project.status === 'pending')) {
-      navigate(`/takeoff/${id}`, { replace: true });
+    if (mode === 'owner' && pendingStatus && params.id) {
+      navigate(`/takeoff/${params.id}`, { replace: true });
     }
-  }, [loading, project, id, navigate]);
+  }, [mode, pendingStatus, params.id, navigate]);
 
   const reAnalyze = useCallback(() => {
-    if (id) navigate(`/takeoff/${id}`);
-  }, [id, navigate]);
-
-  const score = summary?.score
-    ?? (typeof project?.security_score === 'number' ? project.security_score : null);
-
-  const verdict = useMemo(
-    () => (typeof score === 'number' ? verdictFor(score) : null),
-    [score],
-  );
+    if (params.id) navigate(`/takeoff/${params.id}`);
+  }, [params.id, navigate]);
 
   const visibleAllGaps = useMemo(() => {
-    let v = allGaps;
-    if (severityFilter) v = v.filter((g) => g.securitySeverity === severityFilter);
-    return v;
-  }, [allGaps, severityFilter]);
+    if (!data) return [] as V2Gap[];
+    const flat = [...data.allSecurityGaps.broken, ...data.allSecurityGaps.missing, ...data.allSecurityGaps.infra];
+    if (!severityFilter) return flat;
+    return flat.filter((g) => g.securitySeverity === severityFilter);
+  }, [data, severityFilter]);
 
-  // Group + sort the "All security gaps" section. Within each
-  // category we sort by severity (critical → low) then by title for
-  // stable ordering across re-fetches.
   const groupedAllGaps = useMemo(() => {
     const buckets: Record<string, V2Gap[]> = { broken: [], missing: [], infra: [] };
     for (const g of visibleAllGaps) {
@@ -176,7 +280,9 @@ export default function SecurityReport() {
     return buckets;
   }, [visibleAllGaps]);
 
-  if (loading) {
+  // ── Loading + error states ──────────────────────────────────────
+
+  if (loading || (mode === 'owner' && pendingStatus)) {
     return (
       <div className="min-h-screen bg-stone-50 v2-font-sans flex items-center justify-center">
         <div className="text-stone-500 text-sm">Loading security report…</div>
@@ -184,23 +290,39 @@ export default function SecurityReport() {
     );
   }
 
-  if (error || !project) {
+  if (error || !data) {
+    const isGone = errorCode === 410;
     return (
       <div className="min-h-screen bg-stone-50 v2-font-sans flex items-center justify-center px-6">
         <EmptyState
           icon={Shield}
-          title="Couldn't load this security report"
-          description={error ?? 'Project not found.'}
+          title={isGone ? 'This share link is no longer active' : "Couldn't load this security report"}
+          description={isGone
+            ? 'The link has been revoked or has expired. Ask the project owner for a new one.'
+            : (error ?? 'Project not found.')}
         />
       </div>
     );
   }
 
-  const repoLabel = project.repo || project.repo_url;
-  const totalUnaddressed = summary?.totalUnaddressed ?? 0;
-  const breakdown = summary?.severityBreakdown ?? { critical: 0, high: 0, medium: 0, low: 0 };
-  const detectors = summary?.detectors ?? [];
-  const lastAnalyzed = summary?.lastAnalyzed ?? project.updated_at ?? null;
+  const breakdown = data.severityBreakdown;
+  const totalUnaddressed = data.totalUnaddressed;
+  const detectors = data.detectors;
+  const verdict = typeof data.score === 'number' ? verdictFor(data.score) : null;
+  const filteredTopRisks = severityFilter
+    ? data.topRisks.filter((r) => r.securitySeverity === severityFilter)
+    : data.topRisks;
+
+  // Visibility rules for admin affordances. We default to "hide" in
+  // shared mode; owner-mode visibility additionally requires that the
+  // user is signed in *or* the project is public-readable. We don't
+  // know "public-readable" from the client perspective directly, but
+  // an unauthenticated user reaching /v2/projects/:id/security has
+  // already loaded data without a 401, so it's safe to assume the
+  // project is public — but we still hide the Share button because
+  // anonymous users can't create shares anyway.
+  const showAdminActions = !isShared;
+  const showShareButton  = !isShared && !!auth.user;
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
@@ -213,29 +335,49 @@ export default function SecurityReport() {
             </div>
             <div className="min-w-0">
               <h1 className="text-lg font-bold text-stone-900 tracking-tight truncate">
-                {repoLabel}
+                {data.projectName}
               </h1>
               <p className="text-xs text-stone-500 inline-flex items-center gap-1.5">
                 <Shield className="w-3 h-3" aria-hidden />
-                Security Report · {formatLastAnalyzed(lastAnalyzed)}
+                Security Report · {formatLastAnalyzed(data.lastAnalyzed)}
+                {data.redacted ? (
+                  <span className="inline-flex items-center gap-1 text-amber-700 ml-2">
+                    <EyeOff className="w-3 h-3" aria-hidden />
+                    Redacted
+                  </span>
+                ) : null}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Link
-              to={`/v2/projects/${id}#gaps`}
-              className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
-            >
-              ← Back to project
-            </Link>
-            <button
-              type="button"
-              onClick={reAnalyze}
-              className="text-xs text-white bg-stone-900 hover:bg-stone-800 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
-            >
-              <RefreshCw className="w-3 h-3" aria-hidden />
-              Re-analyze
-            </button>
+            {showAdminActions ? (
+              <Link
+                to={`/v2/projects/${params.id}#gaps`}
+                className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
+              >
+                ← Back to project
+              </Link>
+            ) : null}
+            {showShareButton ? (
+              <button
+                type="button"
+                onClick={() => setShareModalOpen(true)}
+                className="text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+              >
+                <Share2 className="w-3 h-3" aria-hidden />
+                Share
+              </button>
+            ) : null}
+            {showAdminActions ? (
+              <button
+                type="button"
+                onClick={reAnalyze}
+                className="text-xs text-white bg-stone-900 hover:bg-stone-800 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+              >
+                <RefreshCw className="w-3 h-3" aria-hidden />
+                Re-analyze
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
@@ -245,11 +387,11 @@ export default function SecurityReport() {
         {/* ── Score hero ─────────────────────────────────────────── */}
         <section className="text-center">
           <p className="text-xs uppercase tracking-widest text-stone-500 mb-3">Security Score</p>
-          {typeof score === 'number' ? (
+          {typeof data.score === 'number' ? (
             <>
               <div className="inline-flex items-baseline gap-2">
                 <span className="text-7xl font-bold text-stone-900 tracking-tight tabular-nums v2-font-serif">
-                  {score}
+                  {data.score}
                 </span>
                 <span className="text-2xl text-stone-400 font-light">/ 100</span>
               </div>
@@ -265,9 +407,7 @@ export default function SecurityReport() {
               </p>
             </>
           ) : (
-            <p className="text-stone-500 text-sm">
-              No security score yet — re-run analysis to populate this report.
-            </p>
+            <p className="text-stone-500 text-sm">No security score yet.</p>
           )}
         </section>
 
@@ -313,30 +453,25 @@ export default function SecurityReport() {
         </section>
 
         {/* ── Top risks ──────────────────────────────────────────── */}
-        {summary && summary.topRisks.length > 0 ? (
+        {filteredTopRisks.length > 0 ? (
           <section>
             <div className="flex items-center justify-between mb-3">
-              <MetadataLabel>Top {Math.min(5, summary.topRisks.length)} risks</MetadataLabel>
-              <Link
-                to={`/v2/projects/${id}#gaps`}
-                className="text-xs text-stone-500 hover:text-stone-900"
-              >
-                Triage in Gaps tab →
-              </Link>
+              <MetadataLabel>Top {Math.min(5, filteredTopRisks.length)} risks</MetadataLabel>
+              {showAdminActions ? (
+                <Link
+                  to={`/v2/projects/${params.id}#gaps`}
+                  className="text-xs text-stone-500 hover:text-stone-900"
+                >
+                  Triage in Gaps tab →
+                </Link>
+              ) : null}
             </div>
             <div className="space-y-3">
-              {(severityFilter
-                ? summary.topRisks.filter((r) => r.securitySeverity === severityFilter)
-                : summary.topRisks
-              ).map((risk) => (
-                // GapCard with no triage callbacks — the report is a
-                // viewing surface, not a working surface. The "Triage
-                // in Gaps tab" link in the section header points to
-                // the working surface.
-                <GapCard
+              {filteredTopRisks.map((risk) => (
+                <TopRiskCard
                   key={risk.id}
                   gap={risk}
-                  status={risk.status}
+                  fixHref={showAdminActions && data.projectId ? `/v2/projects/${data.projectId}#gaps` : null}
                 />
               ))}
             </div>
@@ -344,7 +479,7 @@ export default function SecurityReport() {
         ) : null}
 
         {/* ── All security gaps (collapsible) ─────────────────────── */}
-        {allGaps.length > 0 ? (
+        {(data.allSecurityGaps.broken.length + data.allSecurityGaps.missing.length + data.allSecurityGaps.infra.length) > 0 ? (
           <section>
             <button
               type="button"
@@ -353,7 +488,11 @@ export default function SecurityReport() {
               className="w-full flex items-center justify-between text-left py-2 group"
             >
               <MetadataLabel>
-                All security gaps ({severityFilter ? visibleAllGaps.length : allGaps.length})
+                All security gaps (
+                  {severityFilter
+                    ? visibleAllGaps.length
+                    : data.allSecurityGaps.broken.length + data.allSecurityGaps.missing.length + data.allSecurityGaps.infra.length}
+                )
               </MetadataLabel>
               <span className="text-stone-400 group-hover:text-stone-700 transition-colors">
                 {allOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -376,7 +515,11 @@ export default function SecurityReport() {
                       </div>
                       <ul className="divide-y divide-stone-100">
                         {items.map((g) => (
-                          <CompactRiskRow key={g.id} gap={g} projectId={id!} />
+                          <CompactRiskRow
+                            key={g.id}
+                            gap={g}
+                            fixHref={showAdminActions && data.projectId ? `/v2/projects/${data.projectId}#gaps` : null}
+                          />
                         ))}
                       </ul>
                     </div>
@@ -400,7 +543,7 @@ export default function SecurityReport() {
               <>
                 <p className="text-xs text-stone-500 mb-3">
                   This report ran {detectors.length} security detector{detectors.length === 1 ? '' : 's'} against
-                  your codebase. Each looks for a specific class of issue, with conservative
+                  the codebase. Each looks for a specific class of issue, with conservative
                   patterns to keep false positives low.
                 </p>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
@@ -412,7 +555,7 @@ export default function SecurityReport() {
                   ))}
                 </ul>
                 <p className="text-[11px] text-stone-400 mt-3">
-                  Last analyzed: {formatLastAnalyzed(lastAnalyzed)}
+                  Last analyzed: {formatLastAnalyzed(data.lastAnalyzed)}
                 </p>
               </>
             )}
@@ -420,70 +563,179 @@ export default function SecurityReport() {
         </section>
 
         {/* No-findings reassurance */}
-        {summary && totalUnaddressed === 0 && allGaps.length === 0 ? (
+        {totalUnaddressed === 0
+          && (data.allSecurityGaps.broken.length + data.allSecurityGaps.missing.length + data.allSecurityGaps.infra.length) === 0
+          ? (
           <section className="bg-emerald-50 border border-emerald-100 rounded-lg p-6 text-center">
             <Shield className="w-8 h-8 text-emerald-600 mx-auto mb-2" aria-hidden />
             <p className="font-semibold text-stone-900">No security gaps detected</p>
             <p className="text-sm text-stone-600 mt-1">
               All {detectors.length} detector{detectors.length === 1 ? '' : 's'} ran clean.
-              Re-analyze after each material change to keep this badge honest.
+              {showAdminActions ? ' Re-analyze after each material change to keep this badge honest.' : null}
             </p>
           </section>
         ) : null}
 
+        {/* ── Shared-only footer CTA ─────────────────────────────── */}
+        {isShared ? (
+          <section className="border-t border-stone-200 pt-8 mt-8 text-center">
+            <p className="text-sm text-stone-700">
+              This report was generated by Takeoff.
+            </p>
+            <p className="text-sm text-stone-500 mt-1">Want to audit your own app?</p>
+            <a
+              href="/"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-stone-900 hover:text-stone-700"
+            >
+              Get a security report <ArrowRight className="w-3.5 h-3.5" aria-hidden />
+            </a>
+          </section>
+        ) : null}
+
       </main>
+
+      {/* ── Owner-only: Share modal ──────────────────────────────── */}
+      {showShareButton && data.projectId ? (
+        <ShareSecurityModal
+          open={shareModalOpen}
+          onClose={() => setShareModalOpen(false)}
+          projectId={data.projectId}
+        />
+      ) : null}
     </div>
   );
 }
 
-// Compact list row for the collapsible "All security gaps" section.
-// Stays terse — title, severity, file count, and a deep-link to Gaps —
-// so a project with dozens of findings doesn't blow up into pages of
-// expanded cards.
-function CompactRiskRow({ gap, projectId }: { gap: V2Gap; projectId: string }) {
+// ── TopRiskCard ────────────────────────────────────────────────────
+//
+// Read-only card for the "Top 5 risks" section. Mirrors the visual
+// language of GapCard's security shield + callout (Phase 2a) but
+// strips out triage controls — the report is a viewing surface.
+// `fixHref` adds a "Fix this gap →" deep link when set; in shared
+// mode it's null and the CTA is omitted.
+function TopRiskCard({ gap, fixHref }: { gap: V2Gap; fixHref: string | null }) {
+  const cat = (gap.category as GapCategory) || 'broken';
+  const cm = CATEGORY_META[cat];
+  const CatIcon = cm.icon;
+  const sev = gap.securitySeverity;
+  const sevPill = sev ? SEVERITY_PILL[sev] : null;
+  const filesCount = typeof gap.files === 'number' && gap.files > 0 ? gap.files : null;
+  return (
+    <article className={`bg-white border ${cm.pillBorder} rounded-lg p-5`}>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold border rounded-full px-2 py-0.5 ${cm.pillBg} ${cm.pillText} ${cm.pillBorder}`}>
+          <CatIcon className="w-3 h-3" aria-hidden /> {cm.label}
+        </span>
+        {sev && sevPill ? (
+          <span
+            className={`inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 ${sevPill.bg} ${sevPill.text} ${sevPill.border}`}
+            aria-label={`Severity ${sev}`}
+          >
+            <Shield className="w-3 h-3" aria-hidden /> Security · {sev[0].toUpperCase() + sev.slice(1)}
+          </span>
+        ) : null}
+        {gap.effort ? (
+          <>
+            <span className="text-xs text-stone-500">·</span>
+            <span className="text-xs text-stone-500">{gap.effort} effort</span>
+          </>
+        ) : null}
+        {filesCount !== null ? (
+          <>
+            <span className="text-xs text-stone-500">·</span>
+            <span className="text-xs text-stone-500">{filesCount} file{filesCount === 1 ? '' : 's'}</span>
+          </>
+        ) : null}
+      </div>
+      <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
+      <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
+      {sev ? (
+        <div className="mb-3 px-3 py-2 bg-red-50/50 border border-red-100 rounded-md">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-700 mb-0.5">
+            <Shield className="w-3 h-3" aria-hidden />
+            Why this is a security risk
+          </div>
+          <div className="text-xs text-stone-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span>
+              Severity <span className={`font-medium ${severityToneClass(sev)}`}>{sev}</span>
+            </span>
+            {gap.cweId ? (
+              <>
+                <span aria-hidden className="text-stone-300">·</span>
+                <a
+                  href={cweUrl(gap.cweId)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-red-700 hover:text-red-800 underline-offset-2 hover:underline"
+                >
+                  {gap.cweId}
+                  <ExternalLink className="w-2.5 h-2.5 inline-block ml-0.5 -mt-0.5" aria-hidden />
+                </a>
+              </>
+            ) : null}
+            {gap.securityDetector ? (
+              <>
+                <span aria-hidden className="text-stone-300">·</span>
+                <span>
+                  Detected by <span className="font-mono text-stone-700">{gap.securityDetector}</span>
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      {fixHref ? (
+        <Link
+          to={fixHref}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-900 hover:text-stone-700"
+        >
+          Fix this gap <ArrowRight className="w-3.5 h-3.5" aria-hidden />
+        </Link>
+      ) : null}
+    </article>
+  );
+}
+
+// ── CompactRiskRow ─────────────────────────────────────────────────
+//
+// One-line list entry for the collapsible "All security gaps" section.
+// `fixHref` controls whether the row is link-wrapped (owner mode) or
+// rendered as plain text (shared mode), so a public viewer never gets
+// dead links to the auth-gated Gaps tab.
+function CompactRiskRow({ gap, fixHref }: { gap: V2Gap; fixHref: string | null }) {
   const sev = gap.securitySeverity;
   const sevTone = sev ? severityToneClass(sev) : 'text-stone-500';
   const filesCount = typeof gap.files === 'number' && gap.files > 0 ? gap.files : null;
-
+  const titleEl = fixHref
+    ? (
+      <Link to={fixHref} className="block text-sm font-medium text-stone-900 hover:text-stone-700">
+        {gap.title}
+      </Link>
+    )
+    : <span className="block text-sm font-medium text-stone-900">{gap.title}</span>;
   return (
     <li className="px-4 py-3 hover:bg-stone-50 transition-colors">
       <div className="flex items-start gap-3">
         <Shield className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${sevTone}`} aria-hidden />
         <div className="flex-1 min-w-0">
-          <Link
-            to={`/v2/projects/${projectId}#gaps`}
-            className="block text-sm font-medium text-stone-900 hover:text-stone-700"
-          >
-            {gap.title}
-          </Link>
+          {titleEl}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-stone-500 mt-0.5">
             {sev ? <span className={`font-semibold ${sevTone}`}>{sev}</span> : null}
-            {gap.cweId ? (
-              <span className="font-mono">{gap.cweId}</span>
-            ) : null}
-            {gap.securityDetector ? (
-              <span className="font-mono">{gap.securityDetector}</span>
-            ) : null}
+            {gap.cweId ? <span className="font-mono">{gap.cweId}</span> : null}
+            {gap.securityDetector ? <span className="font-mono">{gap.securityDetector}</span> : null}
             {filesCount !== null ? <span>{filesCount} file{filesCount === 1 ? '' : 's'}</span> : null}
           </div>
         </div>
-        <Link
-          to={`/v2/projects/${projectId}#gaps`}
-          aria-label="Open in Gaps tab"
-          className="text-stone-400 hover:text-stone-700 flex-shrink-0 mt-0.5"
-        >
-          <ExternalLink className="w-3.5 h-3.5" />
-        </Link>
+        {fixHref ? (
+          <Link
+            to={fixHref}
+            aria-label="Open in Gaps tab"
+            className="text-stone-400 hover:text-stone-700 flex-shrink-0 mt-0.5"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Link>
+        ) : null}
       </div>
     </li>
   );
-}
-
-function severityToneClass(s: SecuritySeverity): string {
-  switch (s) {
-    case 'critical': return 'text-red-700';
-    case 'high':     return 'text-red-500';
-    case 'medium':   return 'text-amber-700';
-    case 'low':      return 'text-stone-500';
-  }
 }

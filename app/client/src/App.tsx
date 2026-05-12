@@ -78,7 +78,10 @@ export default function App() {
             {/* v2 (Takeoff) — additive routes, do not affect v1 */}
             <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
             <Route path="/v2/projects/:id" element={<ProjectV2 />} />
-            <Route path="/v2/projects/:id/security" element={<SecurityReportV2 />} />
+            <Route path="/v2/projects/:id/security" element={<SecurityReportV2 mode="owner" />} />
+            {/* Public, no-auth share view. Mounted as a top-level path
+                so it can never be accidentally gated by auth wrappers. */}
+            <Route path="/v2/security/shared/:slug" element={<SecurityReportV2 mode="shared" />} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
