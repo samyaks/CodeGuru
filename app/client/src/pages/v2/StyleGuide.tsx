@@ -198,7 +198,7 @@ export default function StyleGuide() {
         <Section title="TabBar">
           <TabBar
             tabs={[
-              { id: 'gaps', label: 'Gaps', icon: AlertOctagon, badge: 5 },
+              { id: 'gaps', label: 'Gaps', icon: AlertOctagon, badge: 9, badgeColor: 'red' },
               { id: 'map', label: 'Map', icon: Users },
               { id: 'context', label: 'Context', icon: FileText },
               { id: 'shipped', label: 'Shipped', icon: GitCommit, badge: 2, badgeColor: 'emerald' },
@@ -206,6 +206,9 @@ export default function StyleGuide() {
             activeId={activeTab}
             onChange={setActiveTab}
           />
+          <p className="text-xs text-stone-500 mt-2">
+            The Gaps badge above renders in red when there are unaddressed security findings — Phase 2 slice (c).
+          </p>
         </Section>
 
         <Section title="ProgressBar">

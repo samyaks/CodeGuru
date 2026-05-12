@@ -118,6 +118,41 @@ export async function refineV2Gap(
   return data.gap;
 }
 
+// ── Security ───────────────────────────────────────────────────────
+
+/** A single security finding rendered as a top risk in the security
+ *  summary endpoint. Mirrors the V2Gap shape for the security-relevant
+ *  fields plus the lifecycle status — the report view (Phase 3) can
+ *  reuse this list directly without a second fetch. */
+export interface SecurityTopRisk extends V2Gap {
+  // No additional fields — V2Gap already carries isSecurity,
+  // securitySeverity, cweId, securityDetector after Phase 2 slice (a).
+}
+
+export interface SecuritySummary {
+  /** Live score, recomputed from current unaddressed security gaps on
+   *  every request. Should equal `cachedScore` whenever the analysis
+   *  is up-to-date — they diverge only briefly while a re-analysis
+   *  is in flight or a triage just happened. */
+  score: number;
+  severityBreakdown: { critical: number; high: number; medium: number; low: number };
+  totalUnaddressed: number;
+  /** Last persisted score on `deployments.security_score`. Useful to
+   *  cross-check against `score` when surfacing trends. Null on
+   *  projects analyzed before migration 014. */
+  cachedScore: number | null;
+  topRisks: SecurityTopRisk[];
+  /** Names of all detectors registered server-side, in the order
+   *  they ran. Used by the report view to show "detected by" credits. */
+  detectors: string[];
+  lastAnalyzed: string | null;
+}
+
+export async function fetchSecuritySummary(projectId: string): Promise<SecuritySummary> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/security-summary`);
+  return handleApiResponse<SecuritySummary>(res);
+}
+
 // ── Shipped ────────────────────────────────────────────────────────
 
 import type { ShippedItemData } from '../components/v2';

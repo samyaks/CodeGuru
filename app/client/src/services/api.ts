@@ -216,6 +216,12 @@ export interface Project {
   build_plan: BuildPlan | null;
   readiness_score: number | null;
   readiness_categories: Record<string, ReadinessCategory> | null;
+  /** Security score (0-100). Migration 014. Null on projects analyzed
+   *  before that migration; the v2 header hides the security block in
+   *  that case rather than guessing 100. Recomputed on every analysis
+   *  run from the live unaddressed security gaps; the live value is
+   *  also exposed at GET /api/v2/projects/:id/security-summary. */
+  security_score?: number | null;
   plan_steps: PlanStep[] | null;
   recommendation: 'deploy' | 'plan' | null;
   analysis_data: AnalysisData | null;

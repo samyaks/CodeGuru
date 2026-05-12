@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react';
 import type { LucideProps } from 'lucide-react';
 
-export type TabBadgeColor = 'default' | 'emerald';
+export type TabBadgeColor = 'default' | 'emerald' | 'red';
 
 export interface TabDescriptor {
   id: string;
@@ -45,8 +45,12 @@ export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps
                     isActive
                       ? tab.badgeColor === 'emerald'
                         ? 'bg-emerald-500 text-white'
-                        : 'bg-stone-900 text-white'
-                      : 'bg-stone-100 text-stone-600'
+                        : tab.badgeColor === 'red'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-stone-900 text-white'
+                      : tab.badgeColor === 'red'
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-stone-100 text-stone-600'
                   }`}
                 >
                   {tab.badge}

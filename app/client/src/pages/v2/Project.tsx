@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Users, Zap,
+  AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Shield, Users, Zap,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
+import { fetchSecuritySummary, type SecuritySummary } from '../../services/v2Api';
 import {
   TabBar, MetadataLabel, EmptyState, ChatDrawer,
 } from '../../components/v2';
@@ -55,6 +56,10 @@ export default function ProjectV2() {
 
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [productMap, setProductMap] = useState<ProductMapData | null>(null);
+  // Best-effort fetch — failures don't block the page. The cached
+  // `project.security_score` is the fallback for the header score; the
+  // tab-badge sub-indicator just stays hidden if we couldn't load.
+  const [securitySummary, setSecuritySummary] = useState<SecuritySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(readHashTab);
@@ -77,6 +82,11 @@ export default function ProjectV2() {
     fetchProductMap(id)
       .then((map) => { if (!cancelled) setProductMap(map); })
       .catch(() => { /* product map is best-effort */ });
+
+    fetchSecuritySummary(id)
+      .then((s) => { if (!cancelled) setSecuritySummary(s); })
+      .catch(() => { /* security summary is best-effort — header falls
+                        back to the cached score on the project row. */ });
 
     return () => { cancelled = true; };
   }, [id]);
@@ -143,6 +153,24 @@ export default function ProjectV2() {
   }, [project]);
 
   const readiness = project?.readiness_score ?? null;
+  // Header score: prefer the live recompute (catches any post-analysis
+  // triage), fall back to the cached column on the project row, else
+  // null (= hide the security block, e.g. for projects analyzed before
+  // migration 014).
+  const securityScore = securitySummary?.score
+    ?? (typeof project?.security_score === 'number' ? project.security_score : null);
+  const securityActiveCount = securitySummary?.totalUnaddressed ?? 0;
+  const securityScoreLow = typeof securityScore === 'number' && securityScore < 60;
+
+  // Tab descriptors are recomputed when the security count changes so
+  // the Gaps badge updates as soon as the summary lands. The badge
+  // doubles as the "🛡️ s" sub-indicator from the spec — same surface,
+  // just a single red pill instead of two stacked tokens.
+  const tabsWithBadges = useMemo(() => TAB_DEFS.map((tab) => (
+    tab.id === 'gaps' && securityActiveCount > 0
+      ? { ...tab, badge: securityActiveCount, badgeColor: 'red' as const }
+      : tab
+  )), [securityActiveCount]);
 
   if (loading) {
     return (
@@ -197,13 +225,37 @@ export default function ProjectV2() {
             <h2 className="text-4xl font-bold text-stone-900 tracking-tight v2-font-serif">
               {project.repo || project.repo_url}
             </h2>
-            {readiness !== null ? (
-              <div className="flex items-center gap-3 text-sm">
-                <span className="text-stone-500">Readiness</span>
-                <span className="text-2xl font-bold text-stone-900">{readiness}</span>
-                <span className="text-stone-400">/ 100</span>
-              </div>
-            ) : null}
+            <div className="flex items-center gap-6 text-sm">
+              {readiness !== null ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-stone-500">Readiness</span>
+                  <span className="text-2xl font-bold text-stone-900">{readiness}</span>
+                  <span className="text-stone-400">/ 100</span>
+                </div>
+              ) : null}
+              {securityScore !== null ? (
+                <div
+                  className="flex items-center gap-3"
+                  title="Computed from active security gaps weighted by severity."
+                >
+                  <span className="text-stone-500 inline-flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5" aria-hidden />
+                    Security
+                  </span>
+                  <span className="text-2xl font-bold text-stone-900 inline-flex items-center gap-1.5">
+                    {securityScore}
+                    {securityScoreLow ? (
+                      <span
+                        className="w-2 h-2 rounded-full bg-red-500"
+                        aria-label="Low security score — review urgently"
+                        title="Low security score — review urgently"
+                      />
+                    ) : null}
+                  </span>
+                  <span className="text-stone-400">/ 100</span>
+                </div>
+              ) : null}
+            </div>
           </div>
           <p className="text-stone-600 text-sm">
             {project.description ?? project.framework ?? 'Project'}
@@ -211,7 +263,7 @@ export default function ProjectV2() {
         </div>
 
         <TabBar
-          tabs={TAB_DEFS}
+          tabs={tabsWithBadges}
           activeId={activeTab}
           onChange={setTab}
           className="mb-8"
