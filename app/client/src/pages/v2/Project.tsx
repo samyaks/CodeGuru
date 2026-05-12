@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Shield, Users, Zap,
 } from 'lucide-react';
@@ -253,6 +253,12 @@ export default function ProjectV2() {
                     ) : null}
                   </span>
                   <span className="text-stone-400">/ 100</span>
+                  <Link
+                    to={`/v2/projects/${id}/security`}
+                    className="text-xs text-stone-500 hover:text-stone-900 underline underline-offset-2 ml-1"
+                  >
+                    Open report →
+                  </Link>
                 </div>
               ) : null}
             </div>
