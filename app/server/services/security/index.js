@@ -39,21 +39,19 @@
 
 const crypto = require('crypto');
 
-// Detector registry. Empty in slice (a); detectors append themselves
-// here as they're added in follow-up commits.
-//
-// Order doesn't matter — findings are deduped by fingerprint downstream.
+// Detector registry. Order doesn't matter — findings are deduped by
+// fingerprint downstream.
 const TIER1 = [
-  // require('./detectors/exposed-secrets'),
-  // require('./detectors/dotenv-committed'),
-  // require('./detectors/dependency-vulnerabilities'),
-  // require('./detectors/sql-injection-patterns'),
-  // require('./detectors/cors-wildcard'),
-  // require('./detectors/eval-with-input'),
-  // require('./detectors/insecure-cookie-config'),
-  // require('./detectors/missing-helmet'),
-  // require('./detectors/csrf-on-state-changing-routes'),
-  // require('./detectors/error-detail-leakage'),
+  require('./detectors/exposed-secrets'),
+  require('./detectors/dotenv-committed'),
+  require('./detectors/dependency-vulnerabilities'),
+  require('./detectors/sql-injection-patterns'),
+  require('./detectors/cors-wildcard'),
+  require('./detectors/eval-with-input'),
+  require('./detectors/insecure-cookie-config'),
+  require('./detectors/missing-helmet'),
+  require('./detectors/csrf-on-state-changing-routes'),
+  require('./detectors/error-detail-leakage'),
 ];
 
 const TIER2 = [
