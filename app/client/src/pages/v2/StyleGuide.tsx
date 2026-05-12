@@ -44,6 +44,64 @@ const SAMPLE_GAPS: GapData[] = [
     effort: 'Medium',
     required_for: ['Notifications', 'Password reset', 'Report delivery'],
   },
+  // Phase 2 slice (a): the security lens. One sample per severity so
+  // we can eyeball the shield badge color + callout in StyleGuide
+  // without spinning up a real analysis run.
+  {
+    id: 'sec1',
+    category: 'broken',
+    title: 'Possible Anthropic API key committed in app/server/keys.ts',
+    description:
+      'A line in app/server/keys.ts matches the pattern of an Anthropic API key. Anyone with read access to this repo can see this credential. Move it to an environment variable and rotate the key (assume it\'s already compromised).',
+    effort: 'Small',
+    files: 1,
+    isSecurity: true,
+    securitySeverity: 'critical',
+    cweId: 'CWE-798',
+    securityDetector: 'exposed-secrets',
+    source: 'security',
+  },
+  {
+    id: 'sec2',
+    category: 'broken',
+    title: 'Possible SQL injection at app/server/users.ts:42',
+    description:
+      'This line builds a SQL query via template-literal interpolation. If any interpolated value is user-controlled, an attacker can terminate the intended query and run their own. Use parameterised queries instead.',
+    effort: 'Medium',
+    files: 1,
+    isSecurity: true,
+    securitySeverity: 'high',
+    cweId: 'CWE-89',
+    securityDetector: 'sql-injection-patterns',
+    source: 'security',
+  },
+  {
+    id: 'sec3',
+    category: 'infra',
+    title: 'Express app is missing helmet security headers',
+    description:
+      'helmet is a one-line middleware that sets a bundle of HTTP security headers. Without it, the app is more exposed to XSS, clickjacking, and MIME-confusion attacks than it needs to be.',
+    effort: 'Small',
+    isSecurity: true,
+    securitySeverity: 'medium',
+    cweId: 'CWE-693',
+    securityDetector: 'missing-helmet',
+    source: 'security',
+  },
+  {
+    id: 'sec4',
+    category: 'broken',
+    title: 'eval() in app/server/util.ts:18',
+    description:
+      'eval() is in use here but no obvious user-input flow reaches it. The immediate risk is low, but eval() remains a footgun that any future refactor can turn into a critical eval-injection issue.',
+    effort: 'Small',
+    files: 1,
+    isSecurity: true,
+    securitySeverity: 'low',
+    cweId: 'CWE-95',
+    securityDetector: 'eval-with-input',
+    source: 'security',
+  },
 ];
 
 const SAMPLE_SHIPPED: ShippedItemData[] = [
@@ -93,6 +151,10 @@ export default function StyleGuide() {
     b1: 'in-progress',
     m1: 'untriaged',
     i1: 'rejected',
+    sec1: 'untriaged',
+    sec2: 'in-progress',
+    sec3: 'untriaged',
+    sec4: 'rejected',
   });
 
   return (

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import {
   AlertOctagon, Briefcase, Check, CheckCircle, ChevronDown, ChevronUp,
-  Circle, Copy, ExternalLink, GitCommit, Server, Sparkles, Users, Wand2, Wrench, X,
+  Circle, Copy, ExternalLink, GitCommit, Server, Shield, Sparkles, Users, Wand2, Wrench, X,
 } from 'lucide-react';
 import { Badge } from './Badge';
 
 export type GapCategory = 'broken' | 'missing' | 'infra';
 export type GapStatus = 'untriaged' | 'in-progress' | 'rejected' | 'shipped';
+export type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface GapAffectedJob {
   jobId: string;
@@ -36,10 +37,27 @@ export interface GapData {
    *  card just falls back to the free-form `affects` strings. */
   affectedJobs?: GapAffectedJob[];
   /** 'ai' for persisted suggestions, 'map' for synthetic gaps generated
-   *  from the product map's missing entities. The latter don't have a
-   *  cached `prompt`, don't accept Accept/Reject, and have a "Get
-   *  Cursor prompt" affordance instead. */
-  source?: 'ai' | 'map';
+   *  from the product map's missing entities, 'security' for findings
+   *  from the security detectors. `map` gaps don't have a cached
+   *  `prompt`, don't accept Accept/Reject, and have a "Get Cursor
+   *  prompt" affordance instead. `security` rows behave like `ai` for
+   *  triage; the security lens is signaled by `isSecurity` instead. */
+  source?: 'ai' | 'map' | 'security';
+  /** Security lens (Phase 1). Orthogonal to category — a gap can be
+   *  Broken AND Security, or Missing-Infra AND Security. Backed by the
+   *  v2 `suggestions.is_security` column. When true, the card renders a
+   *  Shield badge next to the category badge and an inline "why this
+   *  is a security risk" callout under the description. */
+  isSecurity?: boolean;
+  securitySeverity?: SecuritySeverity | null;
+  /** CWE identifier such as 'CWE-89'. Renders as a link to MITRE in
+   *  the security callout when present. */
+  cweId?: string | null;
+  /** Name of the detector that flagged this gap (e.g.
+   *  'sql-injection-patterns'). Surfaced in the callout for trust /
+   *  debugging — the user gets to see the receipt, not just the
+   *  verdict. */
+  securityDetector?: string | null;
 }
 
 export interface GapCardProps {
@@ -73,6 +91,27 @@ const CATEGORY_META: Record<GapCategory, {
   infra: { label: 'Missing Infrastructure', icon: Server, border: 'border-stone-300' },
 };
 
+// Severity colors for the Shield badge. Matches the spec exactly:
+// critical=red-600, high=red-500, medium=amber-600, low=stone-600.
+// The "low" tone uses a stone hue rather than green/blue so a low-sev
+// security gap reads as "still a finding" — not "all clear".
+const SECURITY_SEVERITY_META: Record<SecuritySeverity, {
+  label: string;
+  shieldClass: string;
+}> = {
+  critical: { label: 'Critical', shieldClass: 'bg-red-50 text-red-600 border-red-200' },
+  high:     { label: 'High',     shieldClass: 'bg-red-50 text-red-500 border-red-100' },
+  medium:   { label: 'Medium',   shieldClass: 'bg-amber-50 text-amber-700 border-amber-200' },
+  low:      { label: 'Low',      shieldClass: 'bg-stone-100 text-stone-600 border-stone-200' },
+};
+
+function cweUrl(cweId: string): string {
+  // CWE IDs are formatted "CWE-89"; MITRE wants the integer suffix.
+  const m = /^CWE-(\d+)$/.exec(cweId.trim());
+  if (!m) return 'https://cwe.mitre.org/';
+  return `https://cwe.mitre.org/data/definitions/${m[1]}.html`;
+}
+
 export function GapCard({
   gap, status,
   onAccept, onReject, onRefine, onMarkCommitted, onCopyPrompt, onRestore, onOpenInCursor, onGetPrompt,
@@ -87,6 +126,15 @@ export function GapCard({
   const isUntriaged = status === 'untriaged';
   const isSynthetic = gap.source === 'map';
   const affectedJobs = Array.isArray(gap.affectedJobs) ? gap.affectedJobs : [];
+  // Security tag (Phase 2 slice a). The flag is orthogonal to
+  // category, so we read both — the category badge stays put and the
+  // shield badge sits next to it. We only render security UI when the
+  // severity is one of the four expected values; if the API ever
+  // sends an unrecognized value we silently fall back to the
+  // non-security shape rather than rendering a broken badge.
+  const securityMeta = gap.isSecurity && gap.securitySeverity
+    ? SECURITY_SEVERITY_META[gap.securitySeverity]
+    : null;
 
   const [expanded, setExpanded] = useState(true);
   const [refining, setRefining] = useState(false);
@@ -105,6 +153,15 @@ export function GapCard({
       <div className="p-5">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <Badge variant={gap.category} icon={Icon}>{meta.label}</Badge>
+          {securityMeta ? (
+            <span
+              className={`inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 ${securityMeta.shieldClass}`}
+              title={`Security · ${securityMeta.label}${gap.cweId ? ` · ${gap.cweId}` : ''}${gap.securityDetector ? ` · detected by ${gap.securityDetector}` : ''}`}
+              aria-label={`Security finding, ${securityMeta.label} severity${gap.cweId ? `, ${gap.cweId}` : ''}`}
+            >
+              <Shield className="w-3 h-3" aria-hidden /> Security · {securityMeta.label}
+            </span>
+          ) : null}
           {isSynthetic ? (
             <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-stone-500 bg-stone-100 border border-stone-200 rounded-full px-2 py-0.5">
               <Sparkles className="w-2.5 h-2.5" /> From Map
@@ -138,6 +195,42 @@ export function GapCard({
 
         <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
         <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
+
+        {securityMeta ? (
+          <div className="mb-3 px-3 py-2 bg-red-50/50 border border-red-100 rounded-md">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-700 mb-0.5">
+              <Shield className="w-3 h-3" aria-hidden />
+              Why this is a security risk
+            </div>
+            <div className="text-xs text-stone-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span>
+                Severity <span className="font-medium text-stone-700">{securityMeta.label}</span>
+              </span>
+              {gap.cweId ? (
+                <>
+                  <span aria-hidden className="text-stone-300">·</span>
+                  <a
+                    href={cweUrl(gap.cweId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-red-700 hover:text-red-800 underline-offset-2 hover:underline"
+                  >
+                    {gap.cweId}
+                    <ExternalLink className="w-2.5 h-2.5 inline-block ml-0.5 -mt-0.5" aria-hidden />
+                  </a>
+                </>
+              ) : null}
+              {gap.securityDetector ? (
+                <>
+                  <span aria-hidden className="text-stone-300">·</span>
+                  <span>
+                    Detected by <span className="font-mono text-stone-700">{gap.securityDetector}</span>
+                  </span>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {affectedJobs.length > 0 ? (
           <div className="flex items-start gap-2 text-xs mb-4">
