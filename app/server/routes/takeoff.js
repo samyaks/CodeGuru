@@ -24,6 +24,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { seedFromAnalysis } = require('../lib/auto-entries');
 const { checkProjectAccess } = require('../lib/helpers');
+const { startTimer } = require('../lib/timing');
 
 const router = express.Router();
 
@@ -154,6 +155,7 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
 
 async function runTakeoff(id, repoUrl) {
   const label = repoUrl;
+  const tTotal = startTimer('takeoff_total', id);
   console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, timestamp: new Date().toISOString() }));
   try {
     // Ensure a parent `analyses` row exists so the data-capture FKs resolve.
@@ -180,9 +182,14 @@ async function runTakeoff(id, repoUrl) {
     await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
+    const tAnalyze = startTimer('analyze_repo', id);
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
     }, id);
+    tAnalyze.end({
+      files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
+      readBytes: codebaseModel?.meta?.ingestedBytes ?? null,
+    });
 
     const currentDeployment = await deployments.findById(id);
     const userId = currentDeployment?.user_id;
@@ -193,6 +200,7 @@ async function runTakeoff(id, repoUrl) {
     } catch (err) {
       console.warn(`analyses.update completed for takeoff ${id} failed (non-fatal):`, err.message);
     }
+    tTotal.end({ ok: true });
   } catch (err) {
     console.error(`Takeoff failed for ${id}:`, err);
     try {
@@ -202,11 +210,13 @@ async function runTakeoff(id, repoUrl) {
     }
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
+    tTotal.end({ ok: false, error: err.message });
   }
 }
 
 async function runUploadAnalysis(id, fileEntries, projectName, userId) {
   const label = projectName;
+  const tTotal = startTimer('upload_analysis_total', id);
   console.log(JSON.stringify({ event: 'upload_analysis_start', projectId: id, projectName, timestamp: new Date().toISOString() }));
   try {
     // Ensure a parent `analyses` row exists so data-capture FKs resolve for
@@ -231,9 +241,13 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
     await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
+    const tAnalyze = startTimer('analyze_from_files', id);
     const codebaseModel = await analyzeFromFiles(fileEntries, projectName, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
     }, id);
+    tAnalyze.end({
+      files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
+    });
 
     await runPipeline(id, codebaseModel, userId, label);
 
@@ -242,6 +256,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
     } catch (err) {
       console.warn(`analyses.update completed for upload ${id} failed (non-fatal):`, err.message);
     }
+    tTotal.end({ ok: true });
   } catch (err) {
     console.error(`Upload analysis failed for ${id}:`, err);
     try {
@@ -251,11 +266,15 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
     }
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'upload_analysis_failed', projectId: id, projectName, error: err.message, timestamp: new Date().toISOString() }));
+    tTotal.end({ ok: false, error: err.message });
   }
 }
 
 async function runPipeline(id, codebaseModel, userId, label) {
+  const tPipeline = startTimer('pipeline_total', id);
+
   // Stage 1: Persist analysis data
+  const tStage1 = startTimer('stage1_persist_analysis', id);
   await deployments.update(id, {
     owner: codebaseModel.meta.owner,
     repo: codebaseModel.meta.repo,
@@ -279,17 +298,22 @@ async function runPipeline(id, codebaseModel, userId, label) {
       fileTree: codebaseModel.fileTree,
     },
   });
+  tStage1.end();
 
   // Stage 1b: Plain-English app summary (non-blocking)
+  const tStage1b = startTimer('stage1b_describe_features', id);
   let featuresSummary = null;
   try {
     featuresSummary = await describeFeatures(id, codebaseModel);
     await deployments.update(id, { features_summary: featuresSummary });
+    tStage1b.end({ ok: true, hasSummary: !!featuresSummary });
   } catch (err) {
     console.error(`Features description for ${id} failed (non-fatal):`, err.message);
+    tStage1b.end({ ok: false, error: err.message });
   }
 
   // Stage 2: Build plan + Readiness score
+  const tStage2 = startTimer('stage2_score_readiness', id);
   broadcast(id, { type: 'progress', phase: 'scoring', message: 'Scoring production readiness...' });
 
   const buildPlan = detectBuildPlan({
@@ -333,8 +357,10 @@ async function runPipeline(id, codebaseModel, userId, label) {
   });
 
   await seedFromAnalysis(id, userId, codebaseModel, readiness.score);
+  tStage2.end({ readinessScore: readiness.score });
 
   // Stage 2b: Static + Gap suggestions
+  const tStage2b = startTimer('stage2b_static_suggestions', id);
   let allStaticSuggestions = [];
   try {
     const staticSuggestions = runStaticSuggestions({
@@ -380,11 +406,14 @@ async function runPipeline(id, codebaseModel, userId, label) {
       count: suggestionsCount,
       suggestions: allStaticSuggestions.slice(0, 5),
     });
+    tStage2b.end({ ok: true, count: suggestionsCount });
   } catch (err) {
     console.error(`Static suggestions for ${id} failed (non-fatal):`, err.message);
+    tStage2b.end({ ok: false, error: err.message });
   }
 
   // Stage 3: Generate plan steps
+  const tStage3 = startTimer('stage3_generate_plan', id);
   broadcast(id, { type: 'progress', phase: 'planning', message: 'Generating your plan...' });
 
   const planSteps = generatePlan({
@@ -398,6 +427,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     plan_steps: planSteps,
     updated_at: new Date().toISOString(),
   });
+  tStage3.end({ steps: Array.isArray(planSteps) ? planSteps.length : null });
 
   broadcast(id, {
     type: 'complete',
@@ -430,6 +460,8 @@ async function runPipeline(id, codebaseModel, userId, label) {
   });
 
   // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
+  const tStage4 = startTimer('stage4_ai_suggestions', id);
+  let aiSuggestionsCount = 0;
   try {
     const aiSuggestions = await runAISuggestions({
       projectId: id,
@@ -441,14 +473,17 @@ async function runPipeline(id, codebaseModel, userId, label) {
       staticSuggestions: allStaticSuggestions,
       featuresSummary,
     });
+    aiSuggestionsCount = aiSuggestions.length;
 
     if (aiSuggestions.length > 0) {
       await suggestions.createBatch(aiSuggestions.map(s => ({ ...s, project_id: id })));
       const counts = await suggestions.countByProjectId(id);
       await deployments.update(id, { suggestions_count: counts.total || 0 });
     }
+    tStage4.end({ ok: true, count: aiSuggestionsCount });
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
+    tStage4.end({ ok: false, error: err.message });
   }
 
   // Stage 4b: Security detectors. Runs after AI suggestions so the
@@ -461,8 +496,10 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // every project gets a 100/100 default until detectors land. This
   // call still runs end-to-end so we exercise the persistence + score
   // path on every analysis from day one.
+  const tStage4b = startTimer('stage4b_security_total', id);
   try {
-    const { findings, errors, detectorCount } = await runSecurityDetectors({
+    const tDetectors = startTimer('stage4b_run_detectors', id);
+    const { findings, errors, detectorCount, perDetectorMs } = await runSecurityDetectors({
       stack: codebaseModel.stack,
       structure: codebaseModel.structure,
       fileContents: codebaseModel.fileContents,
@@ -472,13 +509,28 @@ async function runPipeline(id, codebaseModel, userId, label) {
       features: codebaseModel.features,
       meta: codebaseModel.meta,
     });
+    tDetectors.end({
+      detectorCount,
+      findingsCount: findings.length,
+      detectorErrors: errors.length,
+      perDetectorMs,
+    });
 
+    const tPersist = startTimer('stage4b_persist_findings', id);
     const persistSummary = await applySecurityFindings(id, findings);
+    tPersist.end({
+      input: findings.length,
+      created: persistSummary.created,
+      upgraded: persistSummary.upgraded,
+      skipped: persistSummary.skipped,
+      errors: persistSummary.errors.length,
+    });
 
     // Score is computed from the live DB state (not just this run's
     // findings) because user-rejected and shipped rows must be
     // excluded from the penalty. The unaddressed-only fetch in
     // `findV2SecurityGapsByProjectId` does that filtering.
+    const tScore = startTimer('stage4b_compute_score', id);
     const unaddressed = await suggestions.findV2SecurityGapsByProjectId(id);
     const scoreResult = computeSecurityScore(unaddressed);
 
@@ -486,6 +538,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
       security_score: scoreResult.score,
       updated_at: new Date().toISOString(),
     });
+    tScore.end({ score: scoreResult.score, totalUnaddressed: scoreResult.totalUnaddressed });
 
     broadcast(id, {
       type: 'security-scored',
@@ -509,8 +562,10 @@ async function runPipeline(id, codebaseModel, userId, label) {
       skipped: persistSummary.skipped,
       timestamp: new Date().toISOString(),
     }));
+    tStage4b.end({ ok: true, score: scoreResult.score, findings: findings.length });
   } catch (err) {
     console.error(`Security analysis for ${id} failed (non-fatal):`, err.message);
+    tStage4b.end({ ok: false, error: err.message });
   }
 
   // Stage 5: link suggestions to product-map jobs (non-blocking, async).
@@ -518,15 +573,25 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // exist yet when we kick this off. The linker logs a `no-map` reason
   // and bails in that case; `autoCreateProductMap` schedules a second
   // pass once the map lands so unlinked rows still get picked up.
+  //
+  // Timing: Stage 5 runs in `setImmediate`, so its duration is OUTSIDE
+  // `pipeline_total`. We still time it so we can spot a regression in
+  // the linker independently — useful when the linker is calling
+  // Claude (it does, on cold maps).
   setImmediate(() => {
+    const tStage5 = startTimer('stage5_link_gaps_to_jobs', id);
     linkGapsToJobs(id).then((summary) => {
       if (summary.linked > 0 || summary.total > 0) {
         console.log(`[takeoff] gap-job linker for ${id}: ${JSON.stringify(summary)}`);
       }
+      tStage5.end({ ok: true, linked: summary.linked, total: summary.total });
     }).catch((err) => {
       console.error(`[takeoff] gap-job linker for ${id} failed (non-fatal):`, err.message);
+      tStage5.end({ ok: false, error: err.message });
     });
   });
+
+  tPipeline.end({ aiSuggestions: aiSuggestionsCount, staticSuggestions: allStaticSuggestions.length });
 }
 
 // Build a product-map (personas + jobs + entity graph) for a freshly-analyzed

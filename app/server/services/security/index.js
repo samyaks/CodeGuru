@@ -134,23 +134,36 @@ async function runSecurityDetectors(input) {
   const safeInput = input || {};
   const findings = [];
   const errors = [];
+  // Per-detector timing in ms. Returned to the caller alongside
+  // findings so the takeoff pipeline can include it in its
+  // `stage4b_run_detectors` log line — this is how we'll spot a
+  // single slow detector dragging the whole stage.
+  const perDetectorMs = {};
 
   await Promise.all(ALL_DETECTORS.map(async (detector) => {
     if (!detector || typeof detector.run !== 'function' || !detector.name) {
       errors.push({ detector: detector?.name || '(anonymous)', error: 'invalid detector shape' });
       return;
     }
+    const started = Date.now();
     try {
       const raw = await detector.run(safeInput);
       const normalized = normalizeFindings(detector, raw);
       findings.push(...normalized);
+      perDetectorMs[detector.name] = Date.now() - started;
     } catch (err) {
       console.warn(`[security] detector "${detector.name}" failed: ${err.message}`);
       errors.push({ detector: detector.name, error: err.message });
+      perDetectorMs[detector.name] = Date.now() - started;
     }
   }));
 
-  return { findings, errors, detectorCount: ALL_DETECTORS.length };
+  return {
+    findings,
+    errors,
+    detectorCount: ALL_DETECTORS.length,
+    perDetectorMs,
+  };
 }
 
 /**

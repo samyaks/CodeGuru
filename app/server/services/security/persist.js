@@ -96,10 +96,18 @@ async function applySecurityFindings(projectId, findings) {
     return summary;
   }
 
+  // Aggregate-timing buckets so we can see whether the loop is
+  // DB-bound on the existence check, the upgrade lookup, or the
+  // insert itself. Logged once at the end of the function.
+  const totalStart = Date.now();
+  const tBucket = { fpLookup: 0, upgradeLookup: 0, applyFlags: 0, insert: 0 };
+
   for (const finding of findings) {
     try {
       // (1) SKIP — fingerprint already exists for this project.
+      const tFp = Date.now();
       const existing = await suggestions.findV2GapByFingerprint(projectId, finding.fingerprint);
+      tBucket.fpLookup += Date.now() - tFp;
       if (existing) {
         summary.skipped += 1;
         continue;
@@ -107,14 +115,18 @@ async function applySecurityFindings(projectId, findings) {
 
       // (2) UPGRADE — there's an existing non-security gap whose
       //     affected_files include this finding's file. Tag it.
+      const tUp = Date.now();
       const candidate = await suggestions.findUpgradeCandidate(projectId, finding.file);
+      tBucket.upgradeLookup += Date.now() - tUp;
       if (candidate) {
+        const tApply = Date.now();
         await suggestions.applySecurityFlags(candidate.id, projectId, {
           severity:    finding.severity,
           cweId:       finding.cweId,
           detector:    finding.detector,
           fingerprint: finding.fingerprint,
         });
+        tBucket.applyFlags += Date.now() - tApply;
         summary.upgraded += 1;
         continue;
       }
@@ -132,6 +144,7 @@ async function applySecurityFindings(projectId, findings) {
 
       const stableId = makeGapId(projectId, finding.fingerprint);
 
+      const tIns = Date.now();
       await suggestions.createV2Gap({
         id:                  stableId,
         project_id:          projectId,
@@ -154,6 +167,7 @@ async function applySecurityFindings(projectId, findings) {
         security_detector:   finding.detector,
         security_fingerprint: finding.fingerprint,
       });
+      tBucket.insert += Date.now() - tIns;
       summary.created += 1;
     } catch (err) {
       console.warn(
@@ -162,6 +176,18 @@ async function applySecurityFindings(projectId, findings) {
       summary.errors.push({ fingerprint: finding?.fingerprint || null, error: err.message });
     }
   }
+
+  console.log(JSON.stringify({
+    event: 'stage_timing',
+    stage: 'stage4b_persist_breakdown',
+    projectId,
+    ms: Date.now() - totalStart,
+    findings: findings.length,
+    fpLookupMs:      tBucket.fpLookup,
+    upgradeLookupMs: tBucket.upgradeLookup,
+    applyFlagsMs:    tBucket.applyFlags,
+    insertMs:        tBucket.insert,
+  }));
 
   return summary;
 }
