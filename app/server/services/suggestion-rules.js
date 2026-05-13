@@ -217,7 +217,150 @@ function ruleNoHelmet({ stack, fileContents, structure, deps }) {
 // ---------------------------------------------------------------------------
 // Rule 5: no-input-validation — API routes without input validation
 // ---------------------------------------------------------------------------
-function ruleNoInputValidation({ structure, deps }) {
+function buildInputValidationPrompt({ routeFiles, isTs, isEsm, hasMultipleRoutes }) {
+  const importLine = (isTs || isEsm)
+    ? "import { z } from 'zod';"
+    : "const { z } = require('zod');";
+  const ext = isTs ? 'ts' : 'js';
+  const fence = isTs ? 'ts' : 'js';
+
+  const shown = routeFiles.slice(0, 5);
+  const hidden = routeFiles.length - shown.length;
+  const routeListLines = shown.map((f) => `- \`${f}\``);
+  if (hidden > 0) routeListLines.push(`- (+${hidden} more)`);
+
+  const lines = [];
+  lines.push('Add zod for input validation across the API routes in this project. Install with `npm install zod`.');
+  lines.push('');
+  lines.push('Route files that need validation:');
+  lines.push(...routeListLines);
+  lines.push('');
+  lines.push('Validate every piece of user input on each route — `req.body` (POST/PUT/PATCH bodies), `req.query` (filters, search, pagination), and `req.params` (`:id` and other URL params). GET endpoints with query strings or path params need validation too, not just write endpoints.');
+
+  if (isTs) {
+    lines.push('');
+    lines.push('Because this project is TypeScript, derive request types from each schema with `z.infer<typeof Schema>` so handlers receive fully typed `req.body` / `req.query` / `req.params` instead of `any` — define each schema once and let the types follow from it.');
+  }
+
+  lines.push('');
+  lines.push('Error reporting: if this codebase already has an error helper (look for an `AppError` / `HttpError` / `ApiError`-style class, an `httpError(status, message)` factory, or a shared `errors`/`lib/errors`/`utils/errors` module), throw or `next(...)` through that helper so validation failures flow into the existing global error handler. Only fall back to `res.status(400).json({ error: \'ValidationError\', issues: result.error.flatten() })` if no such helper exists. Do not invent a new error class if one already lives in the repo.');
+  lines.push('');
+
+  if (hasMultipleRoutes) {
+    lines.push(`There are ${routeFiles.length} route files, so don't sprinkle \`safeParse\` calls everywhere — add one reusable middleware (e.g. \`middleware/validate.${ext}\`) that takes a schemas object and validates all three request locations in one place:`);
+    lines.push('');
+    lines.push('```' + fence);
+    lines.push(importLine);
+    if (isTs) {
+      lines.push("import type { Request, Response, NextFunction } from 'express';");
+      lines.push("import type { ZodSchema } from 'zod';");
+      lines.push('');
+      lines.push('type Schemas = { body?: ZodSchema; query?: ZodSchema; params?: ZodSchema };');
+      lines.push('');
+      lines.push('export function validate(schemas: Schemas) {');
+      lines.push('  return (req: Request, res: Response, next: NextFunction) => {');
+    } else {
+      lines.push('');
+      lines.push('function validate(schemas) {');
+      lines.push('  return (req, res, next) => {');
+    }
+    lines.push("    for (const key of ['body', 'query', 'params']) {");
+    lines.push('      const schema = schemas[key];');
+    lines.push('      if (!schema) continue;');
+    lines.push('      const result = schema.safeParse(req[key]);');
+    lines.push('      if (!result.success) {');
+    lines.push("        return res.status(400).json({ error: 'ValidationError', location: key, issues: result.error.flatten() });");
+    lines.push('      }');
+    lines.push('      req[key] = result.data;');
+    lines.push('    }');
+    lines.push('    next();');
+    lines.push('  };');
+    lines.push('}');
+    if (!(isTs || isEsm)) lines.push('module.exports = { validate };');
+    lines.push('```');
+    lines.push('');
+    lines.push('Swap the `res.status(400).json(...)` line for the project\'s existing error helper if one exists (e.g. `return next(new AppError(400, \'ValidationError\', result.error.flatten()))`).');
+    lines.push('');
+    lines.push('Then wire it into each of the route files listed above. Example:');
+    lines.push('');
+    lines.push('```' + fence);
+    if (isTs || isEsm) {
+      lines.push("import { z } from 'zod';");
+      lines.push("import { validate } from '../middleware/validate';");
+    } else {
+      lines.push("const { z } = require('zod');");
+      lines.push("const { validate } = require('../middleware/validate');");
+    }
+    lines.push('');
+    lines.push('const createUserSchema = z.object({');
+    lines.push('  email: z.string().email(),');
+    lines.push('  name: z.string().min(1).max(100),');
+    lines.push('});');
+    lines.push('const userParamsSchema = z.object({ id: z.string().uuid() });');
+    lines.push('const listQuerySchema = z.object({');
+    lines.push('  q: z.string().optional(),');
+    lines.push('  page: z.coerce.number().int().min(1).default(1),');
+    lines.push('  limit: z.coerce.number().int().min(1).max(100).default(20),');
+    lines.push('});');
+    lines.push('');
+    lines.push("router.post('/users', validate({ body: createUserSchema }), createUser);");
+    lines.push("router.get('/users/:id', validate({ params: userParamsSchema }), getUser);");
+    lines.push("router.get('/users', validate({ query: listQuerySchema }), listUsers);");
+    if (isTs) {
+      lines.push('');
+      lines.push('type CreateUserBody = z.infer<typeof createUserSchema>;');
+      lines.push('type UserParams = z.infer<typeof userParamsSchema>;');
+      lines.push('type ListUserQuery = z.infer<typeof listQuerySchema>;');
+    }
+    lines.push('```');
+  } else {
+    lines.push('There is only one route file, so an inline `safeParse` per handler is fine. Pattern:');
+    lines.push('');
+    lines.push('```' + fence);
+    lines.push(importLine);
+    lines.push('');
+    lines.push('const createUserSchema = z.object({');
+    lines.push('  email: z.string().email(),');
+    lines.push('  name: z.string().min(1).max(100),');
+    lines.push('});');
+    lines.push('const userParamsSchema = z.object({ id: z.string().uuid() });');
+    lines.push('const listQuerySchema = z.object({');
+    lines.push('  q: z.string().optional(),');
+    lines.push('  page: z.coerce.number().int().min(1).default(1),');
+    lines.push('});');
+    lines.push('');
+    lines.push("router.post('/users', (req, res) => {");
+    lines.push('  const parsed = createUserSchema.safeParse(req.body);');
+    lines.push('  if (!parsed.success) {');
+    lines.push("    return res.status(400).json({ error: 'ValidationError', location: 'body', issues: parsed.error.flatten() });");
+    lines.push('  }');
+    lines.push('  // use parsed.data');
+    lines.push('});');
+    lines.push('');
+    lines.push("router.get('/users/:id', (req, res) => {");
+    lines.push('  const params = userParamsSchema.safeParse(req.params);');
+    lines.push('  if (!params.success) {');
+    lines.push("    return res.status(400).json({ error: 'ValidationError', location: 'params', issues: params.error.flatten() });");
+    lines.push('  }');
+    lines.push('  // use params.data.id');
+    lines.push('});');
+    if (isTs) {
+      lines.push('');
+      lines.push('type CreateUserBody = z.infer<typeof createUserSchema>;');
+      lines.push('type UserParams = z.infer<typeof userParamsSchema>;');
+    }
+    lines.push('```');
+    lines.push('');
+    lines.push('Swap each `res.status(400).json(...)` for the project\'s existing error helper if one exists, so validation errors flow through the same path as the rest of the app\'s errors.');
+  }
+
+  lines.push('');
+  lines.push('Tests: add at least one unit/integration test that sends invalid input (e.g. missing required field, wrong type, malformed `:id`) to a validated route and asserts the response is `400` with the expected error shape. Use whichever test runner the project already uses (vitest, jest, mocha, etc.); if there is none, add a small vitest + supertest test next to one of the updated route files.');
+
+  return lines.join('\n');
+}
+
+function ruleNoInputValidation({ stack, structure, fileContents, deps }) {
   if (structure.routeFiles.length === 0) return null;
 
   const validationLibs = ['zod', 'joi', 'yup', 'class-validator', 'superstruct', 'valibot', 'ajv'];
@@ -225,10 +368,19 @@ function ruleNoInputValidation({ structure, deps }) {
     if (deps[lib]) return null;
   }
 
-  const evidence = structure.routeFiles.map((f) => ({
+  const routeFiles = structure.routeFiles;
+  const languages = (stack && stack.languages) || [];
+  const isTs = languages.includes('TypeScript') || routeFiles.some((f) => /\.tsx?$/.test(f));
+  const pkg = safeJson(fileContents['package.json']) || {};
+  const isEsm = pkg.type === 'module';
+  const hasMultipleRoutes = routeFiles.length >= 2;
+
+  const evidence = routeFiles.map((f) => ({
     file: f,
     reason: 'API route file with no input validation library in the project',
   }));
+
+  const cursorPrompt = buildInputValidationPrompt({ routeFiles, isTs, isEsm, hasMultipleRoutes });
 
   return makeSuggestion({
     type: 'fix',
@@ -236,12 +388,11 @@ function ruleNoInputValidation({ structure, deps }) {
     priority: 'high',
     title: 'No input validation library for API routes',
     description:
-      'Your project has API routes but no input validation library (like zod, joi, or yup). Without validation, bad or malicious input can crash your app, corrupt data, or open security holes.',
+      'Your project has API routes but no input validation library (like zod, joi, or yup). Without validation, bad or malicious input from req.body, req.query, or req.params can crash your app, corrupt data, or open security holes.',
     evidence,
     effort: 'medium',
-    cursorPrompt:
-      'Add zod for input validation on all API routes. Install with `npm install zod`. For each route that accepts user input (POST/PUT/PATCH), define a zod schema and validate the request body:\n\nconst { z } = require(\'zod\');\n\nconst createUserSchema = z.object({\n  email: z.string().email(),\n  name: z.string().min(1).max(100),\n});\n\nrouter.post(\'/users\', (req, res) => {\n  const result = createUserSchema.safeParse(req.body);\n  if (!result.success) return res.status(400).json({ errors: result.error.flatten() });\n  // use result.data\n});',
-    affectedFiles: [...structure.routeFiles, 'package.json'],
+    cursorPrompt,
+    affectedFiles: [...routeFiles, 'package.json'],
   });
 }
 
