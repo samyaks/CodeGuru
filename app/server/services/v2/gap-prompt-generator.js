@@ -24,7 +24,9 @@ Do NOT speak to the user. Speak to the AI agent that will implement the gap.
 Keep the prompt under ~60 lines, plain markdown, no code fences around the
 whole prompt.`;
 
-function buildUserMessage({ project, gap }) {
+// Split into project-stable prefix and gap-specific body so the prefix can
+// be marked cache_control: ephemeral across calls for the same project.
+function buildUserMessageParts({ project, gap }) {
   const stack = project?.stack_info || project?.stack || {};
   const stackLines = Object.entries(stack)
     .filter(([, v]) => v)
@@ -35,10 +37,12 @@ function buildUserMessage({ project, gap }) {
     ? gap.affectedFiles.slice(0, 25).join('\n  - ')
     : '(unspecified)';
 
-  return [
+  const projectPrefix = [
     `Project: ${project?.repo || project?.repo_url || 'unnamed'}`,
     stackLines ? `Stack:\n${stackLines}` : null,
-    '',
+  ].filter(Boolean).join('\n');
+
+  const gapBody = [
     `Gap category: ${gap.category}`,
     `Title: ${gap.title}`,
     `Description: ${gap.description}`,
@@ -47,7 +51,9 @@ function buildUserMessage({ project, gap }) {
     `  - ${files}`,
     '',
     'Write the Cursor prompt now.',
-  ].filter(Boolean).join('\n');
+  ].join('\n');
+
+  return { projectPrefix, gapBody };
 }
 
 /**
@@ -55,10 +61,10 @@ function buildUserMessage({ project, gap }) {
  * responsible for caching back onto the suggestions row.
  */
 async function generateCursorPrompt({ project, gap, refineInstructions }) {
-  const baseUser = buildUserMessage({ project, gap });
-  const userMessage = refineInstructions
-    ? `${baseUser}\n\nUser refinement instructions (apply these before producing the prompt):\n${refineInstructions}`
-    : baseUser;
+  const { projectPrefix, gapBody } = buildUserMessageParts({ project, gap });
+  const dynamicBody = refineInstructions
+    ? `${gapBody}\n\nUser refinement instructions (apply these before producing the prompt):\n${refineInstructions}`
+    : gapBody;
 
   const response = await createMessageTracked({
     phase: refineInstructions ? 'v2.gap.refine' : 'v2.gap.prompt',
@@ -70,8 +76,14 @@ async function generateCursorPrompt({ project, gap, refineInstructions }) {
       // rest of the app. V2_CURSOR_PROMPT_MODEL still overrides per-phase.
       model: process.env.V2_CURSOR_PROMPT_MODEL || CLAUDE_MODEL,
       max_tokens: 1500,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: projectPrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: dynamicBody },
+        ],
+      }],
     },
   });
 

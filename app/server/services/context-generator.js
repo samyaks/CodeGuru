@@ -1,6 +1,10 @@
 const { broadcast } = require('../lib/sse');
 const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
 const { createMessageTracked, streamMessageTracked } = require('../lib/anthropic-tracked');
+const { selectFilesForPrompt } = require('./file-selector');
+
+const APP_CONTEXT_CACHE_CHARS = 1500;
+
 const MAX_TOKENS = 4096;
 
 const SYSTEM_PROMPT = `You are an expert software architect analyzing a codebase to generate .context.md files. These files serve as the source of truth between human developers and AI coding tools.
@@ -21,74 +25,25 @@ Always follow the .context.md spec format with these sections:
 
 Keep language clear and non-technical where possible. A PM should be able to read and understand every context file.`;
 
-async function generateContextFiles(analysisId, codebaseModel) {
-  const send = (data) => broadcast(analysisId, data);
-  const contextFiles = [];
-
-  send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
-
-  // 1. App-level .context.md
-  send({ type: 'progress', phase: 'context-app', message: 'Generating app-level .context.md...' });
-  const appContext = await generateAppContext(analysisId, codebaseModel);
-  contextFiles.push({ path: '.context.md', content: appContext, type: 'existing' });
-
-  // 2. Feature-level .context.md files
-  const featureDirs = identifyFeatureDirs(codebaseModel);
-  for (const dir of featureDirs) {
-    send({ type: 'progress', phase: 'context-feature', message: `Generating context for ${dir}...` });
-    try {
-      const featureContext = await generateFeatureContext(analysisId, codebaseModel, dir, appContext);
-      if (featureContext) {
-        contextFiles.push({ path: `${dir}/.context.md`, content: featureContext, type: 'existing' });
-      }
-    } catch (err) {
-      console.error(`Failed to generate context for ${dir}:`, err.message);
-    }
-  }
-
-  // 3. Gap-specific prescriptive .context.md files
-  const gaps = identifyActionableGaps(codebaseModel);
-  for (const gap of gaps) {
-    send({ type: 'progress', phase: 'context-gap', message: `Generating spec for missing ${gap.name}...` });
-    try {
-      const gapContext = await generateGapContext(analysisId, codebaseModel, gap, appContext);
-      contextFiles.push({ path: gap.path, content: gapContext, type: 'gap' });
-    } catch (err) {
-      console.error(`Failed to generate gap context for ${gap.name}:`, err.message);
-    }
-  }
-
-  // 4. Completion report
-  const completionPct = calculateCompletion(codebaseModel);
-
-  send({ type: 'progress', phase: 'context-done', message: `Generated ${contextFiles.length} context files` });
-
-  return { contextFiles, completionPct };
+function renderFilesBlock(files) {
+  return files
+    .map((f) => `### ${f.path}${f.isSkeleton ? ' (skeleton)' : ''}\n\`\`\`\n${f.content}\n\`\`\``)
+    .join('\n\n');
 }
 
-async function generateAppContext(analysisId, model) {
-  const fileTree = model.fileTree.slice(0, 100).join('\n');
-  const keyEntries = Object.entries(model.fileContents).slice(0, 10);
-  const keyFiles = keyEntries
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 1500)}\n\`\`\``)
-    .join('\n\n');
-  const filesUsed = keyEntries.map(([path]) => path);
+function buildCacheablePrefix(model) {
+  const fileTree = (model.fileTree || []).slice(0, 100).join('\n');
 
-  const { text: fullText } = await streamMessageTracked({
-    client: anthropic,
-    analysisId,
-    phase: 'app-context',
-    targetPath: '.context.md',
-    filesUsed,
-    params: {
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: `Generate the root .context.md file for this project.
+  const { files: selected } = selectFilesForPrompt({
+    fileContents: model.fileContents || {},
+    purpose: 'context_generation',
+    tokenBudget: 12000,
+    maxFiles: 30,
+  });
 
-## Project Info
+  const keyFiles = renderFilesBlock(selected);
+
+  const prefix = `## Project Info
 Name: ${model.meta.name}
 Description: ${model.meta.description || 'No description'}
 Primary Language: ${model.meta.language || 'Unknown'}
@@ -98,12 +53,6 @@ Styling: ${model.stack.styling || 'None detected'}
 Database: ${model.stack.database || 'None detected'}
 Auth: ${model.stack.auth || 'None detected'}
 
-## File Tree
-${fileTree}
-
-## Key Files
-${keyFiles}
-
 ## Detected Gaps
 Auth: ${model.gaps.auth.exists ? 'exists' : 'MISSING'}
 Database: ${model.gaps.database.exists ? 'exists' : 'MISSING'}
@@ -111,7 +60,86 @@ Deployment: ${model.gaps.deployment.exists ? 'exists' : 'MISSING'}
 Testing: ${model.gaps.testing.exists ? 'exists' : 'MISSING'}
 Error Handling: ${model.gaps.errorHandling.exists ? 'exists' : 'MISSING'}
 
-Generate a comprehensive .context.md that captures the project's purpose, tech stack, current state, and what still needs to be built.`,
+## File Tree
+${fileTree}
+
+## Key Files
+${keyFiles}`;
+
+  return { prefix, filesUsed: selected.map((f) => f.path) };
+}
+
+async function generateContextFiles(analysisId, codebaseModel) {
+  const send = (data) => broadcast(analysisId, data);
+  const contextFiles = [];
+
+  send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
+
+  const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } = buildCacheablePrefix(codebaseModel);
+
+  send({ type: 'progress', phase: 'context-app', message: 'Generating app-level .context.md...' });
+  const appContext = await generateAppContext(analysisId, cacheablePrefix, cachedFilesUsed);
+  contextFiles.push({ path: '.context.md', content: appContext, type: 'existing' });
+
+  const featureDirs = identifyFeatureDirs(codebaseModel);
+  for (const dir of featureDirs) {
+    send({ type: 'progress', phase: 'context-feature', message: `Generating context for ${dir}...` });
+    try {
+      const featureContext = await generateFeatureContext(
+        analysisId,
+        codebaseModel,
+        dir,
+        cacheablePrefix,
+        cachedFilesUsed,
+        appContext,
+      );
+      if (featureContext) {
+        contextFiles.push({ path: `${dir}/.context.md`, content: featureContext, type: 'existing' });
+      }
+    } catch (err) {
+      console.error(`Failed to generate context for ${dir}:`, err.message);
+    }
+  }
+
+  const gaps = identifyActionableGaps(codebaseModel);
+  for (const gap of gaps) {
+    send({ type: 'progress', phase: 'context-gap', message: `Generating spec for missing ${gap.name}...` });
+    try {
+      const gapContext = await generateGapContext(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext);
+      contextFiles.push({ path: gap.path, content: gapContext, type: 'gap' });
+    } catch (err) {
+      console.error(`Failed to generate gap context for ${gap.name}:`, err.message);
+    }
+  }
+
+  const completionPct = calculateCompletion(codebaseModel);
+
+  send({ type: 'progress', phase: 'context-done', message: `Generated ${contextFiles.length} context files` });
+
+  return { contextFiles, completionPct };
+}
+
+async function generateAppContext(analysisId, cacheablePrefix, cachedFilesUsed) {
+  const dynamicInstruction = `Generate the root .context.md file for this project.
+
+Use the project info, stack, gaps, file tree, and key files above. Produce a comprehensive .context.md that captures the project's purpose, tech stack, current state, and what still needs to be built.`;
+
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'app-context',
+    targetPath: '.context.md',
+    filesUsed: cachedFilesUsed,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cacheablePrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: dynamicInstruction },
+        ],
       }],
     },
     onText: (_chunk, partial) => {
@@ -126,42 +154,46 @@ Generate a comprehensive .context.md that captures the project's purpose, tech s
   return fullText;
 }
 
-async function generateFeatureContext(analysisId, model, dirPath, appContext) {
-  const relevantEntries = Object.entries(model.fileContents)
-    .filter(([path]) => path.startsWith(dirPath));
-  const relevantFiles = relevantEntries
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 1000)}\n\`\`\``)
-    .join('\n\n');
+async function generateFeatureContext(analysisId, model, dirPath, cacheablePrefix, cachedFilesUsed, appContext) {
+  const { files: dirFiles } = selectFilesForPrompt({
+    fileContents: model.fileContents || {},
+    purpose: 'feature_dir',
+    filterFn: (p) => p.startsWith(dirPath),
+    tokenBudget: 4000,
+    maxFiles: 15,
+  });
 
-  if (!relevantFiles) return null;
+  if (!dirFiles.length) return null;
 
-  const filesUsed = relevantEntries.map(([path]) => path);
+  const dirFilesBlock = renderFilesBlock(dirFiles);
+  const dirFilesUsed = dirFiles.map((f) => f.path);
+
+  const appContextBlock = `## Root .context.md (already generated for this project)\n${truncate(appContext || '', APP_CONTEXT_CACHE_CHARS)}`;
+
+  const dynamicInstruction = `Generate a .context.md file for the "${dirPath}" directory.
+
+## Files in this directory
+${dirFilesBlock}
+
+Produce a focused .context.md for this specific module. Include purpose, constraints, decisions, and dependencies. Reference the project-wide info above as needed.`;
 
   const response = await createMessageTracked({
     client: anthropic,
     analysisId,
     phase: 'feature-context',
     targetPath: dirPath,
-    filesUsed,
+    filesUsed: [...cachedFilesUsed, ...dirFilesUsed],
     params: {
       model: CLAUDE_MODEL,
       max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
-        content: `Generate a .context.md file for the "${dirPath}" directory.
-
-## App Context (from root .context.md)
-${truncate(appContext, 1500)}
-
-## Files in this directory
-${relevantFiles}
-
-## Stack
-Framework: ${model.stack.framework || 'Unknown'}
-Runtime: ${model.stack.runtime || 'Unknown'}
-
-Generate a focused .context.md for this specific module. Include purpose, constraints, decisions, and dependencies.`,
+        content: [
+          { type: 'text', text: cacheablePrefix,   cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: appContextBlock,   cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: dynamicInstruction },
+        ],
       }],
     },
   });
@@ -169,31 +201,12 @@ Generate a focused .context.md for this specific module. Include purpose, constr
   return response.content?.[0]?.text || '';
 }
 
-async function generateGapContext(analysisId, model, gap, appContext) {
-  const { text: fullText } = await streamMessageTracked({
-    client: anthropic,
-    analysisId,
-    phase: 'gap-context',
-    targetPath: gap.path,
-    filesUsed: null,
-    params: {
-      model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: `This codebase is MISSING: ${gap.name}
+async function generateGapContext(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext) {
+  const appContextBlock = `## Root .context.md (already generated for this project)\n${truncate(appContext || '', APP_CONTEXT_CACHE_CHARS)}`;
+
+  const dynamicInstruction = `This codebase is MISSING: ${gap.name}
 
 Generate a PRESCRIPTIVE .context.md that specifies what should be built.
-
-## App Context
-${truncate(appContext, 1500)}
-
-## Current Stack
-Framework: ${model.stack.framework || 'Unknown'}
-Runtime: ${model.stack.runtime || 'Unknown'}
-Database: ${model.stack.database || 'None'}
-Auth: ${model.stack.auth || 'None'}
 
 ## Gap Details
 ${gap.description}
@@ -201,13 +214,31 @@ ${gap.description}
 ## Requirements
 The .context.md should tell an AI tool exactly what to build:
 - What the capability needs to do
-- Recommended approach for this tech stack
+- Recommended approach for this tech stack (use the stack info above)
 - Constraints that must be respected
 - Common pitfalls to avoid
-- How it connects to existing code
+- How it connects to existing code (reference the key files above)
 - Specific files that need to be created or modified
 
-This is a PRESCRIPTIVE spec, not documentation of existing code.`,
+This is a PRESCRIPTIVE spec, not documentation of existing code.`;
+
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'gap-context',
+    targetPath: gap.path,
+    filesUsed: cachedFilesUsed,
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cacheablePrefix,   cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: appContextBlock,   cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: dynamicInstruction },
+        ],
       }],
     },
     onText: (_chunk, partial) => {

@@ -51,7 +51,7 @@ async function classifyWithClaude({ gap, commit }) {
       // canonical CLAUDE_MODEL. V2_VERIFIER_MODEL still overrides.
       model: process.env.V2_VERIFIER_MODEL || CLAUDE_MODEL,
       max_tokens: 600,
-      system: VERIFY_PROMPT,
+      system: [{ type: 'text', text: VERIFY_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: JSON.stringify(userPayload) }],
     },
   });

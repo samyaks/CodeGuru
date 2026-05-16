@@ -1226,22 +1226,40 @@ const analyses = {
       [files || 0, bytes || 0, tokens || 0, id]
     );
   },
-  async incrementLlm(id, { calls = 1, input_tokens = 0, output_tokens = 0, cost_usd = 0 } = {}) {
+  async incrementLlm(id, {
+    calls = 1,
+    input_tokens = 0,
+    output_tokens = 0,
+    cost_usd = 0,
+    cache_creation_tokens = 0,
+    cache_read_tokens = 0,
+  } = {}) {
     await getDb().query(
       `UPDATE analyses
-        SET llm_call_count    = COALESCE(llm_call_count, 0)    + $1,
-            llm_input_tokens  = COALESCE(llm_input_tokens, 0)  + $2,
-            llm_output_tokens = COALESCE(llm_output_tokens, 0) + $3,
-            llm_cost_usd      = COALESCE(llm_cost_usd, 0)      + $4
-        WHERE id = $5`,
-      [calls || 0, input_tokens || 0, output_tokens || 0, cost_usd || 0, id]
+        SET llm_call_count             = COALESCE(llm_call_count, 0)             + $1,
+            llm_input_tokens           = COALESCE(llm_input_tokens, 0)           + $2,
+            llm_output_tokens          = COALESCE(llm_output_tokens, 0)          + $3,
+            llm_cost_usd               = COALESCE(llm_cost_usd, 0)               + $4,
+            llm_cache_creation_tokens  = COALESCE(llm_cache_creation_tokens, 0)  + $5,
+            llm_cache_read_tokens      = COALESCE(llm_cache_read_tokens, 0)      + $6
+        WHERE id = $7`,
+      [
+        calls || 0,
+        input_tokens || 0,
+        output_tokens || 0,
+        cost_usd || 0,
+        cache_creation_tokens || 0,
+        cache_read_tokens || 0,
+        id,
+      ]
     );
   },
   async getRollups(id) {
     const { rows } = await getDb().query(
       `SELECT file_count, tree_total_bytes, tree_estimated_tokens, tree_truncated,
               ingested_file_count, ingested_bytes, ingested_tokens,
-              llm_call_count, llm_input_tokens, llm_output_tokens, llm_cost_usd
+              llm_call_count, llm_input_tokens, llm_output_tokens, llm_cost_usd,
+              llm_cache_creation_tokens, llm_cache_read_tokens
         FROM analyses WHERE id = $1`,
       [id]
     );
@@ -1384,6 +1402,22 @@ const analysisFiles = {
     );
     return rows[0] || null;
   },
+
+  async getContentsMap(analysisId, { includeSkeletons = true } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT path, tier, content, skeleton FROM analysis_files
+         WHERE analysis_id = $1
+           AND ((tier = 'full' AND content IS NOT NULL)
+                OR (tier = 'skeleton' AND skeleton IS NOT NULL))`,
+      [analysisId]
+    );
+    const out = {};
+    for (const r of rows) {
+      if (r.tier === 'full' && r.content) out[r.path] = r.content;
+      else if (includeSkeletons && r.tier === 'skeleton' && r.skeleton) out[r.path] = r.skeleton;
+    }
+    return out;
+  },
 };
 
 // ── Analysis File Chunks ──────────────────────────────────────────
@@ -1434,8 +1468,9 @@ const analysisLlmCalls = {
     const { rows } = await getDb().query(
       `INSERT INTO analysis_llm_calls
         (id, analysis_id, phase, model, input_tokens, output_tokens, cost_usd,
-         duration_ms, target_path, files_used, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         duration_ms, target_path, files_used, created_at,
+         cache_creation_tokens, cache_read_tokens)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id, created_at`,
       [
         id,
@@ -1449,6 +1484,8 @@ const analysisLlmCalls = {
         call.target_path ?? null,
         call.files_used == null ? null : toJsonb(call.files_used),
         created_at,
+        call.cache_creation_tokens ?? 0,
+        call.cache_read_tokens ?? 0,
       ]
     );
     return { id: rows[0].id, created_at: rows[0].created_at, ...call };
@@ -1463,9 +1500,11 @@ const analysisLlmCalls = {
   async aggregateByPhase(analysisId) {
     const { rows } = await getDb().query(
       `SELECT phase,
-        COUNT(*)::int                           AS call_count,
-        COALESCE(SUM(input_tokens), 0)::int     AS input_tokens,
-        COALESCE(SUM(output_tokens), 0)::int    AS output_tokens,
+        COUNT(*)::int                                AS call_count,
+        COALESCE(SUM(input_tokens), 0)::int          AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::int         AS output_tokens,
+        COALESCE(SUM(cache_creation_tokens), 0)::int AS cache_creation_tokens,
+        COALESCE(SUM(cache_read_tokens), 0)::int     AS cache_read_tokens,
         COALESCE(SUM(cost_usd), 0)::double precision AS cost_usd
         FROM analysis_llm_calls
         WHERE analysis_id = $1

@@ -34,7 +34,9 @@ async function streamReview(reviewId, { system, user }) {
     model: CLAUDE_MODEL,
     max_tokens: MAX_TOKENS,
     stream: true,
-    system,
+    system: typeof system === 'string' && system.length > 400
+      ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+      : system,
     messages: [{ role: 'user', content: user }],
   });
 

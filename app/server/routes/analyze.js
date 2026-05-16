@@ -15,6 +15,12 @@ const router = express.Router();
 
 const analyzeRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many analysis requests. Please try again in a minute.' });
 
+function slimCodebaseModel(m) {
+  if (!m) return m;
+  const { fileContents: _omit, ...rest } = m;
+  return rest;
+}
+
 router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
   const { repoUrl } = req.body;
   if (!repoUrl) throw AppError.badRequest('repoUrl is required');
@@ -56,7 +62,7 @@ async function runAnalysis(id, repoUrl) {
       owner: codebaseModel.meta.owner,
       repo: codebaseModel.meta.repo,
       status: 'generating',
-      analysis: codebaseModel,
+      analysis: slimCodebaseModel(codebaseModel),
     });
 
     broadcast(id, { type: 'progress', phase: 'generating', message: 'Generating .context.md files...' });
@@ -143,6 +149,8 @@ router.get('/:id/capture', asyncHandler(async (req, res) => {
     llmInputTokens: raw.llm_input_tokens ?? 0,
     llmOutputTokens: raw.llm_output_tokens ?? 0,
     llmCostUsd: raw.llm_cost_usd ?? 0,
+    llmCacheCreationTokens: raw.llm_cache_creation_tokens ?? 0,
+    llmCacheReadTokens: raw.llm_cache_read_tokens ?? 0,
   };
 
   const tierCounts = await analysisFiles.countByTier(req.params.id);
@@ -151,6 +159,8 @@ router.get('/:id/capture', asyncHandler(async (req, res) => {
     phase: r.phase,
     callCount: r.call_count,
     inputTokens: r.input_tokens,
+    cacheCreationTokens: r.cache_creation_tokens,
+    cacheReadTokens: r.cache_read_tokens,
     outputTokens: r.output_tokens,
     costUsd: r.cost_usd,
   }));

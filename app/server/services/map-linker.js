@@ -79,10 +79,13 @@ async function claudeLink(job, entities, codebaseModel, analysisId) {
     params: {
       model: CLAUDE_MODEL,
       max_tokens: 1000,
-      system: LINK_PROMPT,
+      system: [{ type: 'text', text: LINK_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{
         role: 'user',
-        content: `Job: "${job.title}" (${job.priority || 'medium'} priority)\n\nEntities:\n${entityList}`,
+        content: [
+          { type: 'text', text: `Entities:\n${entityList}`, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: `Job: "${job.title}" (${job.priority || 'medium'} priority)` },
+        ],
       }],
     },
   });

@@ -11,6 +11,44 @@ const MAX_PATCH_CHARS = parseInt(process.env.MAX_COMMIT_REVIEW_PATCH_CHARS, 10) 
 
 const ZERO_SHA = '0000000000000000000000000000000000000000';
 
+// Paths considered "trivial" — changes touching only these files don't need a
+// Claude review (docs, lockfiles, CI config, tests). Used to short-circuit
+// review for things like dependabot bumps or README edits.
+const TRIVIAL_PATTERNS = [
+  /^(docs?|examples?)\//,
+  /README(\.md)?$/,
+  /CHANGELOG(\.md)?$/,
+  /\.md$/,
+  /\.mdx$/,
+  /\.lock$/,
+  /\.lockb$/,
+  /package-lock\.json$/,
+  /yarn\.lock$/,
+  /pnpm-lock\.yaml$/,
+  /poetry\.lock$/,
+  /Cargo\.lock$/,
+  /^go\.sum$/,
+  /Pipfile\.lock$/,
+  /composer\.lock$/,
+  /mix\.lock$/,
+  /Podfile\.lock$/,
+  // .github/workflows/* MUST go through Claude review — deployment, secrets,
+  // CI integrity. Everything else under .github/ (dependabot, CODEOWNERS,
+  // issue templates) stays trivial.
+  /^\.github\/(?!workflows\/)/,
+  /^\.gitignore$/,
+  /^\.gitattributes$/,
+  /^LICEN[SC]E(\.md|\.txt)?$/,
+  /(^|\/)(__tests__|tests?)\//,
+  /\.test\.(t|j)sx?$/,
+  /\.spec\.(t|j)sx?$/,
+];
+
+function isTrivialPath(path) {
+  if (!path) return false;
+  return TRIVIAL_PATTERNS.some((re) => re.test(path));
+}
+
 function isZeroSha(s) {
   return !s || s === ZERO_SHA || /^0+$/.test(s);
 }
@@ -92,17 +130,42 @@ async function runCommitReviewJob({
 
   await commitReviews.markInProgress(commitReviewId);
 
-  const report = await reviewer.reviewCommit(projectId, {
-    owner,
-    repo,
-    afterSha,
-    beforeSha: before || beforeSha,
-    ref,
-    commitTitle,
-    commitBody,
-    files,
-    deployInfo,
-  });
+  const isTrivial = files.length > 0 && files.every((f) => isTrivialPath(f.filename));
+
+  let report;
+  if (isTrivial) {
+    report = {
+      summary: `Skipped Claude review: all ${files.length} file(s) in this push are docs/tests/lockfiles/CI config.`,
+      verdict: 'approve',
+      findings: [],
+      filesummaries: files.map((f) => ({ file: f.filename, severity: 'ok', comment: 'trivial' })),
+      stats: { totalFindings: 0, critical: 0, warnings: 0, info: 0 },
+      deployment: {
+        status: 'not_applicable',
+        summary: 'No deployment configuration touched in this push',
+        platforms: [],
+        cicd: 'Not affected',
+        containerized: false,
+        iac: 'Not affected',
+        concerns: [],
+        suggestions: [],
+      },
+      triage: { skippedClaude: true, reason: 'trivial_changes_only' },
+    };
+    console.log(`commit-review ${commitReviewId}: trivial commit detected (${files.length} files), skipping Claude call`);
+  } else {
+    report = await reviewer.reviewCommit(projectId, {
+      owner,
+      repo,
+      afterSha,
+      beforeSha: before || beforeSha,
+      ref,
+      commitTitle,
+      commitBody,
+      files,
+      deployInfo,
+    });
+  }
 
   await commitReviews.markCompleted(commitReviewId, report);
   broadcast(projectId, {
@@ -116,7 +179,11 @@ async function runCommitReviewJob({
   // so a context-draft failure never marks the (already-completed) review as
   // failed. Skipped entirely if a draft (in any status — pending/approved/
   // dismissed) already exists for this commit, so retries don't generate dupes
-  // or overturn a user's dismiss.
+  // or overturn a user's dismiss. Also skipped for trivial commits (dependabot,
+  // README edits, etc.) — no point summarizing a lockfile bump.
+  if (isTrivial) {
+    return;
+  }
   try {
     const project = await deployments.findById(projectId);
     if (project && project.user_id) {
@@ -174,4 +241,4 @@ async function runCommitReviewJobSafe(ctx) {
   }
 }
 
-module.exports = { runCommitReviewJob, runCommitReviewJobSafe, prepareFiles, isZeroSha };
+module.exports = { runCommitReviewJob, runCommitReviewJobSafe, prepareFiles, isZeroSha, isTrivialPath };

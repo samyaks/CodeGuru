@@ -1,6 +1,7 @@
 const { broadcast } = require('../lib/sse');
-const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
+const { HAIKU_MODEL, anthropic } = require('../lib/constants');
 const { streamMessageTracked } = require('../lib/anthropic-tracked');
+const { selectFilesForPrompt } = require('./file-selector');
 
 const SYSTEM_PROMPT = `You explain software projects to people who have NEVER written code.
 
@@ -33,6 +34,14 @@ Structure your response EXACTLY like this:
 ## What's not built yet?
 (If there are obvious gaps — no way to save your work, no login, no way to get it online — explain what's missing and what it would mean for users.)`;
 
+const FINAL_INSTRUCTION = `Now explain this project to someone who has never seen code before. What is it? What does it do? How would they use it? What's not finished?`;
+
+function renderFilesBlock(files) {
+  return files
+    .map((f) => `### ${f.path}${f.isSkeleton ? ' (skeleton)' : ''}\n\`\`\`\n${f.content}\n\`\`\``)
+    .join('\n\n');
+}
+
 async function describeFeatures(analysisId, codebaseModel) {
   broadcast(analysisId, {
     type: 'progress',
@@ -40,12 +49,16 @@ async function describeFeatures(analysisId, codebaseModel) {
     message: 'Writing a plain-English summary of what this project does...',
   });
 
-  const fileTree = codebaseModel.fileTree.slice(0, 80).join('\n');
+  const fileTree = (codebaseModel.fileTree || []).slice(0, 80).join('\n');
 
-  const keyFileEntries = Object.entries(codebaseModel.fileContents).slice(0, 15);
-  const keyFiles = keyFileEntries
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 2000)}\n\`\`\``)
-    .join('\n\n');
+  const { files: selected } = selectFilesForPrompt({
+    fileContents: codebaseModel.fileContents || {},
+    purpose: 'features_description',
+    tokenBudget: 20000,
+    maxFiles: 25,
+  });
+  const keyFiles = renderFilesBlock(selected);
+  const filesUsed = selected.map((f) => f.path);
 
   const stackLines = [
     codebaseModel.stack.framework && `Framework: ${codebaseModel.stack.framework}`,
@@ -64,21 +77,7 @@ async function describeFeatures(analysisId, codebaseModel) {
     .map((f) => `- ${f.name} (${f.fileCount} files${f.hasUI ? ', has user interface' : ''}${f.hasAPI ? ', has server logic' : ''})`)
     .join('\n');
 
-  const filesUsed = keyFileEntries.map(([path]) => path);
-
-  const { text: fullText } = await streamMessageTracked({
-    client: anthropic,
-    analysisId,
-    phase: 'features-describer',
-    targetPath: null,
-    filesUsed,
-    params: {
-      model: CLAUDE_MODEL,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: `Read this codebase and explain what it does. The person reading your explanation has never written code.
+  const cacheablePrefix = `Read this codebase and explain what it does. The person reading your explanation has never written code.
 
 ## Project
 Name: ${codebaseModel.meta.name}
@@ -95,9 +94,24 @@ ${featureLines}
 ${fileTree}
 
 ## Actual code from the most important files
-${keyFiles}
+${keyFiles}`;
 
-Now explain this project to someone who has never seen code before. What is it? What does it do? How would they use it? What's not finished?`,
+  const { text: fullText } = await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase: 'features-describer',
+    targetPath: null,
+    filesUsed,
+    params: {
+      model: HAIKU_MODEL,
+      max_tokens: 4096,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cacheablePrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: FINAL_INSTRUCTION },
+        ],
       }],
     },
     onText: (_chunk, partial) => {

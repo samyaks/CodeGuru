@@ -92,7 +92,7 @@ async function generateCommitContextDraft({
   const response = await anthropic.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 400,
-    system: SYSTEM_PROMPT,
+    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: userContent }],
   });
 

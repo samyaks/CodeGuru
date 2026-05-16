@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { analyses, deployments, productMap: mapDb } = require('../lib/db');
+const { analyses, deployments, productMap: mapDb, analysisFiles } = require('../lib/db');
 const { checkProjectAccess, safeParseJson } = require('../lib/helpers');
 const { AppError } = require('../lib/app-error');
 
@@ -38,33 +38,44 @@ async function loadCodebaseModel(projectId, analysisId) {
     throw AppError.notFound('Project not found');
   }
 
-  if (analysis) {
-    const fromAnalysis = buildCodebaseModel(analysis);
-    if (fromAnalysis) return fromAnalysis;
+  let model = analysis ? buildCodebaseModel(analysis) : null;
+
+  if (!model) {
+    // Fall back to the deployment's analysis_data (takeoff projects, or any
+    // analysis whose payload didn't survive the buildCodebaseModel shape check).
+    const ad = deployment?.analysis_data
+      ? (typeof deployment.analysis_data === 'string'
+        ? safeParseJson(deployment.analysis_data, {})
+        : deployment.analysis_data)
+      : {};
+
+    model = {
+      meta: {
+        name: deployment?.repo || analysis?.repo || ad.meta?.name,
+        description: deployment?.description || ad.meta?.description,
+      },
+      stack: deployment?.stack_info || ad.stack || {},
+      fileTree: ad.fileTree || [],
+      fileContents: ad.fileContents,
+      gaps: ad.gaps || {},
+      features: ad.features || [],
+      structure: ad.structure || {},
+      deployInfo: ad.deployInfo || {},
+      fileContentsPartial: !ad.fileContents,
+    };
   }
 
-  // Fall back to the deployment's analysis_data (takeoff projects, or any
-  // analysis whose payload didn't survive the buildCodebaseModel shape check).
-  const ad = deployment?.analysis_data
-    ? (typeof deployment.analysis_data === 'string'
-      ? safeParseJson(deployment.analysis_data, {})
-      : deployment.analysis_data)
-    : {};
+  if ((!model.fileContents || Object.keys(model.fileContents).length === 0) && analysisId) {
+    try {
+      model.fileContents = await analysisFiles.getContentsMap(analysisId);
+      model.fileContentsLazy = true;
+    } catch (err) {
+      console.warn(`loadCodebaseModel: getContentsMap failed for ${analysisId}: ${err.message}`);
+      model.fileContents = {};
+    }
+  }
 
-  return {
-    meta: {
-      name: deployment?.repo || analysis?.repo || ad.meta?.name,
-      description: deployment?.description || ad.meta?.description,
-    },
-    stack: deployment?.stack_info || ad.stack || {},
-    fileTree: ad.fileTree || [],
-    fileContents: ad.fileContents || {},
-    gaps: ad.gaps || {},
-    features: ad.features || [],
-    structure: ad.structure || {},
-    deployInfo: ad.deployInfo || {},
-    fileContentsPartial: !ad.fileContents,
-  };
+  return model;
 }
 
 function remapProductNodes(personas, jobs) {

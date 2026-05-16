@@ -11,7 +11,7 @@ const PRICING = {
   default: { input: 3, output: 15 },
 };
 
-function estimateCost(model, inputTokens, outputTokens) {
+function estimateCost(model, { inputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0, outputTokens = 0 } = {}) {
   const lower = String(model || '').toLowerCase();
   let matched = null;
   let matchedLen = -1;
@@ -23,7 +23,15 @@ function estimateCost(model, inputTokens, outputTokens) {
     }
   }
   const rate = matched ? PRICING[matched] : PRICING.default;
-  const cost = ((inputTokens || 0) * rate.input + (outputTokens || 0) * rate.output) / 1_000_000;
+  // Anthropic billing multipliers for prompt-caching buckets:
+  //   cache writes  = 1.25x base input rate
+  //   cache reads   = 0.10x base input rate
+  const cost = (
+    (inputTokens || 0)         * rate.input         +
+    (cacheCreationTokens || 0) * rate.input * 1.25  +
+    (cacheReadTokens || 0)     * rate.input * 0.10  +
+    (outputTokens || 0)        * rate.output
+  ) / 1_000_000;
   return Math.round(cost * 10000) / 10000;
 }
 
@@ -35,9 +43,20 @@ function getSharedClient() {
   return _sharedClient;
 }
 
-async function recordUsage({ analysisId, phase, model, inputTokens, outputTokens, durationMs, targetPath, filesUsed }) {
+async function recordUsage({
+  analysisId,
+  phase,
+  model,
+  inputTokens,
+  cacheCreationTokens = 0,
+  cacheReadTokens = 0,
+  outputTokens,
+  durationMs,
+  targetPath,
+  filesUsed,
+}) {
   if (!analysisId) return;
-  const cost_usd = estimateCost(model, inputTokens, outputTokens);
+  const cost_usd = estimateCost(model, { inputTokens, cacheCreationTokens, cacheReadTokens, outputTokens });
   try {
     await analysisLlmCalls.create({
       analysis_id: analysisId,
@@ -45,6 +64,8 @@ async function recordUsage({ analysisId, phase, model, inputTokens, outputTokens
       model,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      cache_read_tokens: cacheReadTokens,
       cost_usd,
       duration_ms: durationMs,
       target_path: targetPath || null,
@@ -54,6 +75,8 @@ async function recordUsage({ analysisId, phase, model, inputTokens, outputTokens
       calls: 1,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      cache_read_tokens: cacheReadTokens,
       cost_usd,
     });
     await analysisEvents.create({
@@ -61,11 +84,17 @@ async function recordUsage({ analysisId, phase, model, inputTokens, outputTokens
       event_type: 'llm.call',
       source: 'anthropic',
       path: targetPath || null,
-      tokens: (inputTokens || 0) + (outputTokens || 0),
+      tokens:
+        (inputTokens || 0) +
+        (cacheCreationTokens || 0) +
+        (cacheReadTokens || 0) +
+        (outputTokens || 0),
       metadata: {
         phase,
         model,
         input_tokens: inputTokens,
+        cache_creation_input_tokens: cacheCreationTokens,
+        cache_read_input_tokens: cacheReadTokens,
         output_tokens: outputTokens,
         cost_usd,
         duration_ms: durationMs,
@@ -89,12 +118,16 @@ async function createMessageTracked({
   const duration_ms = Date.now() - started;
   const inputTokens = response?.usage?.input_tokens || 0;
   const outputTokens = response?.usage?.output_tokens || 0;
+  const cacheCreationTokens = response?.usage?.cache_creation_input_tokens || 0;
+  const cacheReadTokens = response?.usage?.cache_read_input_tokens || 0;
   const model = params?.model || 'unknown';
   await recordUsage({
     analysisId,
     phase,
     model,
     inputTokens,
+    cacheCreationTokens,
+    cacheReadTokens,
     outputTokens,
     durationMs: duration_ms,
     targetPath,
@@ -123,15 +156,16 @@ async function streamMessageTracked({
   let fullText = '';
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheCreationTokens = 0;
+  let cacheReadTokens = 0;
 
   for await (const event of stream) {
     if (event.type === 'message_start' && event.message?.usage) {
-      if (typeof event.message.usage.input_tokens === 'number') {
-        inputTokens = event.message.usage.input_tokens;
-      }
-      if (typeof event.message.usage.output_tokens === 'number') {
-        outputTokens = event.message.usage.output_tokens;
-      }
+      const u = event.message.usage;
+      if (typeof u.input_tokens === 'number') inputTokens = u.input_tokens;
+      if (typeof u.output_tokens === 'number') outputTokens = u.output_tokens;
+      if (typeof u.cache_creation_input_tokens === 'number') cacheCreationTokens = u.cache_creation_input_tokens;
+      if (typeof u.cache_read_input_tokens === 'number') cacheReadTokens = u.cache_read_input_tokens;
     } else if (event.type === 'content_block_delta' && event.delta?.text) {
       const chunk = event.delta.text;
       fullText += chunk;
@@ -143,12 +177,13 @@ async function streamMessageTracked({
         }
       }
     } else if (event.type === 'message_delta' && event.usage) {
-      if (typeof event.usage.input_tokens === 'number') {
-        inputTokens = event.usage.input_tokens;
-      }
-      if (typeof event.usage.output_tokens === 'number') {
-        outputTokens = event.usage.output_tokens;
-      }
+      const u = event.usage;
+      if (typeof u.input_tokens === 'number') inputTokens = u.input_tokens;
+      if (typeof u.output_tokens === 'number') outputTokens = u.output_tokens;
+      // message_delta may carry final cache totals on some SDK versions; prefer
+      // them when present, otherwise keep the values seen in message_start.
+      if (typeof u.cache_creation_input_tokens === 'number') cacheCreationTokens = u.cache_creation_input_tokens;
+      if (typeof u.cache_read_input_tokens === 'number') cacheReadTokens = u.cache_read_input_tokens;
     }
   }
 
@@ -159,6 +194,8 @@ async function streamMessageTracked({
     phase,
     model,
     inputTokens,
+    cacheCreationTokens,
+    cacheReadTokens,
     outputTokens,
     durationMs,
     targetPath,
@@ -167,7 +204,12 @@ async function streamMessageTracked({
 
   return {
     text: fullText,
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    usage: {
+      input_tokens: inputTokens,
+      cache_creation_input_tokens: cacheCreationTokens,
+      cache_read_input_tokens: cacheReadTokens,
+      output_tokens: outputTokens,
+    },
     model,
     durationMs,
   };

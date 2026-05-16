@@ -230,10 +230,13 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
           // a comfortable margin so the response never truncates and
           // dumps the whole batch into the parse-failure / retry path.
           max_tokens: 3000,
-          system: CLAUDE_SYSTEM,
+          system: [{ type: 'text', text: CLAUDE_SYSTEM, cache_control: { type: 'ephemeral' } }],
           messages: [{
             role: 'user',
-            content: `JOBS:\n${jobList}\n\nGAPS:\n${gapList}\n\nReturn the JSON only.`,
+            content: [
+              { type: 'text', text: `JOBS:\n${jobList}`, cache_control: { type: 'ephemeral' } },
+              { type: 'text', text: `\n\nGAPS:\n${gapList}\n\nReturn the JSON only.` },
+            ],
           }],
         },
       });

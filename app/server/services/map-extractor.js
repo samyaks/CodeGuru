@@ -46,7 +46,7 @@ async function extractProductIntent(description, analysisId = null) {
     params: {
       model: CLAUDE_MODEL,
       max_tokens: 2000,
-      system: EXTRACT_PROMPT,
+      system: [{ type: 'text', text: EXTRACT_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: description }],
     },
   });

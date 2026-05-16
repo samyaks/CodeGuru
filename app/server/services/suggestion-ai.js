@@ -1,6 +1,7 @@
 const crypto = require('crypto');
-const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
+const { HAIKU_MODEL, anthropic, truncate } = require('../lib/constants');
 const { broadcast } = require('../lib/sse');
+const { selectFilesForPrompt } = require('./file-selector');
 
 const SYSTEM_PROMPT = `You are a senior staff engineer and product advisor reviewing a codebase.
 You've been given a list of static analysis findings that were already identified.
@@ -41,14 +42,6 @@ Rules:
 - Return 10-15 high-signal suggestions — quality over quantity
 - Return ONLY the JSON array, no other text. Do not wrap in markdown code fences.`;
 
-const KEY_FILE_PATTERNS = [
-  /route/i, /api/i, /controller/i,
-  /auth/i,
-  /schema/i, /model/i, /migration/i, /database/i, /db/i, /prisma/i,
-  /(^|\/)config\b/i,
-  /(^|\/)(index|main|app|server)\.(js|ts|tsx)$/,
-];
-
 function extractNotBuiltSection(featuresSummary) {
   if (!featuresSummary) return 'Not available';
   const marker = "## What's not built yet?";
@@ -60,21 +53,17 @@ function extractNotBuiltSection(featuresSummary) {
   return truncate(section, 2000);
 }
 
-function scoreFile(path) {
-  for (let i = 0; i < KEY_FILE_PATTERNS.length; i++) {
-    if (KEY_FILE_PATTERNS[i].test(path)) return KEY_FILE_PATTERNS.length - i;
-  }
-  return 0;
-}
-
 function buildKeyFilesSection(fileContents) {
-  const entries = Object.entries(fileContents)
-    .filter(([p]) => !p.toLowerCase().includes('.env'))
-    .sort((a, b) => scoreFile(b[0]) - scoreFile(a[0]))
-    .slice(0, 20);
+  const { files } = selectFilesForPrompt({
+    fileContents: fileContents || {},
+    purpose: 'ai_suggestions',
+    tokenBudget: 25000,
+    maxFiles: 25,
+    filterFn: (p) => !p.toLowerCase().includes('.env'),
+  });
 
-  return entries
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${truncate(content, 2000)}\n\`\`\``)
+  return files
+    .map((f) => `### ${f.path}${f.isSkeleton ? ' (skeleton)' : ''}\n\`\`\`\n${f.content}\n\`\`\``)
     .join('\n\n');
 }
 
@@ -168,7 +157,7 @@ async function runAISuggestions({ projectId, stack, gaps, features, fileContents
     const userMessage = buildUserMessage({ stack, gaps, features, fileTree, fileContents, staticSuggestions, featuresSummary });
 
     const response = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
+      model: HAIKU_MODEL,
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
