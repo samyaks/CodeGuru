@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -41,17 +41,43 @@ jobs:
     needs: typecheck-and-build
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build Docker image
         run: docker build -t codeguru:${{ github.sha }} .
 
+      # Smoke test: confirm the image boots and responds to /health.
+      # We deliberately bypass the default CMD (`migrate.js && app.js`)
+      # because migrate.js requires a real DATABASE_URL and we don't
+      # have a Postgres in CI. We also unset NODE_ENV=production so
+      # validateEnv() doesn't exit fatally on a missing SUPABASE_URL —
+      # /health itself does not touch DB or Supabase.
       - name: Smoke test container
         run: |
           docker run -d --name codeguru-test \
             -p 3001:3001 \
+            -e NODE_ENV=test \
             -e ANTHROPIC_API_KEY=test-key \
-            codeguru:${{ github.sha }}
-          sleep 5
-          curl -sf http://localhost:3001/health
+            codeguru:${{ github.sha }} \
+            node server/app.js
+
+          # Retry for up to 30s — cold container startup on shared
+          # runners can spend several seconds resolving requires.
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              echo "Health check passed on attempt $i"
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "Health check failed after 30 attempts. Container logs:"
+            docker logs codeguru-test || true
+            docker stop codeguru-test || true
+            exit 1
+          fi
+
           docker stop codeguru-test
