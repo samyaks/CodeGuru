@@ -47,17 +47,19 @@ jobs:
         run: docker build -t codeguru:${{ github.sha }} .
 
       # Smoke test: confirm the image boots and responds to /health.
-      # We deliberately bypass the default CMD (`migrate.js && app.js`)
-      # because migrate.js requires a real DATABASE_URL and we don't
-      # have a Postgres in CI. We also unset NODE_ENV=production so
-      # validateEnv() doesn't exit fatally on a missing SUPABASE_URL —
-      # /health itself does not touch DB or Supabase.
+      # We bypass the default CMD (`migrate.js && app.js`) because
+      # migrate.js needs a real Postgres and we don't run one in CI.
+      # The dummy DATABASE_URL only has to parse — the pg Pool is lazy
+      # and never opens a connection unless someone runs a query, and
+      # /health deliberately does not touch the DB. NODE_ENV=test keeps
+      # validateEnv() advisory rather than fatal on missing SUPABASE_URL.
       - name: Smoke test container
         run: |
           docker run -d --name codeguru-test \
             -p 3001:3001 \
             -e NODE_ENV=test \
             -e ANTHROPIC_API_KEY=test-key \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:9999/ci \
             codeguru:${{ github.sha }} \
             node server/app.js
 
