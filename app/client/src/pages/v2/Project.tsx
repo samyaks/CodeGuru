@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, FileText, GitCommit, MessageCircle, Settings, Shield, Users, Zap,
+  AlertOctagon, FileText, GitCommit, Settings, Shield, Users, Zap,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
 import { fetchSecuritySummary, type SecuritySummary } from '../../services/v2Api';
 import {
-  TabBar, MetadataLabel, EmptyState, ChatDrawer,
+  TabBar, MetadataLabel, EmptyState,
 } from '../../components/v2';
-import type { ChatMessage } from '../../components/v2';
 import GapsSection from './GapsSection';
 import ShippedSection from './ShippedSection';
 import MapSection from './MapSection';
@@ -35,15 +34,6 @@ const PLACEHOLDERS: Record<TabId, { icon: typeof AlertOctagon; title: string }> 
   settings: { icon: Settings, title: 'Settings will appear here.' },
 };
 
-const DEFAULT_QUICK_PROMPTS = ['priorities', 'how does verification work', 'partial commits', 'reject reasons'];
-
-const STUB_REPLIES: Record<string, string> = {
-  priori: "Start with Broken gaps — they're shipping risks. Then tackle Missing Functionality blocking your weakest persona.",
-  verif: "When you commit code, Takeoff re-scans the affected files and checks if the gap criteria are still met. Verified means it's truly fixed; partial means some files were missed.",
-  partial: "Partial verification means your commit addressed some but not all of the gap. Click into the partial item in Shipped to see exactly what's left.",
-  reject: "Rejecting a gap means it won't show up in future audits. Useful when something is intentional.",
-};
-
 function readHashTab(): TabId {
   if (typeof window === 'undefined') return 'gaps';
   const raw = window.location.hash.replace(/^#/, '').toLowerCase();
@@ -63,10 +53,6 @@ export default function ProjectV2() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(readHashTab);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', text: "I've analyzed your project. Ask me about any gap, or how to prioritize." },
-  ]);
 
   useEffect(() => {
     if (!id) return;
@@ -108,18 +94,6 @@ export default function ProjectV2() {
       window.location.hash = next;
       setActiveTab(next as TabId);
     }
-  }, []);
-
-  const sendChat = useCallback((text: string) => {
-    setMessages((prev) => [...prev, { role: 'user', text }]);
-    window.setTimeout(() => {
-      const lower = text.toLowerCase();
-      const key = Object.keys(STUB_REPLIES).find((k) => lower.includes(k));
-      const reply = key
-        ? STUB_REPLIES[key]
-        : 'Try asking about: priorities, verification, partial commits, or reject reasons.';
-      setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
-    }, 600);
   }, []);
 
   const personas = useMemo(() => {
@@ -344,29 +318,9 @@ export default function ProjectV2() {
                 </div>
               )}
             </div>
-
-            <button
-              type="button"
-              onClick={() => setChatOpen(true)}
-              className="w-full bg-stone-900 hover:bg-stone-800 text-white rounded-lg p-5 text-left transition-colors group"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <p className="font-semibold">Ask Claude</p>
-                <MessageCircle className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-              <p className="text-xs text-stone-300">Get advice on any gap or priority</p>
-            </button>
           </aside>
         </div>
       </main>
-
-      <ChatDrawer
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-        messages={messages}
-        onSend={sendChat}
-        quickPrompts={DEFAULT_QUICK_PROMPTS}
-      />
     </div>
   );
 }

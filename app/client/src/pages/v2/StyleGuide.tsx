@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 import {
   Card, MetadataLabel, Badge, TabBar, ProgressBar, EmptyState,
-  PersonaCard, GapCard, ShippedItem, ChatDrawer,
+  PersonaCard, GapCard, ShippedItem,
 } from '../../components/v2';
-import type { GapData, ShippedItemData, ChatMessage } from '../../components/v2';
+import type { GapData, ShippedItemData } from '../../components/v2';
 
 // Throwaway QA route. Renders every v2 component in its main states so we can
 // visually verify them. This file is deleted in Phase 6b.
@@ -143,10 +143,6 @@ const SAMPLE_SHIPPED: ShippedItemData[] = [
 
 export default function StyleGuide() {
   const [activeTab, setActiveTab] = useState('gaps');
-  const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: 'assistant', text: 'Hello — this is a stubbed chat for QA.' },
-  ]);
   const [gapStatuses, setGapStatuses] = useState<Record<string, 'untriaged' | 'in-progress' | 'rejected' | 'shipped'>>({
     b1: 'in-progress',
     m1: 'untriaged',
@@ -258,31 +254,7 @@ export default function StyleGuide() {
             description="Accept a gap, commit your work, and it'll appear here verified."
           />
         </Section>
-
-        <Section title="ChatDrawer">
-          <button
-            type="button"
-            onClick={() => setChatOpen(true)}
-            className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium"
-          >
-            Open chat
-          </button>
-        </Section>
       </main>
-
-      <ChatDrawer
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-        messages={messages}
-        quickPrompts={['priorities', 'verification', 'partial commits']}
-        onSend={(text) => {
-          setMessages((prev) => [
-            ...prev,
-            { role: 'user', text },
-            { role: 'assistant', text: 'This is a stubbed reply for the style guide.' },
-          ]);
-        }}
-      />
     </div>
   );
 }

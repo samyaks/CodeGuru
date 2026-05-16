@@ -28,8 +28,5 @@ export type {
 export { ShippedItem } from './ShippedItem';
 export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedItem';
 
-export { ChatDrawer } from './ChatDrawer';
-export type { ChatDrawerProps, ChatMessage } from './ChatDrawer';
-
 export { ShareSecurityModal } from './ShareSecurityModal';
 export type { ShareSecurityModalProps } from './ShareSecurityModal';
