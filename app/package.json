@@ -28,7 +28,7 @@
     "tree-sitter-javascript": "^0.23.1",
     "tree-sitter-python": "^0.23.6",
     "tree-sitter-typescript": "^0.23.2",
-    "uuid": "^11.1.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
