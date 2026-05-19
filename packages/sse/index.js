@@ -75,4 +75,21 @@ function getRecentEvents(id) {
   return eventBuffers.get(id) || [];
 }
 
-module.exports = { addConnection, removeConnection, broadcast, getRecentEvents };
+// Drop any buffered events for `id` and cancel the TTL timer.
+//
+// Use this when a logical "new run" starts for the same id (e.g.
+// reanalyze). Without this, a freshly-connecting client would replay
+// the previous run's terminal events — including `complete` and
+// `error` — and the frontend `useSSE` hook would close on the first
+// terminal event before any new progress arrives.
+//
+// Safe to call when no buffer exists; it's a no-op.
+function clearEventBuffer(id) {
+  if (bufferTimers.has(id)) {
+    clearTimeout(bufferTimers.get(id));
+    bufferTimers.delete(id);
+  }
+  eventBuffers.delete(id);
+}
+
+module.exports = { addConnection, removeConnection, broadcast, getRecentEvents, clearEventBuffer };

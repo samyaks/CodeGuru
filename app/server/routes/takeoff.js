@@ -1,8 +1,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, suggestions, analyses } = require('../lib/db');
-const { addConnection, broadcast, getRecentEvents } = require('../lib/sse');
+const { deployments, suggestions, analyses, shippedItems } = require('../lib/db');
+const { addConnection, broadcast, getRecentEvents, clearEventBuffer } = require('../lib/sse');
 const github = require('../services/github');
 const multer = require('multer');
 const { analyzeRepo, analyzeFromFiles, shouldSkipFile } = require('../services/analyzer');
@@ -50,6 +50,27 @@ const takeoffRateLimit = createRateLimit({
   max: 10,
   message: 'Too many requests. Please try again in a minute.',
 });
+
+// In-process guard against overlapping runs for the same project id.
+// Two concurrent re-analyses would race on `suggestions.deleteByProjectId`
+// + interleaved inserts and produce undefined triage state. The DB
+// `status='analyzing'` check covers the cross-process / restart case;
+// this Set covers the (much more likely) same-process double-click.
+// Lock is acquired in the reanalyze endpoint and released by the
+// `setImmediate(runTakeoff)` wrapper's finally block.
+const inFlightAnalyses = new Set();
+
+// Tighter limit specifically for reanalyze. The flow re-runs LLM calls
+// and re-hits GitHub, so a user mashing the button is expensive in a
+// way the normal takeoff rate limit (which protects new-project
+// creation) doesn't bound enough.
+const reanalyzeRateLimit = createRateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+  message: 'Too many re-analyses. Please wait a few minutes between runs.',
+});
+
+const REANALYZABLE_STATUSES = new Set(['ready', 'live', 'scored', 'failed']);
 
 router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES), asyncHandler(async (req, res) => {
   if (!req.files || req.files.length === 0) {
@@ -131,10 +152,15 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
     await deployments.update(id, { slug });
   }
 
+  inFlightAnalyses.add(id);
   setImmediate(() => {
-    runTakeoff(id, repoUrl).catch((err) => {
-      console.error(`runTakeoff ${id} unhandled:`, err);
-    });
+    runTakeoff(id, repoUrl)
+      .catch((err) => {
+        console.error(`runTakeoff ${id} unhandled:`, err);
+      })
+      .finally(() => {
+        inFlightAnalyses.delete(id);
+      });
   });
 
   // Auto-connect webhook for GitHub-linked projects when the user has a GH token
@@ -273,6 +299,44 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
 
 async function runPipeline(id, codebaseModel, userId, label) {
   const tPipeline = startTimer('pipeline_total', id);
+
+  // ── Triage preservation for re-analyses ──────────────────────
+  //
+  // Stage 2b does `suggestions.deleteByProjectId(id)` and Stage 4b
+  // re-inserts security findings via the persist layer. Without this
+  // snapshot, every re-analyze would wipe v2_status (accepted /
+  // in_progress / shipped / rejected), reject reasons, refined
+  // prompts, and job links — and would orphan every shipped_items
+  // row's gap_id via ON DELETE SET NULL.
+  //
+  // Restoration is keyed by suggestion id, which is content-stable
+  // across runs for all three sources (static rules, AI, security
+  // findings keyed by fingerprint). Snapshot rows whose underlying
+  // signal disappeared from the new analysis are silently dropped.
+  //
+  // First-run projects have empty snapshots, so this is essentially
+  // free; the cost only shows up when there's real triage to save.
+  const tSnap = startTimer('pipeline_snapshot_triage', id);
+  let triageSnapshot = [];
+  let shippedLinkSnapshot = [];
+  try {
+    [triageSnapshot, shippedLinkSnapshot] = await Promise.all([
+      suggestions.snapshotV2Triage(id),
+      shippedItems.snapshotGapLinks(id),
+    ]);
+    tSnap.end({
+      triage: triageSnapshot.length,
+      shippedLinks: shippedLinkSnapshot.length,
+    });
+  } catch (err) {
+    // Snapshot failure is non-fatal: we'd rather lose triage on this
+    // re-analyze than abort the whole pipeline. Logged so we can
+    // catch a regression in the snapshot query.
+    console.warn(`[pipeline] triage snapshot for ${id} failed (continuing without preservation):`, err.message);
+    triageSnapshot = [];
+    shippedLinkSnapshot = [];
+    tSnap.end({ ok: false, error: err.message });
+  }
 
   // Stage 1: Persist analysis data
   const tStage1 = startTimer('stage1_persist_analysis', id);
@@ -581,6 +645,58 @@ async function runPipeline(id, codebaseModel, userId, label) {
     tStage4b.end({ ok: false, error: err.message });
   }
 
+  // ── Restore triage + shipped→gap links ──────────────────────
+  //
+  // All suggestion-creating stages (2b static/gap, 4 AI, 4b security)
+  // have finished writing. The rows the snapshot captured either
+  // returned with their original ids (signal still present → restore)
+  // or didn't (signal gone → drop the snapshot row silently).
+  //
+  // Security re-scoring uses the live unaddressed set, so we recompute
+  // the score after restoring rejected/shipped status to make sure the
+  // cached `deployments.security_score` reflects post-restore reality.
+  if (triageSnapshot.length > 0 || shippedLinkSnapshot.length > 0) {
+    const tRestore = startTimer('pipeline_restore_triage', id);
+    try {
+      const triageResult = await suggestions.restoreV2Triage(id, triageSnapshot);
+      const shippedResult = await shippedItems.relinkGaps(id, shippedLinkSnapshot);
+
+      // Re-score security if any rejected/shipped status was restored,
+      // since the score was computed in Stage 4b against fresh
+      // untriaged rows (over-counting). Cheap: same query + math.
+      if (triageResult.restored > 0) {
+        try {
+          const unaddressed = await suggestions.findV2SecurityGapsByProjectId(id);
+          const rescored = computeSecurityScore(unaddressed);
+          await deployments.update(id, {
+            security_score: rescored.score,
+            updated_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.warn(`[pipeline] post-restore security rescore for ${id} failed (non-fatal):`, err.message);
+        }
+      }
+
+      tRestore.end({
+        triageRestored: triageResult.restored,
+        triageSkipped: triageResult.skipped,
+        shippedRelinked: shippedResult.relinked,
+        shippedSkipped: shippedResult.skipped,
+      });
+
+      console.log(JSON.stringify({
+        event: 'triage_restored',
+        projectId: id,
+        triage: triageResult,
+        shipped: shippedResult,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (err) {
+      console.error(`[pipeline] triage restore for ${id} failed (non-fatal):`, err.message);
+      tRestore.end({ ok: false, error: err.message });
+    }
+  }
+
   // Stage 6: Generate AI-ready .context.md files (non-fatal).
   // These are the markdown files vibe coders commit to their repo so
   // Cursor/Claude can read them as it works on the code. Runs serially
@@ -755,6 +871,86 @@ router.get('/:id/stream', asyncHandler(async (req, res) => {
   if (project.status === 'failed') {
     broadcast(req.params.id, { type: 'error', error: project.error });
   }
+}));
+
+// Re-run the full analysis pipeline for an existing project. The button
+// in the UI sends users here instead of the old no-op (navigate-to-
+// progress-page-and-replay-cached-complete) flow.
+//
+// Triage preservation (snapshot v2 columns + shipped→gap links before
+// the delete in Stage 2b, restore after Stage 4b) lives in
+// `runPipeline`, so anything that gets here will preserve user state
+// automatically. See suggestions.snapshotV2Triage in lib/db.js.
+//
+// Guards:
+//   • Auth + checkProjectAccess (owner-only mutating op)
+//   • Rate limit (5/5min/IP — re-analyses re-hit LLMs + GitHub)
+//   • 409 if status ∈ {pending, analyzing} OR an in-process run is
+//     already underway. Atomic via the inFlightAnalyses Set check
+//     PLUS a DB status check, so neither a same-process double-click
+//     nor a cross-restart race can fire two pipelines.
+//   • 400 if repo_url is a `local://` upload (we don't persist
+//     uploaded files, so there's nothing to re-analyze).
+//
+// On success we clear the SSE buffer so the AnalysisProgress page
+// doesn't receive the previous run's cached `complete` event — that
+// would close the EventSource immediately and the user would see
+// "Analysis Complete" before the new run had broadcast a single
+// progress message.
+router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) => {
+  const project = await deployments.findById(req.params.id);
+  if (!project) throw AppError.notFound('Project not found');
+
+  checkProjectAccess(project, req);
+
+  if (typeof project.repo_url !== 'string' || project.repo_url.startsWith('local://')) {
+    throw AppError.badRequest(
+      'Re-analyze is only available for GitHub-connected projects. ' +
+      'Uploaded folders cannot be re-analyzed because we do not store the original files.'
+    );
+  }
+
+  if (inFlightAnalyses.has(project.id) || !REANALYZABLE_STATUSES.has(project.status)) {
+    throw AppError.conflict(
+      `Project is currently ${project.status === 'analyzing' ? 'being analyzed' : `in '${project.status}' state`}; ` +
+      'wait for it to finish before re-analyzing.'
+    );
+  }
+
+  inFlightAnalyses.add(project.id);
+
+  // Order matters: status update must commit BEFORE we drop the SSE
+  // buffer, so any client that's mid-reconnect doesn't see the stale
+  // 'ready' state during the gap. Clear → reset status → broadcast a
+  // fresh 'status: analyzing' so currently-connected clients flip
+  // immediately.
+  clearEventBuffer(project.id);
+  await deployments.update(project.id, {
+    status: 'analyzing',
+    error: null,
+    updated_at: new Date().toISOString(),
+  });
+  broadcast(project.id, { type: 'status', status: 'analyzing' });
+
+  console.log(JSON.stringify({
+    event: 'reanalyze_triggered',
+    projectId: project.id,
+    repoUrl: project.repo_url,
+    userId: req.user?.id || null,
+    timestamp: new Date().toISOString(),
+  }));
+
+  setImmediate(() => {
+    runTakeoff(project.id, project.repo_url)
+      .catch((err) => {
+        console.error(`reanalyze runTakeoff ${project.id} unhandled:`, err);
+      })
+      .finally(() => {
+        inFlightAnalyses.delete(project.id);
+      });
+  });
+
+  res.status(202).json({ projectId: project.id, status: 'analyzing' });
 }));
 
 router.get('/:id/env-vars', asyncHandler(async (req, res) => {

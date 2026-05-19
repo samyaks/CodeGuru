@@ -303,6 +303,24 @@ export async function fetchProject(id: string): Promise<Project> {
   return handleApiResponse<Project>(res);
 }
 
+// Re-run the analysis pipeline for an existing project.
+//
+// The server preserves all v2 gap triage (accepted/rejected/shipped/in
+// progress + reject reasons + refined prompts) and re-links shipped
+// commits to their gaps automatically. Plan-step checkoffs are NOT
+// preserved — those are regenerated from the new analysis and there's
+// no stable key to restore against.
+//
+// Returns 202 + `{ projectId, status: 'analyzing' }`. The caller is
+// responsible for navigating to `/takeoff/:id` so the SSE progress
+// page can drive the user through the new run.
+export async function reanalyzeProject(id: string): Promise<{ projectId: string; status: string }> {
+  const res = await authFetch(`${API_BASE}/takeoff/${id}/reanalyze`, {
+    method: 'POST',
+  });
+  return handleApiResponse<{ projectId: string; status: string }>(res);
+}
+
 export async function updatePlanStep(projectId: string, stepId: string, status: 'todo' | 'done') {
   const res = await authFetch(`${API_BASE}/takeoff/${projectId}/plan/${stepId}`, {
     method: 'PATCH',

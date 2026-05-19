@@ -841,6 +841,103 @@ const suggestions = {
   async deleteByProjectId(projectId) {
     await getDb().query('DELETE FROM suggestions WHERE project_id = $1', [projectId]);
   },
+
+  // ── Triage snapshot / restore ─────────────────────────────────
+  //
+  // `runPipeline` does a full `DELETE FROM suggestions … project_id = …`
+  // followed by `createBatch` on every run. That wipes every user-set
+  // v2 column (`v2_status`, reject reason, refined-from link, job
+  // links, verification, refined cursor prompt). For re-analyses this
+  // is unacceptable — the user's accept/reject/ship decisions are
+  // their most precious state.
+  //
+  // These helpers let callers snapshot triage before the delete and
+  // restore it onto the freshly-inserted rows. They work because all
+  // three suggestion sources (static rules, AI suggestions, security
+  // detectors) emit content-stable ids (sha256 of project_id +
+  // rule/finding key, see services/suggestion-rules.js:5,
+  // services/suggestion-ai.js:135, services/security/persist.js:70).
+  // A gap whose underlying signal still exists will return with the
+  // same id and pick up the restored triage; a gap whose signal is
+  // gone won't be re-inserted and the snapshot row is simply
+  // discarded.
+
+  // Capture every row whose v2 columns differ from defaults. Rows
+  // still on the untriaged-default-empty profile aren't snapshotted —
+  // we don't need to "restore" `v2_status='untriaged'` onto a fresh
+  // insert that already defaults to that value.
+  async snapshotV2Triage(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT id, v2_status, v2_rejected_reason, v2_committed_at,
+              v2_refined_from_id, v2_job_links, verification, cursor_prompt
+         FROM suggestions
+        WHERE project_id = $1
+          AND (v2_status <> 'untriaged'
+               OR v2_refined_from_id IS NOT NULL
+               OR v2_job_links IS NOT NULL
+               OR verification IS NOT NULL)`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Apply each snapshot row's triage fields onto the suggestion that
+  // shares its id. Rows whose id no longer exists (signal gone) are
+  // silently skipped — they're not errors.
+  //
+  // `cursor_prompt` is only restored when the snapshot carried user-
+  // touched intent — i.e. (a) the row was actively triaged
+  // (status != untriaged) OR (b) the row was refined
+  // (v2_refined_from_id IS NOT NULL — refineV2Gap sets that flag and
+  // resets v2_status back to 'untriaged'). For genuinely fresh
+  // untriaged rows we want the new pipeline's prompt to win rather
+  // than stomp it with an older one.
+  //
+  // Returns `{ restored, skipped }` so callers can log a meaningful
+  // summary.
+  async restoreV2Triage(projectId, snapshots) {
+    if (!Array.isArray(snapshots) || snapshots.length === 0) {
+      return { restored: 0, skipped: 0 };
+    }
+    let restored = 0;
+    let skipped = 0;
+    await withTransaction(async (client) => {
+      for (const snap of snapshots) {
+        const wasTriaged = snap.v2_status && snap.v2_status !== 'untriaged';
+        const wasRefined = snap.v2_refined_from_id != null;
+        const restoreCursorPrompt = (wasTriaged || wasRefined) && snap.cursor_prompt != null;
+        const sets = [
+          'v2_status = $1',
+          'v2_rejected_reason = $2',
+          'v2_committed_at = $3',
+          'v2_refined_from_id = $4',
+          'v2_job_links = $5::jsonb',
+          'verification = $6',
+        ];
+        const params = [
+          snap.v2_status ?? 'untriaged',
+          snap.v2_rejected_reason ?? null,
+          snap.v2_committed_at ?? null,
+          snap.v2_refined_from_id ?? null,
+          toJsonb(snap.v2_job_links ?? null),
+          snap.verification ?? null,
+        ];
+        if (restoreCursorPrompt) {
+          sets.push(`cursor_prompt = $${params.length + 1}`);
+          params.push(snap.cursor_prompt);
+        }
+        params.push(snap.id, projectId);
+        const { rowCount } = await client.query(
+          `UPDATE suggestions SET ${sets.join(', ')}
+             WHERE id = $${params.length - 1} AND project_id = $${params.length}`,
+          params
+        );
+        if (rowCount > 0) restored += 1;
+        else skipped += 1;
+      }
+    });
+    return { restored, skipped };
+  },
   async countByProjectId(projectId) {
     const { rows } = await getDb().query(
       `SELECT COUNT(*)::int AS total,
@@ -1674,6 +1771,54 @@ const shippedItems = {
       [projectId, sinceIso]
     );
     return rows[0]?.n || 0;
+  },
+
+  // ── Triage-preservation companions for re-analyze ────────────
+  //
+  // The suggestions table has `gap_id … ON DELETE SET NULL` on
+  // shipped_items (migration 011_v2_shipped.sql:29). When runPipeline
+  // deletes all suggestions to re-insert them, every shipped row's
+  // gap_id becomes NULL — even though the new pipeline will recreate
+  // the gap with the SAME content-stable scoped id. These helpers let
+  // takeoff.js snapshot the (shipped_id → gap_id) pairs before the
+  // delete and re-link them after the new suggestions land.
+  //
+  // Only rows with a non-null gap_id are interesting; null-link rows
+  // either pre-date the link or have already been orphaned.
+  async snapshotGapLinks(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT id, gap_id FROM shipped_items
+        WHERE project_id = $1 AND gap_id IS NOT NULL`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  // Re-apply `gap_id` to each shipped row from the snapshot, but only
+  // when the target suggestion exists post-insert (FK would otherwise
+  // throw). Returns `{ relinked, skipped }` so callers can log.
+  async relinkGaps(projectId, snapshots) {
+    if (!Array.isArray(snapshots) || snapshots.length === 0) {
+      return { relinked: 0, skipped: 0 };
+    }
+    let relinked = 0;
+    let skipped = 0;
+    await withTransaction(async (client) => {
+      for (const snap of snapshots) {
+        const { rowCount } = await client.query(
+          `UPDATE shipped_items SET gap_id = $1
+             WHERE id = $2 AND project_id = $3
+               AND EXISTS (
+                 SELECT 1 FROM suggestions
+                  WHERE id = $1 AND project_id = $3
+               )`,
+          [snap.gap_id, snap.id, projectId]
+        );
+        if (rowCount > 0) relinked += 1;
+        else skipped += 1;
+      }
+    });
+    return { relinked, skipped };
   },
 };
 

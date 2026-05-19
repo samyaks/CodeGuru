@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -13,7 +13,7 @@ import {
   Download,
   FileText,
 } from 'lucide-react';
-import { MetadataLabel, EmptyState, ProgressBar } from '../../components/v2';
+import { MetadataLabel, EmptyState, ProgressBar, ReanalyzeModal } from '../../components/v2';
 import {
   fetchProjectDetail,
   fetchBuildStory,
@@ -379,10 +379,17 @@ function ContextFilesCard({
 }
 
 export function ContextSection({ projectId }: ContextSectionProps) {
+  const navigate = useNavigate();
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [story, setStory] = useState<BuildEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reanalyzeModalOpen, setReanalyzeModalOpen] = useState(false);
+
+  const handleReanalyzeTriggered = useCallback((id: string) => {
+    setReanalyzeModalOpen(false);
+    navigate(`/takeoff/${id}`);
+  }, [navigate]);
 
   // `reload` is the user-triggered Retry path on the load-error empty
   // state. The story fetch is best-effort, so we only block on the
@@ -446,6 +453,12 @@ export function ContextSection({ projectId }: ContextSectionProps) {
       />
     );
   }
+
+  // Local uploads (`local://…`) can't be re-analyzed because we don't
+  // persist the original files. Hide the Re-analyze affordance for
+  // those projects rather than show a button that always 400s.
+  // SettingsSection.tsx applies the same check on `repoUrl`.
+  const isLocalProject = typeof project.repo_url === 'string' && project.repo_url.startsWith('local://');
 
   const stack: Array<[string, string]> = [];
   if (project.stack_info?.runtime) stack.push(['Runtime', project.stack_info.runtime]);
@@ -523,16 +536,23 @@ export function ContextSection({ projectId }: ContextSectionProps) {
         <EmptyState
           icon={FileText}
           title="No AI-ready context files yet"
-          description="This project was analyzed before our context-file generator landed (or the stage failed). Re-analyze to generate them automatically, or build one from your story below."
+          description={
+            isLocalProject
+              ? "This was an uploaded folder, so we can't re-analyze to generate context files. You can still build one from your story below."
+              : 'This project was analyzed before our context-file generator landed (or the stage failed). Re-analyze to generate them automatically, or build one from your story below.'
+          }
           action={
             <div className="flex items-center gap-2">
-              <Link
-                to={`/takeoff/${projectId}`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Re-analyze
-              </Link>
+              {!isLocalProject ? (
+                <button
+                  type="button"
+                  onClick={() => setReanalyzeModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Re-analyze
+                </button>
+              ) : null}
               <Link
                 to={`/projects/${projectId}/story`}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
@@ -742,6 +762,16 @@ export function ContextSection({ projectId }: ContextSectionProps) {
           </ul>
         )}
       </div>
+
+      {!isLocalProject ? (
+        <ReanalyzeModal
+          open={reanalyzeModalOpen}
+          onClose={() => setReanalyzeModalOpen(false)}
+          projectId={projectId}
+          projectLabel={project.repo ? `${project.owner}/${project.repo}` : project.repo_url || projectId}
+          onTriggered={handleReanalyzeTriggered}
+        />
+      ) : null}
     </div>
   );
 }

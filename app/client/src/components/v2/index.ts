@@ -30,3 +30,6 @@ export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedI
 
 export { ShareSecurityModal } from './ShareSecurityModal';
 export type { ShareSecurityModalProps } from './ShareSecurityModal';
+
+export { ReanalyzeModal } from './ReanalyzeModal';
+export type { ReanalyzeModalProps } from './ReanalyzeModal';

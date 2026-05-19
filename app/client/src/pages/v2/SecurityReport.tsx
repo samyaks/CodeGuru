@@ -5,7 +5,7 @@ import {
   FileText, RefreshCw, Server, Share2, Shield, Wrench,
 } from 'lucide-react';
 import {
-  EmptyState, MetadataLabel, ShareSecurityModal,
+  EmptyState, MetadataLabel, ShareSecurityModal, ReanalyzeModal,
 } from '../../components/v2';
 import Header from '../../components/Header';
 import type { GapCategory, SecuritySeverity } from '../../components/v2';
@@ -156,6 +156,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
   const [severityFilter, setSeverityFilter] = useState<SecuritySeverity | null>(null);
   const [allOpen, setAllOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [reanalyzeModalOpen, setReanalyzeModalOpen] = useState(false);
   // Bumped by the Retry button on the load-error empty state to
   // re-trigger the loader useEffect below. Cheaper than extracting
   // the (mode-switching, dual-shape) async loader into a reusable
@@ -258,9 +259,25 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
     }
   }, [mode, pendingStatus, params.id, navigate]);
 
+  // Open the confirmation modal. The actual POST + navigation happens
+  // in `handleReanalyzeTriggered` below, called by the modal once the
+  // server returns 202. We don't unconditionally navigate to /takeoff
+  // anymore — the previous behavior bounced users to a no-op progress
+  // page that replayed the cached `complete` event from the prior run.
   const reAnalyze = useCallback(() => {
-    if (params.id) navigate(`/takeoff/${params.id}`);
-  }, [params.id, navigate]);
+    if (params.id) setReanalyzeModalOpen(true);
+  }, [params.id]);
+
+  const handleReanalyzeTriggered = useCallback((projectId: string) => {
+    setReanalyzeModalOpen(false);
+    navigate(`/takeoff/${projectId}`);
+  }, [navigate]);
+
+  // Local uploads (`local://…`) can't be re-analyzed because we don't
+  // persist the original files. Hide the button on this page rather
+  // than show a button that always errors. SettingsSection.tsx uses
+  // the same `local://` check on `repoUrl`.
+  const isLocalProject = typeof data?.repoUrl === 'string' && data.repoUrl.startsWith('local://');
 
   const visibleAllGaps = useMemo(() => {
     if (!data) return [] as V2Gap[];
@@ -381,7 +398,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                 Share
               </button>
             ) : null}
-            {showAdminActions ? (
+            {showAdminActions && !isLocalProject ? (
               <button
                 type="button"
                 onClick={reAnalyze}
@@ -620,6 +637,17 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
           open={shareModalOpen}
           onClose={() => setShareModalOpen(false)}
           projectId={data.projectId}
+        />
+      ) : null}
+
+      {/* ── Owner-only: Re-analyze confirmation ─────────────────── */}
+      {showAdminActions && data.projectId && !isLocalProject ? (
+        <ReanalyzeModal
+          open={reanalyzeModalOpen}
+          onClose={() => setReanalyzeModalOpen(false)}
+          projectId={data.projectId}
+          projectLabel={data.projectName}
+          onTriggered={handleReanalyzeTriggered}
         />
       ) : null}
     </div>
