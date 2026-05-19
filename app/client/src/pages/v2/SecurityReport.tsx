@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertOctagon, ArrowRight, ChevronDown, ChevronRight, ExternalLink, EyeOff,
-  FileText, RefreshCw, Server, Share2, Shield, Wrench, Zap,
+  FileText, RefreshCw, Server, Share2, Shield, Wrench,
 } from 'lucide-react';
 import {
   EmptyState, MetadataLabel, ShareSecurityModal,
 } from '../../components/v2';
+import Header from '../../components/Header';
 import type { GapCategory, SecuritySeverity } from '../../components/v2';
 import { useAuth } from '../../hooks/useAuth';
 import { fetchProjectDetail } from '../../services/api';
@@ -326,33 +327,26 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
-      {/* ── Sticky header ────────────────────────────────────────── */}
-      <header className="border-b border-stone-200 bg-white/80 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 bg-stone-900 rounded flex items-center justify-center flex-shrink-0">
-              <Zap className="w-4 h-4 text-stone-50" strokeWidth={2.5} />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold text-stone-900 tracking-tight truncate">
-                {data.projectName}
-              </h1>
-              <p className="text-xs text-stone-500 inline-flex items-center gap-1.5">
-                <Shield className="w-3 h-3" aria-hidden />
-                Security Report · {formatLastAnalyzed(data.lastAnalyzed)}
-                {data.redacted ? (
-                  <span className="inline-flex items-center gap-1 text-amber-700 ml-2">
-                    <EyeOff className="w-3 h-3" aria-hidden />
-                    Redacted
-                  </span>
-                ) : null}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+      <Header
+        variant="workspace"
+        title={data.projectName}
+        subtitle={
+          <>
+            <Shield className="w-3 h-3" aria-hidden />
+            Security Report · {formatLastAnalyzed(data.lastAnalyzed)}
+            {data.redacted ? (
+              <span className="inline-flex items-center gap-1 text-amber-700 ml-2">
+                <EyeOff className="w-3 h-3" aria-hidden />
+                Redacted
+              </span>
+            ) : null}
+          </>
+        }
+        actions={
+          <>
             {showAdminActions ? (
               <Link
-                to={`/v2/projects/${params.id}#gaps`}
+                to={`/projects/${params.id}#gaps`}
                 className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
               >
                 ← Back to project
@@ -378,9 +372,9 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                 Re-analyze
               </button>
             ) : null}
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <main className="max-w-5xl mx-auto px-6 py-12 space-y-12">
 
@@ -459,7 +453,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               <MetadataLabel>Top {Math.min(5, filteredTopRisks.length)} risks</MetadataLabel>
               {showAdminActions ? (
                 <Link
-                  to={`/v2/projects/${params.id}#gaps`}
+                  to={`/projects/${params.id}#gaps`}
                   className="text-xs text-stone-500 hover:text-stone-900"
                 >
                   Triage in Gaps tab →
@@ -471,7 +465,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                 <TopRiskCard
                   key={risk.id}
                   gap={risk}
-                  fixHref={showAdminActions && data.projectId ? `/v2/projects/${data.projectId}#gaps` : null}
+                  fixHref={showAdminActions && data.projectId ? `/projects/${data.projectId}#gaps` : null}
                 />
               ))}
             </div>
@@ -518,7 +512,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                           <CompactRiskRow
                             key={g.id}
                             gap={g}
-                            fixHref={showAdminActions && data.projectId ? `/v2/projects/${data.projectId}#gaps` : null}
+                            fixHref={showAdminActions && data.projectId ? `/projects/${data.projectId}#gaps` : null}
                           />
                         ))}
                       </ul>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, FileText, GitCommit, Settings, Shield, Users, Zap,
+  AlertOctagon, FileText, GitCommit, Settings, Shield, Users,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
@@ -9,6 +9,7 @@ import { fetchSecuritySummary, type SecuritySummary } from '../../services/v2Api
 import {
   TabBar, MetadataLabel, EmptyState,
 } from '../../components/v2';
+import Header from '../../components/Header';
 import GapsSection from './GapsSection';
 import ShippedSection from './ShippedSection';
 import MapSection from './MapSection';
@@ -175,22 +176,18 @@ export default function ProjectV2() {
 
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
-      <header className="border-b border-stone-200 bg-white/80 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-stone-900 rounded flex items-center justify-center">
-              <Zap className="w-4 h-4 text-stone-50" strokeWidth={2.5} />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-stone-900 tracking-tight">Takeoff</h1>
-              <p className="text-xs text-stone-500">AI in the loop</p>
-            </div>
-          </div>
-          <a href="/" className="text-sm text-stone-600 hover:text-stone-900 transition-colors">
+      <Header
+        variant="workspace"
+        title={project.repo}
+        actions={
+          <Link
+            to="/"
+            className="text-sm text-stone-600 hover:text-stone-900 transition-colors px-2"
+          >
             + New project
-          </a>
-        </div>
-      </header>
+          </Link>
+        }
+      />
 
       <main className="max-w-6xl mx-auto px-6 py-12">
         <div className="mb-8">

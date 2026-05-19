@@ -85,7 +85,7 @@ export default function AnalysisProgress() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header backTo="/" />
+      <Header variant="workspace" backTo="/" />
 
       <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24">
         <div className="max-w-lg w-full text-center space-y-8">
