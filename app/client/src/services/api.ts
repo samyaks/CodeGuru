@@ -226,6 +226,8 @@ export interface Project {
   recommendation: 'deploy' | 'plan' | null;
   analysis_data: AnalysisData | null;
   features_summary: string | null;
+  context_files: ContextFile[] | null;
+  completion_pct: number | null;
   slug: string | null;
   status: string;
   live_url: string | null;
@@ -357,6 +359,12 @@ export interface BuildEntry {
   sort_order: number;
   source_commit_sha: string | null;
   approval_status: 'pending' | 'approved' | 'dismissed' | null;
+}
+
+export interface ContextFile {
+  path: string;
+  content: string;
+  type: 'app' | 'feature' | 'gap';
 }
 
 export interface ProjectWithEntries extends Project {

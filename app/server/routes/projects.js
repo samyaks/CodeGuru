@@ -1,5 +1,5 @@
 const express = require('express');
-const { deployments, buildEntries, commitReviews } = require('../lib/db');
+const { deployments, buildEntries, commitReviews, analyses } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const railway = require('@codeguru/railway');
 const github = require('../services/github');
@@ -50,8 +50,19 @@ router.get('/:id', readLimit, asyncHandler(async (req, res) => {
 
   checkProjectAccess(project, req);
 
-  const entries = await buildEntries.findByProjectId(req.params.id);
-  res.json({ ...project, entries });
+  // `analyses.findById` is best-effort: legacy projects (or any deployment
+  // whose analyses row was never created) shouldn't 500 the detail endpoint.
+  const [entries, analysisRow] = await Promise.all([
+    buildEntries.findByProjectId(req.params.id),
+    analyses.findById(req.params.id).catch(() => null),
+  ]);
+
+  res.json({
+    ...project,
+    entries,
+    context_files: analysisRow?.context_files ?? null,
+    completion_pct: analysisRow?.completion_pct ?? null,
+  });
 }));
 
 router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {

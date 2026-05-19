@@ -10,6 +10,7 @@ const { detectBuildPlan } = require('../services/build-detector');
 const { scoreReadiness } = require('../services/readiness-scorer');
 const { generatePlan } = require('../services/plan-generator');
 const { describeFeatures } = require('../services/features-describer');
+const { generateContextFiles } = require('../services/context-generator');
 const { runStaticSuggestions, runGapSuggestions, STATIC_RULE_GAP_KEYS } = require('../services/suggestion-rules');
 const { runAISuggestions } = require('../services/suggestion-ai');
 const { runSecurityDetectors, listDetectorNames } = require('../services/security');
@@ -568,6 +569,37 @@ async function runPipeline(id, codebaseModel, userId, label) {
     tStage4b.end({ ok: false, error: err.message });
   }
 
+  // Stage 6: Generate AI-ready .context.md files (non-fatal).
+  // These are the markdown files vibe coders commit to their repo so
+  // Cursor/Claude can read them as it works on the code. Runs serially
+  // at the tail of the pipeline so users see readiness/plan/suggestions
+  // first (via the earlier `complete` broadcast); context files arrive
+  // as the final SSE milestone.
+  const tStage6 = startTimer('stage6_generate_context_files', id);
+  broadcast(id, { type: 'progress', phase: 'context-files', message: 'Generating AI-ready context files...' });
+  let contextFilesCount = 0;
+  try {
+    const { contextFiles, completionPct } = await generateContextFiles(id, codebaseModel);
+    contextFilesCount = contextFiles.length;
+    try {
+      await analyses.update(id, {
+        context_files: contextFiles,
+        completion_pct: completionPct,
+      });
+    } catch (err) {
+      console.warn(`analyses.update context_files for takeoff ${id} failed (non-fatal):`, err.message);
+    }
+    broadcast(id, {
+      type: 'context-files-ready',
+      count: contextFiles.length,
+      completionPct,
+    });
+    tStage6.end({ ok: true, count: contextFiles.length, completionPct });
+  } catch (err) {
+    console.error(`Context file generation for ${id} failed (non-fatal):`, err.message);
+    tStage6.end({ ok: false, error: err.message });
+  }
+
   // Stage 5: link suggestions to product-map jobs (non-blocking, async).
   // The product map is built in a parallel `setImmediate` so it may not
   // exist yet when we kick this off. The linker logs a `no-map` reason
@@ -591,7 +623,11 @@ async function runPipeline(id, codebaseModel, userId, label) {
     });
   });
 
-  tPipeline.end({ aiSuggestions: aiSuggestionsCount, staticSuggestions: allStaticSuggestions.length });
+  tPipeline.end({
+    aiSuggestions: aiSuggestionsCount,
+    staticSuggestions: allStaticSuggestions.length,
+    contextFiles: contextFilesCount,
+  });
 }
 
 // Build a product-map (personas + jobs + entity graph) for a freshly-analyzed

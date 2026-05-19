@@ -8,6 +8,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   Circle,
+  Copy,
+  Download,
+  FileText,
 } from 'lucide-react';
 import { MetadataLabel, EmptyState, ProgressBar } from '../../components/v2';
 import {
@@ -15,10 +18,68 @@ import {
   fetchBuildStory,
   type ProjectWithEntries,
   type BuildEntry,
+  type ContextFile,
   type GapInfo,
   type ReadinessCategory,
 } from '../../services/api';
 import { clampScore } from '../../services/productMapApi';
+
+const CONTEXT_FILE_TYPE_ORDER: Record<ContextFile['type'], number> = {
+  app: 0,
+  feature: 1,
+  gap: 2,
+};
+
+const CONTEXT_FILE_TYPE_LABEL: Record<ContextFile['type'], string> = {
+  app: 'app',
+  feature: 'feature',
+  gap: 'gap',
+};
+
+function sortContextFiles(files: ContextFile[]): ContextFile[] {
+  return files.slice().sort((a, b) => {
+    const t = CONTEXT_FILE_TYPE_ORDER[a.type] - CONTEXT_FILE_TYPE_ORDER[b.type];
+    if (t !== 0) return t;
+    return a.path.localeCompare(b.path);
+  });
+}
+
+// `path` ends in `.context.md` but contains slashes; OSes don't love that in a
+// `download` attribute. We keep the last two segments (e.g. `auth/.context.md`
+// -> `auth__.context.md`) so the file is recognizable without being literal.
+function fileToDownloadName(p: string): string {
+  const parts = p.split('/').filter(Boolean);
+  if (parts.length <= 1) return p;
+  return parts.slice(-2).join('__');
+}
+
+function downloadBlob(filename: string, content: string, mime = 'text/markdown') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    // Non-secure contexts (http://) and some Safari versions reject clipboard
+    // writes. Surfacing via console keeps the UI from looking broken.
+    console.warn('clipboard write failed:', err);
+    return false;
+  }
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.round(text.length / 4));
+}
 
 export interface ContextSectionProps {
   projectId: string;
@@ -156,6 +217,149 @@ function Collapsible({
   );
 }
 
+function ContextFileRow({ file }: { file: ContextFile }) {
+  const [copyLabel, setCopyLabel] = useState<'Copy' | 'Copied!'>('Copy');
+  const [open, setOpen] = useState(false);
+
+  const tokenEstimate = useMemo(() => estimateTokens(file.content), [file.content]);
+  const downloadName = useMemo(() => fileToDownloadName(file.path), [file.path]);
+
+  const onCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const ok = await copyToClipboard(file.content);
+    if (ok) {
+      setCopyLabel('Copied!');
+      setTimeout(() => setCopyLabel('Copy'), 1500);
+    }
+  };
+
+  const onDownload = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    downloadBlob(downloadName, file.content);
+  };
+
+  return (
+    <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
+      <div className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-stone-50 transition-colors">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+        >
+          {open ? (
+            <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0" />
+          )}
+          <FileText className="w-4 h-4 text-stone-400 flex-shrink-0" />
+          <code className="text-xs font-mono text-stone-800 truncate">{file.path}</code>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium flex-shrink-0">
+            {CONTEXT_FILE_TYPE_LABEL[file.type]}
+          </span>
+          <span className="text-[11px] text-stone-400 flex-shrink-0">
+            ~{tokenEstimate.toLocaleString()} tokens
+          </span>
+        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            type="button"
+            onClick={onCopy}
+            className="text-xs px-2 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+            aria-label={`Copy ${file.path}`}
+          >
+            <Copy className="w-3 h-3" />
+            {copyLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onDownload}
+            className="text-xs px-2 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+            aria-label={`Download ${file.path}`}
+          >
+            <Download className="w-3 h-3" />
+            Download
+          </button>
+        </div>
+      </div>
+      {open ? (
+        <pre className="text-xs text-stone-700 font-mono whitespace-pre-wrap bg-stone-50 border-t border-stone-200 px-4 py-3 max-h-80 overflow-y-auto">
+          {file.content}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
+function ContextFilesCard({
+  files,
+  bundleBaseName,
+}: {
+  files: ContextFile[];
+  bundleBaseName: string;
+}) {
+  const [copyAllLabel, setCopyAllLabel] = useState<'Copy all' | 'Copied!'>('Copy all');
+  const ordered = useMemo(() => sortContextFiles(files), [files]);
+
+  const bundled = useMemo(
+    () =>
+      ordered
+        .map((f) => `## ${f.path}\n\n${f.content.trim()}\n`)
+        .join('\n\n---\n\n'),
+    [ordered],
+  );
+
+  const onCopyAll = async () => {
+    const ok = await copyToClipboard(bundled);
+    if (ok) {
+      setCopyAllLabel('Copied!');
+      setTimeout(() => setCopyAllLabel('Copy all'), 1500);
+    }
+  };
+
+  const onDownloadAll = () => {
+    const safeBase = bundleBaseName.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+    downloadBlob(`${safeBase}-context.md`, bundled);
+  };
+
+  return (
+    <div className="bg-white border border-stone-200 rounded-lg p-5">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <MetadataLabel>AI-ready context files</MetadataLabel>
+        <span className="text-[11px] px-1.5 py-0.5 rounded bg-stone-900 text-white font-medium">
+          {ordered.length}
+        </span>
+        <p className="text-xs text-stone-500 flex-1 min-w-[12rem]">
+          Commit these alongside your code so Cursor / Claude reads them as it works.
+        </p>
+        <div className="flex items-center gap-1 ml-auto">
+          <button
+            type="button"
+            onClick={onCopyAll}
+            className="text-xs px-2.5 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+          >
+            <Copy className="w-3 h-3" />
+            {copyAllLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onDownloadAll}
+            className="text-xs px-2.5 py-1 rounded border border-stone-900 bg-stone-900 text-white hover:bg-stone-800 transition-colors inline-flex items-center gap-1"
+          >
+            <Download className="w-3 h-3" />
+            Download all
+          </button>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {ordered.map((file) => (
+          <ContextFileRow key={file.path} file={file} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ContextSection({ projectId }: ContextSectionProps) {
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [story, setStory] = useState<BuildEntry[]>([]);
@@ -247,6 +451,13 @@ export function ContextSection({ projectId }: ContextSectionProps) {
           <p className="text-stone-700 leading-relaxed v2-font-serif whitespace-pre-wrap">{summary}</p>
         )}
       </div>
+
+      {project.context_files && project.context_files.length > 0 ? (
+        <ContextFilesCard
+          files={project.context_files}
+          bundleBaseName={project.repo || project.owner || project.slug || 'project'}
+        />
+      ) : null}
 
       {readinessEntries.length > 0 ? (
         <div className="bg-white border border-stone-200 rounded-lg p-5">
