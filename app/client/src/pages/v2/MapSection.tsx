@@ -213,18 +213,23 @@ export function MapSection({ projectId }: MapSectionProps) {
     return personas.reduce((min, p) => (p.readiness < min.readiness ? p : min), personas[0]);
   }, [personas]);
 
-  const handleGenerate = useCallback(async () => {
-    setGenerating(true);
-    setError(null);
-    try {
-      const next = await regenerateProductMap(projectId);
-      setData(next);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setGenerating(false);
-    }
-  }, [projectId]);
+  const handleGenerate = useCallback(
+    async (force = false) => {
+      setGenerating(true);
+      setError(null);
+      try {
+        const next = await regenerateProductMap(projectId, { force });
+        setData(next);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [projectId]
+  );
+  const handleEmptyStateGenerate = useCallback(() => handleGenerate(false), [handleGenerate]);
+  const handleRerun = useCallback(() => handleGenerate(true), [handleGenerate]);
 
   const handleAddPersona = useCallback(
     async (input: { name: string; emoji: string; description: string }) => {
@@ -343,7 +348,7 @@ export function MapSection({ projectId }: MapSectionProps) {
           </p>
           <button
             type="button"
-            onClick={handleGenerate}
+            onClick={handleEmptyStateGenerate}
             disabled={generating}
             className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-stone-900 text-white text-sm font-medium rounded-md hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -391,9 +396,9 @@ export function MapSection({ projectId }: MapSectionProps) {
         </div>
         <button
           type="button"
-          onClick={handleGenerate}
+          onClick={handleRerun}
           disabled={generating}
-          title="Re-run Claude extraction (overwrites edits if a row doesn't already exist)"
+          title="Re-run Claude extraction (creates a fresh map and replaces the current one)"
           className="text-xs text-stone-600 hover:text-stone-900 inline-flex items-center gap-1 mt-1 disabled:opacity-50"
         >
           <Sparkles className="w-3 h-3" />

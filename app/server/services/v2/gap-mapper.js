@@ -166,6 +166,21 @@ function attachAffectedJobs(gaps, productMap) {
   });
 }
 
+// Confidence threshold above which a capability detector's verdict
+// overrides the LLM-extracted entity status. 0.7 mirrors the threshold
+// the detectors themselves use to flip `status` from 'partial' to
+// 'present' (see e.g. `capability-detectors/auth.js`).
+const DETECTOR_OVERRIDE_CONFIDENCE = 0.7;
+
+// Map an entity to the detector key in `gaps` that vets it. Capability
+// entities (`type: 'capability'`, `key: 'auth'/'deployment'/…`) map
+// directly; route/page/component entities have no deterministic
+// detector to cross-check against and aren't overridden here.
+function detectorKeyFor(entity) {
+  if (!entity || entity.type !== 'capability') return null;
+  return entity.key || null;
+}
+
 /**
  * Synthesize map-derived gaps for entities that jobs need but aren't
  * built yet. These are computed fresh on every GET — they don't live in
@@ -185,8 +200,17 @@ function attachAffectedJobs(gaps, productMap) {
  *   - File overlap (gap.affectedFiles ∩ entity.filePath) gives us
  *     entity-specific coverage even without a heuristic link record,
  *     so we add those too.
+ *
+ * Detector override (added 2026-05 — diagnostic finding):
+ *   The LLM map extractor frequently marks capability entities
+ *   (`auth`, `deployment`, `errorHandling`, …) as `partial` even when
+ *   the deterministic capability detectors say `exists=true conf≥0.95`.
+ *   `detectorGaps` (the capability-detector output, shaped by
+ *   `projectToLegacyGapShape`) is the source of truth for capability
+ *   presence; when it says present, we skip the synthetic
+ *   "Finish <Capability>" gap regardless of what the entity row claims.
  */
-function synthesizeMapGaps(productMap, existingGaps) {
+function synthesizeMapGaps(productMap, existingGaps, detectorGaps = {}) {
   if (!productMap || !Array.isArray(productMap.jobs) || !Array.isArray(productMap.entities) || !Array.isArray(productMap.edges)) {
     return [];
   }
@@ -243,6 +267,19 @@ function synthesizeMapGaps(productMap, existingGaps) {
     const isBlocking = status === 'partial' || status === 'stub' || status === 'missing'
       || (status !== 'detected' && status !== 'confirmed' && status !== 'full');
     if (!isBlocking) continue;
+
+    // Detector override: if a capability detector says this thing is
+    // present with high confidence, the entity status is stale/wrong
+    // and we suppress the synthetic gap. Routes/pages/components
+    // aren't cross-checkable this way, so they fall through to the
+    // entity-status rule above.
+    const detectorKey = detectorKeyFor(entity);
+    if (detectorKey) {
+      const det = detectorGaps?.[detectorKey];
+      if (det?.exists && (det?.confidence ?? 0) >= DETECTOR_OVERRIDE_CONFIDENCE) {
+        continue;
+      }
+    }
 
     const pairKey = `${job.id}::${entity.id}`;
     const wildcardKey = `${job.id}::*`;

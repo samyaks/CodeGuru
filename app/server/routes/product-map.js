@@ -146,7 +146,36 @@ router.post(
   asyncHandler(async (req, res) => {
     try {
       const { projectId } = req.params;
-      const { analysisId = null, description: bodyDescription } = req.body || {};
+      const { analysisId = null, description: bodyDescription, force: bodyForce } = req.body || {};
+      const force = bodyForce === true;
+
+      // Idempotency guard (added 2026-05): without this every call to
+      // POST /:projectId — including auto-fires from the v2 Map tab and
+      // the parallel takeoff `setImmediate` — inserts a fresh row and
+      // re-runs `extract-intent` (a Sonnet call). We were producing
+      // 2-3 product_maps per scan. Now, if a map already exists, we
+      // return the existing one (200) and let the explicit Re-run
+      // button opt back in with `force: true`.
+      //
+      // Authorization: this route is mounted with `optionalAuth`
+      // (`app.js`), so per-project access has to be enforced inside
+      // the handler. The non-idempotent path gets this via
+      // `createProductMap` (which calls `checkProjectAccess` after
+      // loading the deployment). The idempotent early-return below
+      // MUST run the same check before handing back the map, or any
+      // caller can read any private project's map by POSTing here.
+      let project = null;
+      if (!force) {
+        project = await deployments.findById(projectId);
+        if (!project) {
+          return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });
+        }
+        checkProjectAccess(project, req);
+        const existing = await getMapByProject(projectId);
+        if (existing && existing.map) {
+          return res.status(200).json(formatFullMap(existing));
+        }
+      }
 
       // For takeoff (deployment) projects there's no `analyses` row, so
       // analysisId is optional. We also accept a missing description and
@@ -155,9 +184,13 @@ router.post(
       // a map for an existing project without re-asking the user.
       let description = typeof bodyDescription === 'string' ? bodyDescription.trim() : '';
       if (!description) {
-        const project = await deployments.findById(projectId);
+        // Reuse the project we loaded above for the access check when
+        // we have it; otherwise (force=true path) load it now.
         if (!project) {
-          return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });
+          project = await deployments.findById(projectId);
+          if (!project) {
+            return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });
+          }
         }
         description =
           (typeof project.features_summary === 'string' && project.features_summary.trim()) ||

@@ -89,7 +89,7 @@ function pruneInternalFields(gap) {
 }
 
 router.get('/', readLimit, asyncHandler(async (req, res) => {
-  await loadProjectAndAuthorize(req);
+  const project = await loadProjectAndAuthorize(req);
   const v2Status = normalizeV2Status(req.query.status);
   const projectId = req.params.id;
 
@@ -104,6 +104,14 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
       return null;
     }),
   ]);
+
+  // Detector output (persisted on the deployment row) — used by
+  // `synthesizeMapGaps` to override stale entity statuses for
+  // capability entities (auth/database/deployment/…). The LLM map
+  // extractor frequently marks these `partial` even when the
+  // detectors say `exists=true conf≥0.95`; this lets the deterministic
+  // signal win.
+  const detectorGaps = project?.analysis_data?.gaps || {};
 
   const mapped = rows.map(toGap);
 
@@ -130,7 +138,7 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   //    only exist as untriaged.
   const synthetic = (v2Status && v2Status !== 'untriaged')
     ? []
-    : synthesizeMapGaps(map, enriched);
+    : synthesizeMapGaps(map, enriched, detectorGaps);
 
   const grouped = groupGaps([...enriched, ...synthetic]);
 
@@ -168,7 +176,8 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
     if (!map || !Array.isArray(map.entities) || !Array.isArray(map.jobs)) {
       throw AppError.notFound('Map not available for this project');
     }
-    const synthetic = synthesizeMapGaps(map, []);
+    const detectorGaps = project?.analysis_data?.gaps || {};
+    const synthetic = synthesizeMapGaps(map, [], detectorGaps);
     const target = synthetic.find((g) => g.id === gapId);
     if (!target) throw AppError.notFound('Synthetic gap no longer applies (entity may have been built)');
 

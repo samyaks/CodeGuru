@@ -394,16 +394,22 @@ export async function createProductMap(
 
 /**
  * Regenerate a project's product map from its features_summary /
- * description. Used by the v2 Map tab when the project has no map yet
- * (the v1 onboarding wizard was removed in the migration). The backend
- * derives the description from the deployment row when not provided.
+ * description. Used by the v2 Map tab's "Re-run" button.
+ *
+ * `force: true` is mandatory — the backend POST is now idempotent (it
+ * returns the existing map if one exists) so a regenerate that doesn't
+ * pass `force` is just a fetch. The empty-state "Generate from your
+ * codebase" button calls this with the empty options object: that hits
+ * the idempotent path on first paint (no map → falls through to
+ * Claude) and the existing map on every subsequent click.
  */
 export async function regenerateProductMap(
   projectId: string,
-  opts: { description?: string } = {},
+  opts: { description?: string; force?: boolean } = {},
 ): Promise<ProductMapData> {
   const body: Record<string, unknown> = {};
   if (opts.description && opts.description.trim()) body.description = opts.description.trim();
+  if (opts.force === true) body.force = true;
   const res = await authFetch(`${API}/product-map/${projectId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

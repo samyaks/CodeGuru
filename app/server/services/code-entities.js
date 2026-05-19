@@ -57,15 +57,25 @@ function extractCodeEntities(codebaseModel) {
         if (/export\s+(async\s+)?function\s+DELETE/i.test(content) || /\.delete\(/i.test(content)) methods.push('DELETE');
         if (methods.length === 0) methods.push('*');
 
+        // `fileContents` is the slim, budget-capped sample (~50 files
+        // of full content), NOT the whole repo. When a route file is
+        // outside that sample, `content` is the empty string and the
+        // old `content.length < 200 → stub` rule fired on every
+        // unselected route — producing a flood of bogus
+        // "Finish <route>" synthetic gaps. Only stub when we actually
+        // looked at the file AND it's short or has stub markers.
+        const sampled = content.length > 0;
+        const looksStub = sampled
+          && (content.length < 200 || /todo|placeholder|stub|not.?implemented/i.test(content));
+
         for (const method of methods) {
-          const isStub = content.length < 200 || /todo|placeholder|stub|not.?implemented/i.test(content);
           entities.push({
             id: `route:${method} ${routePath}`,
             type: 'route',
             key: `${method} ${routePath}`,
             label: `${method} ${routePath}`,
             filePath,
-            status: isStub ? 'stub' : 'detected',
+            status: looksStub ? 'stub' : 'detected',
             module: null,
             metadata: { method },
           });
@@ -104,15 +114,27 @@ function extractCodeEntities(codebaseModel) {
     { gapKey: 'envConfig', label: 'Environment Config', module: null },
     { gapKey: 'errorHandling', label: 'Error Handling', module: null },
   ];
+  // Status threshold mirrors `capability-detectors/*.js`: ≥0.7
+  // confidence flips a capability from 'partial' to 'present', so we
+  // adopt the same line for 'full' here. The legacy
+  // `hasSchema || provider` rule was missing fields the new detectors
+  // don't populate (`platform`, `hasGlobalHandler`, `hasRoles`, …)
+  // and silently collapsed every capability to 'partial', which is
+  // what produced the flood of "Finish <Capability>" synthetic gaps.
+  const FULL_CONFIDENCE = 0.7;
   for (const { gapKey, label, module } of capMap) {
     const gap = gaps[gapKey];
+    let status;
+    if (!gap || !gap.exists) status = 'none';
+    else if ((gap.confidence ?? 0) >= FULL_CONFIDENCE) status = 'full';
+    else status = 'partial';
     entities.push({
       id: `cap:${gapKey}`,
       type: 'capability',
       key: gapKey,
       label,
       filePath: null,
-      status: gap && gap.exists ? (gap.hasSchema || gap.provider ? 'full' : 'partial') : 'none',
+      status,
       module,
       metadata: { detail: (gap && (gap.provider || gap.platform || gap.type)) || '' },
     });
