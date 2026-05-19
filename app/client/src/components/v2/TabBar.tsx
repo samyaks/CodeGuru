@@ -21,7 +21,18 @@ export interface TabBarProps {
 export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps) {
   return (
     <div className={`border-b border-stone-200 ${className}`.trim()}>
-      <div className="flex gap-1">
+      {/* `overflow-x-auto` lets the 5-tab v2 workspace bar scroll
+          horizontally below ~640px instead of clipping or forcing a
+          page-level horizontal scroll. The negative margin / matching
+          padding keeps the underline flush with the parent's edge so
+          the affordance looks intentional rather than clipped, and
+          `flex-nowrap` prevents wrapping into a stacked second row
+          which would break the underline-as-active pattern. */}
+      <div
+        role="tablist"
+        aria-orientation="horizontal"
+        className="flex flex-nowrap gap-1 overflow-x-auto -mx-2 px-2 [scrollbar-width:thin]"
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeId === tab.id;
@@ -30,8 +41,13 @@ export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`tabpanel-${tab.id}`}
+              id={`tab-${tab.id}`}
+              tabIndex={isActive ? 0 : -1}
               onClick={() => onChange(tab.id)}
-              className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 transition-all -mb-px ${
+              className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm font-medium border-b-2 transition-all -mb-px whitespace-nowrap flex-shrink-0 ${
                 isActive
                   ? 'border-stone-900 text-stone-900'
                   : 'border-transparent text-stone-500 hover:text-stone-900'

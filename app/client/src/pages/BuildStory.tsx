@@ -625,16 +625,24 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                               <EyeOff size={14} />
                             )}
                           </button>
+                          {/* Always visible (no hover-only fade) so the
+                              controls work on touch devices. The
+                              adjacent Eye toggle is already always
+                              shown, so this aligns the row's pattern.
+                              On desktop the extra two icons read as
+                              quiet row metadata, not noise. */}
                           <button
                             onClick={() => startEdit(entry)}
-                            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-page transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 rounded-md text-text-muted hover:text-text hover:bg-page transition-colors"
+                            aria-label="Edit entry"
                             title="Edit"
                           >
                             <Pencil size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(entry.id)}
-                            className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger-bg transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger-bg transition-colors"
+                            aria-label="Delete entry"
                             title="Delete"
                           >
                             <Trash2 size={14} />

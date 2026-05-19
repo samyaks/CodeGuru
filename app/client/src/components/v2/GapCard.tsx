@@ -69,7 +69,6 @@ export interface GapCardProps {
   onMarkCommitted?: (id: string) => void;
   onCopyPrompt?: (id: string) => void;
   onRestore?: (id: string) => void;
-  onOpenInCursor?: (id: string) => void;
   /** Map-derived gaps only: fetch the Cursor prompt on demand. The
    *  parent renders the prompt back into `gap.prompt` so this card
    *  shows it inline. */
@@ -114,7 +113,7 @@ function cweUrl(cweId: string): string {
 
 export function GapCard({
   gap, status,
-  onAccept, onReject, onRefine, onMarkCommitted, onCopyPrompt, onRestore, onOpenInCursor, onGetPrompt,
+  onAccept, onReject, onRefine, onMarkCommitted, onCopyPrompt, onRestore, onGetPrompt,
   copied = false,
   promptLoading = false,
   className = '',
@@ -135,8 +134,20 @@ export function GapCard({
   const securityMeta = gap.isSecurity && gap.securitySeverity
     ? SECURITY_SEVERITY_META[gap.securitySeverity]
     : null;
+  // The full "why this is a security risk" callout only renders for
+  // critical/high. For medium/low the Shield badge already carries
+  // the message (severity + CWE in `title`) and the verbose block
+  // becomes noise that pushes the actual gap content below the fold.
+  // Users on the Security tab can still see the full CWE link via
+  // the dedicated SecurityReport page.
+  const showSecurityCallout = !!securityMeta
+    && (gap.securitySeverity === 'critical' || gap.securitySeverity === 'high');
 
-  const [expanded, setExpanded] = useState(true);
+  // The Cursor prompt block defaults collapsed. A user with N accepted
+  // gaps would otherwise see N long prompts stacked open by default —
+  // ~10× scroll cost for the common multi-gap triage flow. The Copy
+  // button works without expanding, so collapse is the natural default.
+  const [expanded, setExpanded] = useState(false);
   const [refining, setRefining] = useState(false);
   const [refineText, setRefineText] = useState('');
 
@@ -196,7 +207,7 @@ export function GapCard({
         <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
         <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
 
-        {securityMeta ? (
+        {showSecurityCallout ? (
           <div className="mb-3 px-3 py-2 bg-red-50/50 border border-red-100 rounded-md">
             <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-700 mb-0.5">
               <Shield className="w-3 h-3" aria-hidden />
@@ -290,15 +301,10 @@ export function GapCard({
               >
                 {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
               </button>
-              {onOpenInCursor ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenInCursor(gap.id)}
-                  className="flex items-center gap-2 px-4 py-2 border border-stone-300 hover:bg-stone-50 text-stone-700 rounded-md text-sm font-medium transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" /> Open in Cursor
-                </button>
-              ) : null}
+              {/* `Mark committed` keeps `ml-auto` so it right-aligns on
+                  desktop. On narrow viewports the wrap from `flex-wrap`
+                  drops it to the next line where ml-auto effectively
+                  becomes a no-op — still readable, just stacked. */}
               <button
                 type="button"
                 onClick={() => onMarkCommitted?.(gap.id)}
@@ -313,7 +319,7 @@ export function GapCard({
 
         {refining && isUntriaged ? (
           <div className="mt-4 p-3 bg-stone-50 border border-stone-200 rounded-md">
-            <p className="text-xs text-stone-600 mb-2 font-medium">Tell Claude how to reshape this gap:</p>
+            <p className="text-xs text-stone-600 mb-2 font-medium">How should we reshape this gap?</p>
             <textarea
               value={refineText}
               onChange={(e) => setRefineText(e.target.value)}
@@ -382,7 +388,13 @@ export function GapCard({
         ) : null}
 
         {isUntriaged && !refining && !isSynthetic ? (
-          <div className="flex items-center gap-2">
+          /* Hierarchy: Accept is the primary action (the GapsSection
+             copy says "Accept gaps to start working on them"), so it
+             gets the solid black treatment. Reject and Refine are
+             quiet ghost buttons — no border, no fill — so the eye
+             lands on Accept first. Padding stays consistent so the
+             three are still recognizable as a button group. */
+          <div className="flex items-center gap-1 flex-wrap">
             <button
               type="button"
               onClick={() => onAccept?.(gap.id)}
@@ -393,14 +405,14 @@ export function GapCard({
             <button
               type="button"
               onClick={() => onReject?.(gap.id)}
-              className="flex items-center gap-2 px-4 py-2 border border-stone-300 hover:bg-stone-50 text-stone-700 rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
             >
               <X className="w-4 h-4" /> Reject
             </button>
             <button
               type="button"
               onClick={() => setRefining(true)}
-              className="flex items-center gap-2 px-4 py-2 border border-stone-300 hover:bg-stone-50 text-stone-700 rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
             >
               <Wand2 className="w-4 h-4" /> Refine
             </button>

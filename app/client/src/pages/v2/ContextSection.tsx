@@ -250,12 +250,17 @@ function ContextFileRow({ file }: { file: ContextFile }) {
 
   return (
     <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-      <div className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-stone-50 transition-colors">
+      {/* Below sm: stack path/pill/tokens above Copy/Download so the
+          row doesn't crush the path to a few characters. Above sm:
+          keep the original single-line layout. The button group
+          right-aligns on mobile via `self-end` to avoid full-width
+          buttons that would shout louder than the path itself. */}
+      <div className="w-full px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 hover:bg-stone-50 transition-colors">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+          className="flex items-center gap-2 flex-1 min-w-0 text-left flex-wrap sm:flex-nowrap"
         >
           {open ? (
             <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0" />
@@ -263,7 +268,7 @@ function ContextFileRow({ file }: { file: ContextFile }) {
             <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0" />
           )}
           <FileText className="w-4 h-4 text-stone-400 flex-shrink-0" />
-          <code className="text-xs font-mono text-stone-800 truncate">{file.path}</code>
+          <code className="text-xs font-mono text-stone-800 truncate min-w-0 flex-1 sm:flex-initial">{file.path}</code>
           <span
             className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium flex-shrink-0 ${CONTEXT_FILE_TYPE_PILL[file.type]}`}
           >
@@ -273,7 +278,7 @@ function ContextFileRow({ file }: { file: ContextFile }) {
             ~{tokenEstimate.toLocaleString()} tokens
           </span>
         </button>
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0 self-end sm:self-auto">
           <button
             type="button"
             onClick={onCopy}
