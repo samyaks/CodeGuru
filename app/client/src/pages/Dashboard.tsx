@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   FolderGit2,
   FileText,
@@ -9,6 +9,8 @@ import {
   Plus,
   Lightbulb,
   Map,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import Header from '../components/Header';
 import {
@@ -19,6 +21,7 @@ import {
 } from '../services/api';
 import { Badge, Button, Card, Pill, SegmentedTabs } from '../components/ui';
 import type { BadgeStatus, TabItem } from '../components/ui';
+import { EmptyState } from '../components/v2/EmptyState';
 
 interface Analysis {
   id: string;
@@ -65,30 +68,68 @@ function asBadgeStatus(s: string): BadgeStatus {
 }
 
 export default function Dashboard() {
+  const [searchParams] = useSearchParams();
+  const legacyMode = searchParams.get('legacy') === 'true';
+
   const [projects, setProjects] = useState<Project[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [analysesError, setAnalysesError] = useState<string | null>(null);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('projects');
 
-  useEffect(() => {
-    Promise.all([
-      fetchProjects().catch(() => []),
-      fetchAnalyses().catch(() => []),
-      fetchReviews().catch(() => []),
-    ]).then(([p, a, r]) => {
-      setProjects(p);
-      setAnalyses(a);
-      setReviews(r);
-      setLoading(false);
-    });
+  // Force the projects tab whenever legacy mode is off, even if stale state
+  // or a URL hint would have selected analyses/reviews.
+  const activeTab: Tab = legacyMode ? tab : 'projects';
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setProjectsError(null);
+    setAnalysesError(null);
+    setReviewsError(null);
+    const [pRes, aRes, rRes] = await Promise.allSettled([
+      fetchProjects(),
+      fetchAnalyses(),
+      fetchReviews(),
+    ]);
+    if (pRes.status === 'fulfilled') setProjects(pRes.value);
+    else {
+      setProjects([]);
+      setProjectsError(pRes.reason instanceof Error ? pRes.reason.message : 'Failed to load projects.');
+    }
+    if (aRes.status === 'fulfilled') setAnalyses(aRes.value);
+    else {
+      setAnalyses([]);
+      setAnalysesError(aRes.reason instanceof Error ? aRes.reason.message : 'Failed to load analyses.');
+    }
+    if (rRes.status === 'fulfilled') setReviews(rRes.value);
+    else {
+      setReviews([]);
+      setReviewsError(rRes.reason instanceof Error ? rRes.reason.message : 'Failed to load reviews.');
+    }
+    setLoading(false);
   }, []);
 
-  const tabs: TabItem<Tab>[] = [
-    { key: 'projects', label: 'Projects' },
-    { key: 'analyses', label: 'Analyses' },
-    { key: 'reviews', label: 'Reviews' },
-  ];
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const tabs: TabItem<Tab>[] = legacyMode
+    ? [
+        { key: 'projects', label: 'Projects' },
+        { key: 'analyses', label: 'Analyses' },
+        { key: 'reviews', label: 'Reviews' },
+      ]
+    : [{ key: 'projects', label: 'Projects' }];
+
+  const retryButton = (
+    <Button size="sm" variant="secondary" onClick={() => void reload()}>
+      <RefreshCw size={14} />
+      Retry
+    </Button>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-page">
@@ -96,7 +137,11 @@ export default function Dashboard() {
 
       <main className="flex-1 max-w-[960px] mx-auto w-full px-6 py-8">
         <div className="flex items-center justify-between mb-7 gap-3 flex-wrap">
-          <SegmentedTabs<Tab> tabs={tabs} value={tab} onChange={setTab} />
+          {legacyMode ? (
+            <SegmentedTabs<Tab> tabs={tabs} value={activeTab} onChange={setTab} />
+          ) : (
+            <div />
+          )}
           <Link to="/">
             <Button size="sm" className="!h-9 !px-4">
               <Plus size={16} />
@@ -112,15 +157,32 @@ export default function Dashboard() {
         )}
 
         {/* Projects */}
-        {!loading && tab === 'projects' && projects.length === 0 && (
+        {!loading && activeTab === 'projects' && projectsError && (
           <EmptyState
-            icon={<FolderGit2 size={48} />}
-            title="No projects yet"
-            description="Analyze your first app to get started."
+            icon={AlertCircle}
+            title="Couldn't load projects"
+            description={`${projectsError} Check your connection and try again.`}
+            action={retryButton}
           />
         )}
 
-        {!loading && tab === 'projects' && projects.length > 0 && (
+        {!loading && activeTab === 'projects' && !projectsError && projects.length === 0 && (
+          <EmptyState
+            icon={FolderGit2}
+            title="No projects yet"
+            description="Analyze your first app to get started."
+            action={
+              <Link to="/">
+                <Button size="sm">
+                  <Plus size={16} />
+                  Analyze a repo
+                </Button>
+              </Link>
+            }
+          />
+        )}
+
+        {!loading && activeTab === 'projects' && !projectsError && projects.length > 0 && (
           <div className="grid md:grid-cols-2 gap-3.5">
             {projects.map((p) => (
               <ProjectCard key={p.id} project={p} />
@@ -128,16 +190,25 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Analyses */}
-        {!loading && tab === 'analyses' && analyses.length === 0 && (
+        {/* Analyses (legacy only) */}
+        {!loading && legacyMode && activeTab === 'analyses' && analysesError && (
           <EmptyState
-            icon={<FolderGit2 size={48} />}
+            icon={AlertCircle}
+            title="Couldn't load analyses"
+            description={`${analysesError} Check your connection and try again.`}
+            action={retryButton}
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length === 0 && (
+          <EmptyState
+            icon={FolderGit2}
             title="No analyses yet"
             description="Run an analysis on a GitHub repo to see it here."
           />
         )}
 
-        {!loading && tab === 'analyses' && analyses.length > 0 && (
+        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length > 0 && (
           <div className="flex flex-col gap-2">
             {analyses.map((a) => (
               <Link
@@ -165,16 +236,25 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Reviews */}
-        {!loading && tab === 'reviews' && reviews.length === 0 && (
+        {/* Reviews (legacy only) */}
+        {!loading && legacyMode && activeTab === 'reviews' && reviewsError && (
           <EmptyState
-            icon={<FileText size={48} />}
+            icon={AlertCircle}
+            title="Couldn't load reviews"
+            description={`${reviewsError} Check your connection and try again.`}
+            action={retryButton}
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length === 0 && (
+          <EmptyState
+            icon={FileText}
             title="No reviews yet"
             description="Create a code review to see it here."
           />
         )}
 
-        {!loading && tab === 'reviews' && reviews.length > 0 && (
+        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length > 0 && (
           <div className="flex flex-col gap-2">
             {reviews.map((r) => (
               <Link
@@ -268,26 +348,3 @@ function ProjectCard({ project }: { project: Project }) {
   );
 }
 
-function EmptyState({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
-      <div className="text-text-disabled">{icon}</div>
-      <h2 className="text-xl font-semibold text-text-soft">{title}</h2>
-      <p className="text-text-muted max-w-md">{description}</p>
-      <Link to="/" className="mt-2">
-        <Button>
-          <Plus size={16} />
-          Analyze a repo
-        </Button>
-      </Link>
-    </div>
-  );
-}
