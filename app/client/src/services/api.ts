@@ -361,10 +361,14 @@ export interface BuildEntry {
   approval_status: 'pending' | 'approved' | 'dismissed' | null;
 }
 
+// `type` reflects what context-generator actually emits, not what we initially
+// guessed: 'existing' = the path already has a .context.md in the repo and this
+// is a regenerated refresh; 'gap' = a prescriptive spec for a capability the
+// repo is missing entirely.
 export interface ContextFile {
   path: string;
   content: string;
-  type: 'app' | 'feature' | 'gap';
+  type: 'existing' | 'gap';
 }
 
 export interface ProjectWithEntries extends Project {

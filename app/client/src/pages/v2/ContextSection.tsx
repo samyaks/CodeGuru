@@ -24,16 +24,26 @@ import {
 } from '../../services/api';
 import { clampScore } from '../../services/productMapApi';
 
+// `existing` files (refreshed context for paths that already have a .context.md)
+// surface first; prescriptive `gap` files (specs for missing capabilities) come
+// after so missing-pieces work is grouped together at the bottom of the list.
 const CONTEXT_FILE_TYPE_ORDER: Record<ContextFile['type'], number> = {
-  app: 0,
-  feature: 1,
-  gap: 2,
+  existing: 0,
+  gap: 1,
 };
 
 const CONTEXT_FILE_TYPE_LABEL: Record<ContextFile['type'], string> = {
-  app: 'app',
-  feature: 'feature',
-  gap: 'gap',
+  existing: 'refresh',
+  gap: 'missing',
+};
+
+// `gap` files are prescriptive specs for capabilities the repo doesn't have
+// yet — they're action items, so they earn the amber accent. `existing` files
+// are regenerated documentation for paths that already exist, so they're
+// purely informational.
+const CONTEXT_FILE_TYPE_PILL: Record<ContextFile['type'], string> = {
+  existing: 'bg-stone-100 text-stone-600 border-stone-200',
+  gap: 'bg-amber-50 text-amber-700 border-amber-200',
 };
 
 function sortContextFiles(files: ContextFile[]): ContextFile[] {
@@ -254,7 +264,9 @@ function ContextFileRow({ file }: { file: ContextFile }) {
           )}
           <FileText className="w-4 h-4 text-stone-400 flex-shrink-0" />
           <code className="text-xs font-mono text-stone-800 truncate">{file.path}</code>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium flex-shrink-0">
+          <span
+            className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium flex-shrink-0 ${CONTEXT_FILE_TYPE_PILL[file.type]}`}
+          >
             {CONTEXT_FILE_TYPE_LABEL[file.type]}
           </span>
           <span className="text-[11px] text-stone-400 flex-shrink-0">

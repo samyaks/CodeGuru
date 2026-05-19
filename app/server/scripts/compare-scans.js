@@ -133,12 +133,22 @@ async function graphSignals(analysisId) {
 }
 
 async function gapSummary(analysisId) {
-  const { rows } = await getDb().query(
-    `SELECT analysis FROM analyses WHERE id = $1`,
+  // v2 (takeoff flow) persists gaps to deployments.analysis_data.gaps.
+  // The legacy /analyze flow writes them to analyses.analysis.gaps. Prefer
+  // deployments since that's where 100% of recent scans land; fall back to
+  // analyses for the rare legacy scan. Both rows share the same id.
+  const { rows: [d] } = await getDb().query(
+    `SELECT analysis_data->'gaps' AS gaps FROM deployments WHERE id = $1`,
     [analysisId]
   );
-  const a = rows[0]?.analysis || {};
-  const g = a.gaps || {};
+  let g = d?.gaps || null;
+  if (!g) {
+    const { rows: [a] } = await getDb().query(
+      `SELECT analysis->'gaps' AS gaps FROM analyses WHERE id = $1`,
+      [analysisId]
+    );
+    g = a?.gaps || {};
+  }
   const out = {};
   for (const k of ['auth', 'database', 'deployment', 'permissions', 'testing', 'errorHandling', 'envConfig']) {
     const v = g[k] || {};
