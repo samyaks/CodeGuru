@@ -3,6 +3,7 @@ const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
 const { createMessageTracked, streamMessageTracked } = require('../lib/anthropic-tracked');
 const { selectFilesForPrompt } = require('./file-selector');
 const { analysisFiles } = require('../lib/db');
+const { computeImportGraph } = require('./import-graph');
 
 const APP_CONTEXT_CACHE_CHARS = 1500;
 
@@ -317,6 +318,13 @@ async function runDelimitedCall({
     for (const p of s.filesUsed || []) allFilesUsed.add(p);
   }
 
+  // Intentionally NO `cache_control` on the prefix. The delimited call is a
+  // single-shot in the typical case (CodeGuru's first scan: 5 sections in one
+  // call, no retry). Ephemeral caching costs 1.25× input on creation; the only
+  // payoff is if a second call within 5 min reads the same prefix. With p_retry
+  // far below the ~28% break-even rate, caching here was a net ~$0.02/scan
+  // tax. The multi-call legacy path below still caches because it always makes
+  // 3+ calls sharing the prefix.
   await streamMessageTracked({
     client: anthropic,
     analysisId,
@@ -330,7 +338,7 @@ async function runDelimitedCall({
       messages: [{
         role: 'user',
         content: [
-          { type: 'text', text: cacheablePrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: cacheablePrefix },
           { type: 'text', text: dynamicInstruction },
           { type: 'text', text: finalReminder },
         ],
@@ -358,7 +366,7 @@ async function generateContextFiles(analysisId, codebaseModel) {
     console.warn(`[context-generator] getSkeletonsMap failed: ${err.message}`);
   }
 
-  const featureDirs = identifyFeatureDirs(codebaseModel);
+  const featureDirs = identifyFeatureDirs(codebaseModel, skeletons);
   const gaps = identifyActionableGaps(codebaseModel);
 
   const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } =
@@ -447,7 +455,7 @@ async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons =
   const appContext = await generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed);
   contextFiles.push({ path: '.context.md', content: appContext, type: 'existing' });
 
-  const featureDirs = identifyFeatureDirs(codebaseModel);
+  const featureDirs = identifyFeatureDirs(codebaseModel, skeletons);
   for (const dir of featureDirs) {
     send({ type: 'progress', phase: 'context-feature', message: `Generating context for ${dir}...` });
     try {
@@ -621,28 +629,121 @@ This is a PRESCRIPTIVE spec, not documentation of existing code.`;
 
 // ── Plan helpers (unchanged public behavior) ────────────────────
 
-function identifyFeatureDirs(model) {
-  const dirs = new Set();
-  const seen = new Set();
+// Dirs we never want to author context for — build artifacts, vendored code,
+// or the user's own snapshot of legacy material. Mirrors analyzer.js SKIP_DIRS
+// closely so the two stay in sync.
+const FEATURE_DIR_SKIP_ROOTS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.output',
+  '__pycache__', '.cache', 'coverage', '.turbo', '.vercel', 'vendor',
+  '.svelte-kit', 'target', 'out', '.expo', 'archive', '.venv', 'venv',
+]);
 
-  for (const [path] of Object.entries(model.fileContents)) {
-    const parts = path.split('/');
-    if (parts.length >= 2) {
-      const topDir = parts[0];
-      if (!seen.has(topDir) && !['node_modules', '.git', 'dist', 'build'].includes(topDir)) {
-        seen.add(topDir);
-        if (['src', 'app', 'server', 'client', 'lib', 'api', 'pages', 'components'].includes(topDir)) {
-          if (parts.length >= 3) {
-            dirs.add(`${parts[0]}/${parts[1]}`);
-          }
-        } else {
-          dirs.add(topDir);
-        }
-      }
+// Roots that act as monorepo / framework containers — depth-1 under them is
+// almost never the actual "feature"; depth-2 is. So `app/server` and
+// `app/client/src/pages` are real features, but `app` itself isn't.
+const FEATURE_DIR_NESTED_ROOTS = new Set([
+  'src', 'app', 'server', 'client', 'lib', 'api', 'pages', 'components', 'packages',
+]);
+
+// Bucket a file path to its canonical "feature dir". Returns null if the file
+// lives somewhere we should skip entirely (root, build dir, etc.).
+function featureDirOf(p) {
+  const parts = p.split('/');
+  if (parts.length < 2) return null;
+  if (FEATURE_DIR_SKIP_ROOTS.has(parts[0])) return null;
+
+  // For nested roots (`app`, `src`, …) descend one level deeper so the dir is
+  // actually the feature module rather than the container. For deep monorepos
+  // like CodeGuru this catches `app/server`, `app/client`, `packages/auth`,
+  // etc. — the previous heuristic only kept the FIRST `app/X` it saw because
+  // of a `seen.has(topDir)` early-exit, so the bulk of the codebase was
+  // invisible to context generation.
+  if (FEATURE_DIR_NESTED_ROOTS.has(parts[0])) {
+    if (parts.length < 3) return null;
+    // Go one level deeper for nested-root-of-nested-root patterns like
+    // `app/client/src/...` so the canonical bucket is `app/client/src` —
+    // otherwise the entire client tree collapses into a single context file.
+    if (FEATURE_DIR_NESTED_ROOTS.has(parts[1]) && parts.length >= 4) {
+      return `${parts[0]}/${parts[1]}/${parts[2]}`;
     }
+    return `${parts[0]}/${parts[1]}`;
+  }
+  return parts[0];
+}
+
+// Max dirs to ship to Claude in a single delimited call. Stays well under the
+// 20K max_tokens cap so we don't trigger the retry path unnecessarily, and
+// keeps the prompt size manageable.
+const FEATURE_DIR_MAX = 10;
+// Minimum file count to qualify a dir. A 1-file dir is rarely worth a full
+// .context.md — it usually devolves to "this file does X".
+const FEATURE_DIR_MIN_FILES = 2;
+
+function identifyFeatureDirs(model, skeletons = {}) {
+  const fileContents = model.fileContents || {};
+  const fileTree = Array.isArray(model.fileTree) ? model.fileTree : Object.keys(fileContents);
+
+  // Recompute the import graph from the in-memory full-tier files. analyzer.js
+  // already computed and persisted this once for ranking purposes, but
+  // threading it through codebaseModel would couple two layers; recomputing on
+  // ~50 files is sub-100ms and keeps the call self-contained.
+  let graph;
+  try {
+    graph = computeImportGraph(fileContents);
+  } catch (err) {
+    console.warn(`[context-generator] import graph for feature-dir scoring failed: ${err.message}`);
+    graph = new Map();
   }
 
-  return [...dirs].slice(0, 5);
+  // Aggregate per-dir from the FULL fileTree so dirs aren't scored against the
+  // ~50-file selector sample. Centrality comes from the import graph (which
+  // only knows about full-tier files) — sparse but the best signal we have.
+  // We separately track whether the dir has *any* renderable content
+  // (fileContents OR skeleton) — without that, the section plan's per-dir
+  // selectFilesForPrompt call would drop the dir, so there's no point
+  // suggesting it.
+  const dirStats = new Map();
+  const skeletonsSet = new Set(Object.keys(skeletons || {}));
+
+  for (const filePath of fileTree) {
+    const dir = featureDirOf(filePath);
+    if (!dir) continue;
+    const stat = dirStats.get(dir) || {
+      fileCount: 0, inboundSum: 0, outboundSum: 0, renderableCount: 0,
+    };
+    stat.fileCount += 1;
+    if (fileContents[filePath] || skeletonsSet.has(filePath)) stat.renderableCount += 1;
+    const node = graph.get(filePath);
+    if (node) {
+      stat.inboundSum  += node.inboundDegree  || 0;
+      stat.outboundSum += node.outboundDegree || 0;
+    }
+    dirStats.set(dir, stat);
+  }
+
+  // Score: file count is the primary signal (a fat dir is meaty regardless of
+  // who imports it). Inbound traffic boosts dirs that everything else depends
+  // on. Outbound contributes a smaller boost since "imports a lot" loosely
+  // indicates an orchestrator / glue module. Use log on fileCount so a
+  // 200-file dir doesn't completely drown a 10-file hub.
+  const scored = [];
+  for (const [dir, stat] of dirStats) {
+    if (stat.fileCount < FEATURE_DIR_MIN_FILES) continue;
+    if (stat.renderableCount < 1) continue;
+    const score =
+      4 * Math.log2(1 + stat.fileCount) +
+      2 * Math.log2(1 + stat.inboundSum) +
+      1 * Math.log2(1 + stat.outboundSum);
+    scored.push({
+      dir, score,
+      fileCount: stat.fileCount,
+      renderableCount: stat.renderableCount,
+      inboundSum: stat.inboundSum,
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, FEATURE_DIR_MAX).map((s) => s.dir);
 }
 
 function identifyActionableGaps(model) {
