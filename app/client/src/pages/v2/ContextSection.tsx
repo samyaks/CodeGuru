@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
   FolderTree,
   Layers,
+  RefreshCw,
   ShieldCheck,
   CheckCircle2,
   Circle,
@@ -383,6 +384,26 @@ export function ContextSection({ projectId }: ContextSectionProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // `reload` is the user-triggered Retry path on the load-error empty
+  // state. The story fetch is best-effort, so we only block on the
+  // main project fetch's success/failure for the error UI.
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const p = await fetchProjectDetail(projectId);
+      setProject(p);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to load context');
+    } finally {
+      setLoading(false);
+    }
+    // Story refresh is fire-and-forget; failures don't surface.
+    fetchBuildStory(projectId)
+      .then((entries) => setStory(entries.slice(0, 10)))
+      .catch(() => { /* best-effort */ });
+  }, [projectId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -408,7 +429,22 @@ export function ContextSection({ projectId }: ContextSectionProps) {
     return <div className="text-sm text-stone-500">Loading context…</div>;
   }
   if (error || !project) {
-    return <EmptyState title="Couldn't load context" description={error ?? 'Project not found.'} />;
+    return (
+      <EmptyState
+        title="Couldn't load context"
+        description={error ?? 'Project not found.'}
+        action={
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        }
+      />
+    );
   }
 
   const stack: Array<[string, string]> = [];
@@ -474,7 +510,39 @@ export function ContextSection({ projectId }: ContextSectionProps) {
           files={project.context_files}
           bundleBaseName={project.repo || project.owner || project.slug || 'project'}
         />
-      ) : null}
+      ) : (
+        /* The Context-Files generator runs as part of the takeoff
+           pipeline, but projects analyzed before that wiring landed
+           (or those where the stage failed silently) have no files
+           on disk. Surface this explicitly instead of silently
+           hiding the card — otherwise users reading the tab's
+           "AI-ready context files" sub-promise have no idea why
+           the section is absent. The Build Story page is a working
+           alternative path: it generates a single .context.md from
+           the user's narrative entries. */
+        <EmptyState
+          icon={FileText}
+          title="No AI-ready context files yet"
+          description="This project was analyzed before our context-file generator landed (or the stage failed). Re-analyze to generate them automatically, or build one from your story below."
+          action={
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/takeoff/${projectId}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Re-analyze
+              </Link>
+              <Link
+                to={`/projects/${projectId}/story`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+              >
+                Build from story
+              </Link>
+            </div>
+          }
+        />
+      )}
 
       {readinessEntries.length > 0 ? (
         <div className="bg-white border border-stone-200 rounded-lg p-5">

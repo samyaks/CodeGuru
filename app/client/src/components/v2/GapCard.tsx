@@ -160,7 +160,15 @@ export function GapCard({
         : meta.border;
 
   return (
-    <div className={`bg-white border ${ringClass} rounded-lg overflow-hidden transition-all hover:shadow-sm ${className}`.trim()}>
+    <div
+      /* `gap-<id>` is the stable scroll target for deep-links from
+         SecurityReport's "Fix this gap →" affordance. GapsSection
+         reads `?focus=<gapId>` on mount, scrolls to this element,
+         and toggles `data-focused` so we can ring it briefly. */
+      id={`gap-${gap.id}`}
+      data-gap-id={gap.id}
+      className={`bg-white border ${ringClass} rounded-lg overflow-hidden transition-all hover:shadow-sm data-[focused=true]:ring-2 data-[focused=true]:ring-amber-400 data-[focused=true]:ring-offset-2 ${className}`.trim()}
+    >
       <div className="p-5">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <Badge variant={gap.category} icon={Icon}>{meta.label}</Badge>

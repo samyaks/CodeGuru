@@ -156,6 +156,12 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
   const [severityFilter, setSeverityFilter] = useState<SecuritySeverity | null>(null);
   const [allOpen, setAllOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  // Bumped by the Retry button on the load-error empty state to
+  // re-trigger the loader useEffect below. Cheaper than extracting
+  // the (mode-switching, dual-shape) async loader into a reusable
+  // callback.
+  const [reloadTrigger, setReloadTrigger] = useState(0);
+  const reload = useCallback(() => setReloadTrigger((n) => n + 1), []);
 
   // ── Data loaders ────────────────────────────────────────────────
   //
@@ -241,7 +247,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [isShared, params.id, params.slug]);
+  }, [isShared, params.id, params.slug, reloadTrigger]);
 
   // Owner-mode: bounce in-flight projects to the takeoff progress page
   // exactly like the project workspace does. Effect rather than inline
@@ -301,6 +307,19 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
           description={isGone
             ? 'The link has been revoked or has expired. Ask the project owner for a new one.'
             : (error ?? 'Project not found.')}
+          /* No Retry for the 410 case — the share link is
+             permanently revoked, retrying won't bring it back.
+             Generic errors (network blips, 5xx) get a Retry. */
+          action={isGone ? undefined : (
+            <button
+              type="button"
+              onClick={reload}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </button>
+          )}
         />
       </div>
     );
@@ -465,7 +484,12 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                 <TopRiskCard
                   key={risk.id}
                   gap={risk}
-                  fixHref={showAdminActions && data.projectId ? `/projects/${data.projectId}#gaps` : null}
+                  /* `?focus=<id>#gaps` deep-links to the specific gap
+                     in the Gaps tab — GapsSection scrolls + rings it
+                     so the user doesn't have to scan the list. */
+                  fixHref={showAdminActions && data.projectId
+                    ? `/projects/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
+                    : null}
                 />
               ))}
             </div>
@@ -512,7 +536,9 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                           <CompactRiskRow
                             key={g.id}
                             gap={g}
-                            fixHref={showAdminActions && data.projectId ? `/projects/${data.projectId}#gaps` : null}
+                            fixHref={showAdminActions && data.projectId
+                              ? `/projects/${data.projectId}?focus=${encodeURIComponent(g.id)}#gaps`
+                              : null}
                           />
                         ))}
                       </ul>

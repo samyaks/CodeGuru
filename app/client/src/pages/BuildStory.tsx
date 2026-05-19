@@ -142,6 +142,12 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [socialSummary, setSocialSummary] = useState<string | null>(null);
   const [togglingVisibility, setTogglingVisibility] = useState<string | null>(null);
+  // Inline confirm replaces window.confirm() — touch-safe and
+  // visually consistent with the Settings tab's danger-zone pattern.
+  // A single id at a time; clicking another row's Delete cancels
+  // any previous pending confirm.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const { commits, loading: commitsLoading, reason: commitsReason } = useCommits(projectId);
 
@@ -306,12 +312,15 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
   }, [projectId, editingId, editForm]);
 
   const handleDelete = useCallback(async (entryId: string) => {
-    if (!window.confirm('Delete this entry? This cannot be undone.')) return;
+    setDeletingId(entryId);
     try {
       await deleteBuildEntry(projectId, entryId);
       setEntries((prev) => prev.filter((e) => e.id !== entryId));
+      setConfirmingDeleteId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete entry');
+    } finally {
+      setDeletingId(null);
     }
   }, [projectId]);
 
@@ -639,14 +648,42 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
                           >
                             <Pencil size={14} />
                           </button>
-                          <button
-                            onClick={() => handleDelete(entry.id)}
-                            className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger-bg transition-colors"
-                            aria-label="Delete entry"
-                            title="Delete"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          {confirmingDeleteId === entry.id ? (
+                            /* Inline confirm. Clicking the second
+                               Delete commits; clicking elsewhere
+                               (e.g. another row's trash icon) replaces
+                               the pending confirm; Cancel clears it. */
+                            <span className="flex items-center gap-1 text-[11px]">
+                              <button
+                                onClick={() => setConfirmingDeleteId(null)}
+                                disabled={deletingId === entry.id}
+                                className="px-2 py-1 rounded text-text-muted hover:text-text hover:bg-page transition-colors"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => handleDelete(entry.id)}
+                                disabled={deletingId === entry.id}
+                                className="px-2 py-1 rounded bg-danger-bg text-danger hover:bg-danger hover:text-white border border-danger transition-colors disabled:opacity-50 inline-flex items-center gap-1 font-medium"
+                              >
+                                {deletingId === entry.id ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  <Trash2 size={11} />
+                                )}
+                                Delete
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmingDeleteId(entry.id)}
+                              className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger-bg transition-colors"
+                              aria-label="Delete entry"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       <p className="text-sm text-text-soft whitespace-pre-wrap break-words">

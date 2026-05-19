@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertOctagon, FileText, GitCommit, Settings, Shield, Users,
+  AlertOctagon, FileText, GitCommit, RefreshCw, Settings, Shield, Users,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
@@ -54,6 +54,26 @@ export default function ProjectV2() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(readHashTab);
+
+  // `reload` is the user-triggered Retry path on the load-error view.
+  // We only block on the main project fetch for the error UI; the
+  // product-map + security summary are best-effort and their failures
+  // never surface as the page error.
+  const reload = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const p = await fetchProjectDetail(id);
+      setProject(p);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to load project');
+    } finally {
+      setLoading(false);
+    }
+    fetchProductMap(id).then(setProductMap).catch(() => { /* best-effort */ });
+    fetchSecuritySummary(id).then(setSecuritySummary).catch(() => { /* best-effort */ });
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -162,6 +182,16 @@ export default function ProjectV2() {
           icon={AlertOctagon}
           title="Couldn't load this project"
           description={error ?? 'Project not found.'}
+          action={
+            <button
+              type="button"
+              onClick={() => void reload()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            >
+              <RefreshCw className="w-3 h-3" />
+              Retry
+            </button>
+          }
         />
       </div>
     );

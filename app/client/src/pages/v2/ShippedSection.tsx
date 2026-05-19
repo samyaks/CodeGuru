@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { GitCommit, Github, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { GitCommit, Github, RefreshCw, Settings } from 'lucide-react';
 import { ShippedItem, EmptyState } from '../../components/v2';
 import {
   fetchV2Shipped,
@@ -86,6 +87,16 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
       <EmptyState
         title="Couldn't load shipped commits"
         description={error}
+        action={
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        }
       />
     );
   }
@@ -140,10 +151,23 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
             description="New commits matching an open gap will land here automatically. To pull in the last few commits from before today, click 'Sync recent commits' above."
           />
         ) : (
+          /* The Settings tab is where the GitHub integration lives —
+             give users a way to get there rather than just describing
+             what's missing. The hash + projectId pattern matches what
+             the workspace TabBar uses internally. */
           <EmptyState
             icon={GitCommit}
             title="No GitHub repo connected"
             description="Connect a GitHub repo so Takeoff can match your commits to open gaps."
+            action={
+              <Link
+                to={`/projects/${projectId}#settings`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+              >
+                <Settings className="w-3 h-3" />
+                Open Settings
+              </Link>
+            }
           />
         )
       ) : (

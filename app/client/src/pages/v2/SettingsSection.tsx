@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Trash2, AlertTriangle } from 'lucide-react';
+import { ExternalLink, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import { MetadataLabel, EmptyState } from '../../components/v2';
 import { fetchProjectDetail, deleteProject, type ProjectWithEntries } from '../../services/api';
 
@@ -33,6 +33,24 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // `reload` is callable from the Retry button on the load-error
+  // empty state. The cancelled-ref guard isn't needed here because
+  // the manual reload is user-triggered (vs the auto reload on
+  // mount/projectId change, which still uses the cancelled-flag
+  // pattern below).
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const p = await fetchProjectDetail(projectId);
+      setProject(p);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to load settings');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -60,7 +78,22 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
     return <div className="text-sm text-stone-500">Loading settings…</div>;
   }
   if (!project) {
-    return <EmptyState title="Couldn't load settings" description={error ?? 'Project not found.'} />;
+    return (
+      <EmptyState
+        title="Couldn't load settings"
+        description={error ?? 'Project not found.'}
+        action={
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        }
+      />
+    );
   }
 
   const buildPlan = project.build_plan;

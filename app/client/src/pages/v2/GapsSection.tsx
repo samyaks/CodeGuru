@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Shield } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { CheckCircle, RefreshCw, Shield } from 'lucide-react';
 import { GapCard, EmptyState } from '../../components/v2';
 import type { GapStatus } from '../../components/v2';
 import {
@@ -56,6 +57,36 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     () => [...groups.broken, ...groups.missing, ...groups.infra],
     [groups],
   );
+
+  // Deep-link focus: SecurityReport's "Fix this gap →" affordance
+  // sends users here with `?focus=<gapId>` in the URL. After the gaps
+  // load, scroll the target card into view and ring it for a beat so
+  // the user can find it in a long list. We strip the param after
+  // applying it so a refresh/back-nav doesn't re-trigger the scroll
+  // and so the URL doesn't carry stale state.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusId = searchParams.get('focus');
+  useEffect(() => {
+    if (!focusId || loading || allGaps.length === 0) return;
+    const el = document.getElementById(`gap-${focusId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.dataset.focused = 'true';
+    const timer = window.setTimeout(() => {
+      el.dataset.focused = 'false';
+    }, 2400);
+    // Strip the focus param so back-nav / refresh doesn't re-fire.
+    // `replace: true` to avoid polluting history.
+    const next = new URLSearchParams(searchParams);
+    next.delete('focus');
+    setSearchParams(next, { replace: true });
+    return () => window.clearTimeout(timer);
+    // We intentionally don't depend on `searchParams` / `setSearchParams`
+    // — the strip-on-apply pattern would loop otherwise. focusId is
+    // the canonical trigger; everything else is read at the moment of
+    // application.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, loading, allGaps.length]);
 
   // Status filter narrows by lifecycle (untriaged/in-progress vs rejected
   // vs everything); persona filter narrows by which job is affected; the
@@ -225,6 +256,16 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
       <EmptyState
         title="Couldn't load gaps"
         description={error}
+        action={
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        }
       />
     );
   }
