@@ -2,12 +2,18 @@ const { broadcast } = require('../lib/sse');
 const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
 const { createMessageTracked, streamMessageTracked } = require('../lib/anthropic-tracked');
 const { selectFilesForPrompt } = require('./file-selector');
+const { analysisFiles } = require('../lib/db');
 
 const APP_CONTEXT_CACHE_CHARS = 1500;
 
-const MAX_TOKENS = 4096;
+// Per-call output cap. Sized to accommodate ~app + 5 dirs + 5-7 gaps in a
+// single response (~20K target). Stream truncation triggers the missing-
+// section retry below.
+const COMBINED_MAX_TOKENS = 20000;
+// Legacy per-section cap (kept for the multi-call fallback path).
+const LEGACY_MAX_TOKENS = 4096;
 
-const SYSTEM_PROMPT = `You are an expert software architect analyzing a codebase to generate .context.md files. These files serve as the source of truth between human developers and AI coding tools.
+const BASE_SYSTEM_PROMPT = `You are an expert software architect analyzing a codebase to generate .context.md files. These files serve as the source of truth between human developers and AI coding tools.
 
 Your output will be used by vibe coders — people who build apps primarily through AI tools like Cursor and Claude Code. They understand their app's purpose but may not know engineering best practices for auth, databases, deployment, etc.
 
@@ -25,19 +31,42 @@ Always follow the .context.md spec format with these sections:
 
 Keep language clear and non-technical where possible. A PM should be able to read and understand every context file.`;
 
+const COMBINED_SYSTEM_PROMPT = `${BASE_SYSTEM_PROMPT}
+
+OUTPUT FORMAT
+You MUST emit every requested section between explicit delimiters and nothing else:
+<<<SECTION:app>>>
+...the .context.md body for the project root...
+<<<END>>>
+
+<<<SECTION:dir:<dir-path>>>
+...the .context.md body for that directory...
+<<<END>>>
+
+<<<SECTION:gap:<gap-name>>>
+...the prescriptive .context.md body for that missing capability...
+<<<END>>>
+
+Rules:
+- Emit sections in the exact order listed in the user message.
+- Do not emit any text outside the delimiters (no preamble, no commentary, no JSON).
+- Inside each section, use the .context.md spec format (## owner, ## purpose, ## constraints, ## decisions, ## ai-log, ## dependencies, ## status).
+- Each section's <<<END>>> must appear on its own and be matched 1:1 with the preceding <<<SECTION:...>>>.`;
+
 function renderFilesBlock(files) {
   return files
     .map((f) => `### ${f.path}${f.isSkeleton ? ' (skeleton)' : ''}\n\`\`\`\n${f.content}\n\`\`\``)
     .join('\n\n');
 }
 
-function buildCacheablePrefix(model) {
+function buildCacheablePrefix(model, skeletons = {}) {
   const fileTree = (model.fileTree || []).slice(0, 100).join('\n');
 
   const { files: selected } = selectFilesForPrompt({
     fileContents: model.fileContents || {},
+    skeletons,
     purpose: 'context_generation',
-    tokenBudget: 12000,
+    tokenBudget: 18000,
     maxFiles: 30,
   });
 
@@ -69,29 +98,367 @@ ${keyFiles}`;
   return { prefix, filesUsed: selected.map((f) => f.path) };
 }
 
+// ── Section descriptors ──────────────────────────────────────────
+//
+// A "section descriptor" is the unit the planner emits and the parser fills.
+// `key` is what appears inside the delimiter (`app`, dir path, or gap name).
+// `pathFor` is the .context.md path the resulting body will be written to.
+// `instruction` is the per-section prompt fragment.
+
+function sectionKey(s) {
+  if (s.kind === 'app') return 'app';
+  return `${s.kind}:${s.key}`;
+}
+
+function buildSectionPlan(model, featureDirs, gaps, skeletons) {
+  const plan = [];
+
+  plan.push({
+    kind: 'app',
+    key: 'app',
+    pathFor: '.context.md',
+    type: 'existing',
+    filesUsed: [],
+    instruction:
+      'Generate the root .context.md for this project. Capture purpose, tech stack, ' +
+      'current state, and what still needs to be built. Reference the Project Info and ' +
+      'Key Files from the cached context above.',
+  });
+
+  for (const dir of featureDirs) {
+    const { files: dirFiles } = selectFilesForPrompt({
+      fileContents: model.fileContents || {},
+      skeletons,
+      purpose: 'feature_dir',
+      filterFn: (p) => p.startsWith(dir),
+      tokenBudget: 3000,
+      maxFiles: 8,
+    });
+    if (!dirFiles.length) continue;
+
+    plan.push({
+      kind: 'dir',
+      key: dir,
+      pathFor: `${dir}/.context.md`,
+      type: 'existing',
+      filesUsed: dirFiles.map((f) => f.path),
+      instruction:
+        `Generate a focused .context.md for the "${dir}" directory.\n\n` +
+        `Files in this directory:\n${renderFilesBlock(dirFiles)}\n\n` +
+        'Capture this module\'s purpose, constraints, decisions, and dependencies. ' +
+        'Reference project-wide info from the cached context above as needed.',
+    });
+  }
+
+  for (const gap of gaps) {
+    plan.push({
+      kind: 'gap',
+      key: gap.name,
+      pathFor: gap.path,
+      type: 'gap',
+      filesUsed: [],
+      instruction:
+        `This codebase is MISSING: ${gap.name}\n\n` +
+        `## Gap details\n${gap.description}\n\n` +
+        'Generate a PRESCRIPTIVE .context.md that tells an AI tool exactly what to build:\n' +
+        '- What the capability needs to do (plain English)\n' +
+        '- Recommended approach for the detected tech stack\n' +
+        '- Constraints that must be respected\n' +
+        '- Common pitfalls to avoid\n' +
+        '- How it connects to existing code (reference the Key Files above)\n' +
+        '- Specific files that should be created or modified\n' +
+        'This is a PRESCRIPTIVE spec, not documentation of existing code.',
+    });
+  }
+
+  return plan;
+}
+
+function buildDynamicInstructionBlock(plan) {
+  const header =
+    'Emit the following sections, IN ORDER, each wrapped between its <<<SECTION:...>>> ' +
+    'and <<<END>>> delimiters as described in the system prompt. The exact delimiter for ' +
+    'each section is shown below — use it verbatim.\n';
+
+  const blocks = plan.map((s, i) => {
+    const opener = `<<<SECTION:${s.kind === 'app' ? 'app' : `${s.kind}:${s.key}`}>>>`;
+    return `--- Section ${i + 1} of ${plan.length} ---\nDelimiter: ${opener} ... <<<END>>>\n\n${s.instruction}`;
+  });
+
+  const footer =
+    '\n\n--- Reminder ---\n' +
+    '- Every section must start with its exact <<<SECTION:...>>> delimiter and end with <<<END>>>.\n' +
+    '- Emit sections in the order listed above.\n' +
+    '- Do not emit anything outside the delimiters.';
+
+  return `${header}\n${blocks.join('\n\n')}${footer}`;
+}
+
+// ── Delimited streaming parser ──────────────────────────────────
+//
+// Exported for unit testing. Builds a small state machine that consumes text
+// chunks and surfaces section boundaries via callbacks. The parser tolerates
+// delimiters split across chunks by keeping a safety tail in the buffer until
+// the next chunk arrives.
+
+const SECTION_START_RE = /<<<SECTION:(app|dir|gap)(?::([^>]+))?>>>/;
+const SECTION_END = '<<<END>>>';
+// Conservative safety window: must comfortably exceed both delimiter widths so
+// a partial match never gets prematurely committed.
+const PARSER_TAIL_KEEP = 64;
+
+function createSectionParser({ onSectionStart, onSectionPartial, onSectionDone } = {}) {
+  let buf = '';
+  let cur = null;
+  const finished = new Map();
+
+  function emitPartial() {
+    if (cur && onSectionPartial) onSectionPartial(cur);
+  }
+
+  function ingest(chunk) {
+    if (chunk == null || chunk === '') return;
+    buf += chunk;
+
+    while (true) {
+      if (!cur) {
+        const m = SECTION_START_RE.exec(buf);
+        if (!m) {
+          if (buf.length > PARSER_TAIL_KEEP) buf = buf.slice(-PARSER_TAIL_KEEP);
+          return;
+        }
+        const kind = m[1];
+        const key = m[2] || (kind === 'app' ? 'app' : null);
+        cur = { kind, key, body: '' };
+        buf = buf.slice(m.index + m[0].length);
+        if (onSectionStart) onSectionStart(cur);
+        continue;
+      }
+
+      const endIdx = buf.indexOf(SECTION_END);
+      if (endIdx === -1) {
+        if (buf.length > PARSER_TAIL_KEEP) {
+          cur.body += buf.slice(0, buf.length - PARSER_TAIL_KEEP);
+          buf = buf.slice(-PARSER_TAIL_KEEP);
+          emitPartial();
+        }
+        return;
+      }
+
+      cur.body += buf.slice(0, endIdx);
+      emitPartial();
+      finished.set(sectionKey(cur), cur.body.trim());
+      if (onSectionDone) onSectionDone(cur);
+      cur = null;
+      buf = buf.slice(endIdx + SECTION_END.length);
+    }
+  }
+
+  function finalize() {
+    if (cur) {
+      cur.body += buf;
+      if (cur.body.trim().length > 0) {
+        finished.set(sectionKey(cur), cur.body.trim());
+        if (onSectionDone) onSectionDone(cur);
+      }
+      cur = null;
+    }
+    buf = '';
+  }
+
+  return { ingest, finalize, finished };
+}
+
+// ── Single delimited streaming call ─────────────────────────────
+
+async function runDelimitedCall({
+  analysisId,
+  phase,
+  cacheablePrefix,
+  cachedFilesUsed,
+  plan,
+  send,
+}) {
+  const dynamicInstruction = buildDynamicInstructionBlock(plan);
+  const finalReminder =
+    'Begin now. Output ONLY the delimited sections above, in order, with no extra text.';
+
+  const pathByKey = new Map();
+  for (const s of plan) pathByKey.set(sectionKey(s), s.pathFor);
+
+  const phaseByKind = {
+    app: 'context-app',
+    dir: 'context-feature',
+    gap: 'context-gap',
+  };
+
+  const parser = createSectionParser({
+    onSectionStart: (cur) => {
+      const key = sectionKey(cur);
+      const ssePhase = phaseByKind[cur.kind] || 'context-section';
+      const targetPath = pathByKey.get(key) || key;
+      const label =
+        cur.kind === 'app'
+          ? 'Generating app-level .context.md...'
+          : cur.kind === 'dir'
+            ? `Generating context for ${cur.key}...`
+            : `Generating spec for missing ${cur.key}...`;
+      send({ type: 'progress', phase: ssePhase, message: label, path: targetPath });
+    },
+    onSectionPartial: (cur) => {
+      const targetPath = pathByKey.get(sectionKey(cur));
+      if (!targetPath) return;
+      send({ type: 'context-stream', path: targetPath, partial: cur.body });
+    },
+  });
+
+  const allFilesUsed = new Set(cachedFilesUsed || []);
+  for (const s of plan) {
+    for (const p of s.filesUsed || []) allFilesUsed.add(p);
+  }
+
+  await streamMessageTracked({
+    client: anthropic,
+    analysisId,
+    phase,
+    targetPath: 'multi',
+    filesUsed: [...allFilesUsed],
+    params: {
+      model: CLAUDE_MODEL,
+      max_tokens: COMBINED_MAX_TOKENS,
+      system: COMBINED_SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cacheablePrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: dynamicInstruction },
+          { type: 'text', text: finalReminder },
+        ],
+      }],
+    },
+    onText: (chunk) => parser.ingest(chunk),
+  });
+
+  parser.finalize();
+  return parser.finished;
+}
+
+// ── Public entry point ──────────────────────────────────────────
+
 async function generateContextFiles(analysisId, codebaseModel) {
+  const send = (data) => broadcast(analysisId, data);
+  send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
+
+  let skeletons = {};
+  try {
+    if (analysisFiles && typeof analysisFiles.getSkeletonsMap === 'function') {
+      skeletons = (await analysisFiles.getSkeletonsMap(analysisId)) || {};
+    }
+  } catch (err) {
+    console.warn(`[context-generator] getSkeletonsMap failed: ${err.message}`);
+  }
+
+  const featureDirs = identifyFeatureDirs(codebaseModel);
+  const gaps = identifyActionableGaps(codebaseModel);
+
+  const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } =
+    buildCacheablePrefix(codebaseModel, skeletons);
+
+  const plan = buildSectionPlan(codebaseModel, featureDirs, gaps, skeletons);
+
+  let sectionsByKey;
+  try {
+    sectionsByKey = await runDelimitedCall({
+      analysisId,
+      phase: 'context-multi',
+      cacheablePrefix,
+      cachedFilesUsed,
+      plan,
+      send,
+    });
+  } catch (err) {
+    console.error(`[context-generator] combined streaming call failed: ${err.message}`);
+    sectionsByKey = new Map();
+  }
+
+  // Retry only the sections Claude didn't emit (likely cause: max_tokens
+  // truncated the response mid-stream). Skip retry entirely if the first call
+  // produced nothing at all — the legacy fallback below handles that.
+  if (sectionsByKey.size > 0) {
+    const missing = plan.filter((s) => !sectionsByKey.has(sectionKey(s)));
+    if (missing.length > 0) {
+      console.warn(
+        `[context-generator] ${missing.length}/${plan.length} section(s) missing after first pass; retrying`,
+      );
+      try {
+        const retried = await runDelimitedCall({
+          analysisId,
+          phase: 'context-multi-retry',
+          cacheablePrefix,
+          cachedFilesUsed,
+          plan: missing,
+          send,
+        });
+        for (const [k, v] of retried) sectionsByKey.set(k, v);
+      } catch (err) {
+        console.warn(`[context-generator] retry call failed: ${err.message}`);
+      }
+    }
+  }
+
+  if (sectionsByKey.size === 0) {
+    console.warn(
+      '[context-generator] delimited parse produced no sections; falling back to legacy multi-call path',
+    );
+    return generateContextFilesLegacy(analysisId, codebaseModel, skeletons);
+  }
+
+  const contextFiles = [];
+  for (const s of plan) {
+    const body = sectionsByKey.get(sectionKey(s));
+    if (!body) continue;
+    contextFiles.push({ path: s.pathFor, content: body, type: s.type });
+  }
+
+  const completionPct = calculateCompletion(codebaseModel);
+  send({
+    type: 'progress',
+    phase: 'context-done',
+    message: `Generated ${contextFiles.length} context files`,
+  });
+
+  return { contextFiles, completionPct };
+}
+
+// ── Legacy multi-call fallback ──────────────────────────────────
+//
+// Preserved verbatim modulo the new `skeletons` plumbing so the file-selector
+// can degrade over-budget files to their skeleton form. Only invoked if the
+// combined streaming call fails to produce a single parseable section.
+
+async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons = {}) {
   const send = (data) => broadcast(analysisId, data);
   const contextFiles = [];
 
-  send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
-
-  const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } = buildCacheablePrefix(codebaseModel);
+  const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } =
+    buildCacheablePrefix(codebaseModel, skeletons);
 
   send({ type: 'progress', phase: 'context-app', message: 'Generating app-level .context.md...' });
-  const appContext = await generateAppContext(analysisId, cacheablePrefix, cachedFilesUsed);
+  const appContext = await generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed);
   contextFiles.push({ path: '.context.md', content: appContext, type: 'existing' });
 
   const featureDirs = identifyFeatureDirs(codebaseModel);
   for (const dir of featureDirs) {
     send({ type: 'progress', phase: 'context-feature', message: `Generating context for ${dir}...` });
     try {
-      const featureContext = await generateFeatureContext(
+      const featureContext = await generateFeatureContextLegacy(
         analysisId,
         codebaseModel,
         dir,
         cacheablePrefix,
         cachedFilesUsed,
         appContext,
+        skeletons,
       );
       if (featureContext) {
         contextFiles.push({ path: `${dir}/.context.md`, content: featureContext, type: 'existing' });
@@ -105,7 +472,13 @@ async function generateContextFiles(analysisId, codebaseModel) {
   for (const gap of gaps) {
     send({ type: 'progress', phase: 'context-gap', message: `Generating spec for missing ${gap.name}...` });
     try {
-      const gapContext = await generateGapContext(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext);
+      const gapContext = await generateGapContextLegacy(
+        analysisId,
+        gap,
+        cacheablePrefix,
+        cachedFilesUsed,
+        appContext,
+      );
       contextFiles.push({ path: gap.path, content: gapContext, type: 'gap' });
     } catch (err) {
       console.error(`Failed to generate gap context for ${gap.name}:`, err.message);
@@ -113,13 +486,11 @@ async function generateContextFiles(analysisId, codebaseModel) {
   }
 
   const completionPct = calculateCompletion(codebaseModel);
-
   send({ type: 'progress', phase: 'context-done', message: `Generated ${contextFiles.length} context files` });
-
   return { contextFiles, completionPct };
 }
 
-async function generateAppContext(analysisId, cacheablePrefix, cachedFilesUsed) {
+async function generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed) {
   const dynamicInstruction = `Generate the root .context.md file for this project.
 
 Use the project info, stack, gaps, file tree, and key files above. Produce a comprehensive .context.md that captures the project's purpose, tech stack, current state, and what still needs to be built.`;
@@ -132,8 +503,8 @@ Use the project info, stack, gaps, file tree, and key files above. Produce a com
     filesUsed: cachedFilesUsed,
     params: {
       model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      max_tokens: LEGACY_MAX_TOKENS,
+      system: BASE_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [
@@ -143,20 +514,19 @@ Use the project info, stack, gaps, file tree, and key files above. Produce a com
       }],
     },
     onText: (_chunk, partial) => {
-      broadcast(analysisId, {
-        type: 'context-stream',
-        path: '.context.md',
-        partial,
-      });
+      broadcast(analysisId, { type: 'context-stream', path: '.context.md', partial });
     },
   });
 
   return fullText;
 }
 
-async function generateFeatureContext(analysisId, model, dirPath, cacheablePrefix, cachedFilesUsed, appContext) {
+async function generateFeatureContextLegacy(
+  analysisId, model, dirPath, cacheablePrefix, cachedFilesUsed, appContext, skeletons,
+) {
   const { files: dirFiles } = selectFilesForPrompt({
     fileContents: model.fileContents || {},
+    skeletons,
     purpose: 'feature_dir',
     filterFn: (p) => p.startsWith(dirPath),
     tokenBudget: 4000,
@@ -185,8 +555,8 @@ Produce a focused .context.md for this specific module. Include purpose, constra
     filesUsed: [...cachedFilesUsed, ...dirFilesUsed],
     params: {
       model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      max_tokens: LEGACY_MAX_TOKENS,
+      system: BASE_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [
@@ -201,7 +571,7 @@ Produce a focused .context.md for this specific module. Include purpose, constra
   return response.content?.[0]?.text || '';
 }
 
-async function generateGapContext(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext) {
+async function generateGapContextLegacy(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext) {
   const appContextBlock = `## Root .context.md (already generated for this project)\n${truncate(appContext || '', APP_CONTEXT_CACHE_CHARS)}`;
 
   const dynamicInstruction = `This codebase is MISSING: ${gap.name}
@@ -230,8 +600,8 @@ This is a PRESCRIPTIVE spec, not documentation of existing code.`;
     filesUsed: cachedFilesUsed,
     params: {
       model: CLAUDE_MODEL,
-      max_tokens: MAX_TOKENS,
-      system: SYSTEM_PROMPT,
+      max_tokens: LEGACY_MAX_TOKENS,
+      system: BASE_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [
@@ -242,16 +612,14 @@ This is a PRESCRIPTIVE spec, not documentation of existing code.`;
       }],
     },
     onText: (_chunk, partial) => {
-      broadcast(analysisId, {
-        type: 'context-stream',
-        path: gap.path,
-        partial,
-      });
+      broadcast(analysisId, { type: 'context-stream', path: gap.path, partial });
     },
   });
 
   return fullText;
 }
+
+// ── Plan helpers (unchanged public behavior) ────────────────────
 
 function identifyFeatureDirs(model) {
   const dirs = new Set();
@@ -356,4 +724,13 @@ function calculateCompletion(model) {
   return earned;
 }
 
-module.exports = { generateContextFiles, calculateCompletion };
+module.exports = {
+  generateContextFiles,
+  calculateCompletion,
+  // Exposed for tests / future reuse. Not part of the route surface.
+  createSectionParser,
+  buildSectionPlan,
+  buildCacheablePrefix,
+  identifyFeatureDirs,
+  identifyActionableGaps,
+};

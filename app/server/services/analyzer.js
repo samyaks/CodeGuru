@@ -2,6 +2,8 @@ const github = require('./github');
 const { detectDeploymentFiles } = require('./deployment');
 const { analyses, analysisFiles, analysisEvents } = require('../lib/db');
 const { estimateTokens, extractSkeleton, inferLanguage, computeDepth } = require('../lib/capture-utils');
+const { runAllDetectors } = require('./capability-detectors');
+const { computeImportGraph } = require('./import-graph');
 
 const MAX_FILES_TO_READ = parseInt(process.env.MAX_FILES_TO_READ, 10) || 150;
 const CAPTURE_FULL_TIER_LIMIT = parseInt(process.env.CAPTURE_FULL_TIER_LIMIT, 10) || 50;
@@ -328,7 +330,7 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
           const tier = decideTier(sizeForTier, rank);
           if (tier) {
             const contentTokens = estimateTokens(r.content);
-            const skeleton = extractSkeleton(r.content);
+            const skeleton = extractSkeleton(r.content, 4000, { path: r.path });
             const skeletonTokens = estimateTokens(skeleton);
             const bytes = r.size || r.content.length;
 
@@ -381,11 +383,28 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
     });
   }
 
+  // P2.2: build the import graph from everything we just read. Persisted
+  // centrality has no effect on the current run's tier ranking (the read
+  // already happened) — it lands in `analysis_files` so the next analysis
+  // for this id can re-rank with structural importance.
+  send({ phase: 'graph', message: 'Computing import graph...' });
+  const importGraph = computeImportGraph(fileContents);
+
+  if (analysisId) {
+    await safeDb(() => analysisFiles.updateGraphMetrics(analysisId, importGraph), 'analysisFiles.updateGraphMetrics');
+    await safeDb(() => analysisEvents.create({
+      analysis_id: analysisId,
+      event_type: 'graph.computed',
+      metadata: { nodes: importGraph.size },
+    }), 'analysisEvents.create graph.computed');
+  }
+
   send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });
 
   const stack = detectStack(allFiles, fileContents);
   const structure = analyzeStructure(allFiles);
-  const gaps = detectGaps(allFiles, fileContents, stack);
+  const detectorResults = await runAllDetectors({ files: allFiles, fileContents, stack });
+  const gaps = projectToLegacyGapShape(detectorResults);
   const deployInfo = detectDeploymentFiles(tree);
   const features = detectFeatures(allFiles, fileContents);
   const existingContext = detectExistingContext(allFiles);
@@ -537,72 +556,60 @@ function analyzeStructure(files) {
   };
 }
 
-function detectGaps(files, contents, stack) {
-  const paths = files.map((f) => f.path);
-  const allContent = Object.values(contents).join('\n');
-
-  const hasAuthFiles = paths.some((p) =>
-    /auth|login|signup|session|middleware.*auth/i.test(p)
-  );
-  const hasAuthCode = allContent.includes('signIn') || allContent.includes('login')
-    || allContent.includes('session') || allContent.includes('jwt')
-    || allContent.includes('passport') || allContent.includes('requireAuth');
-
-  const hasDbFiles = paths.some((p) =>
-    /schema|migration|model|prisma|drizzle|database|\.sql$/i.test(p)
-  );
-
-  const hasDeployFiles = paths.some((p) =>
-    /Dockerfile|docker-compose|vercel\.json|netlify\.toml|fly\.toml|Procfile|\.github\/workflows/i.test(p)
-  );
-
-  const hasTestFiles = paths.some((p) =>
-    /test|spec|__tests__|\.test\.|\.spec\./i.test(p)
-  );
-
-  const hasErrorHandler = allContent.includes('errorHandler')
-    || allContent.includes('error-handler')
-    || allContent.includes('app.use((err');
-
-  const hasEnvExample = paths.some((p) => /\.env\.example$|^env\.example$/i.test(p));
-
-  const hasPermissions = allContent.includes('role') && (allContent.includes('admin') || allContent.includes('permission'));
-
+// Maps the structured `runAllDetectors` output back to the flat gap shape
+// every downstream consumer (context-generator, suggestion-rules,
+// readiness-scorer, /api/analyze, frontend Analytics view) already reads.
+// New fields — `confidence` and `evidence` — ride alongside without
+// breaking those legacy keys.
+function projectToLegacyGapShape(d) {
   return {
     auth: {
-      exists: hasAuthFiles || hasAuthCode,
-      provider: stack.auth || null,
-      issues: hasAuthFiles && !hasAuthCode
-        ? ['Auth files exist but implementation may be incomplete']
-        : [],
+      exists:     d.auth?.exists ?? false,
+      provider:   d.auth?.extra?.provider ?? null,
+      issues:     d.auth?.extra?.issues ?? [],
+      confidence: d.auth?.confidence ?? 0,
+      evidence:   d.auth?.evidence ?? [],
     },
     database: {
-      exists: hasDbFiles || !!stack.database,
-      type: stack.database || null,
-      hasSchema: paths.some((p) => /schema/i.test(p)),
-      hasMigrations: paths.some((p) => /migration/i.test(p)),
+      exists:        d.database?.exists ?? false,
+      type:          d.database?.extra?.type ?? null,
+      hasSchema:     d.database?.extra?.hasSchema ?? false,
+      hasMigrations: d.database?.extra?.hasMigrations ?? false,
+      confidence:    d.database?.confidence ?? 0,
+      evidence:      d.database?.evidence ?? [],
     },
     deployment: {
-      exists: hasDeployFiles,
-      platform: null,
-      hasCI: paths.some((p) => p.startsWith('.github/workflows')),
+      exists:     d.deployment?.exists ?? false,
+      platform:   d.deployment?.extra?.platform ?? null,
+      platforms:  d.deployment?.extra?.platforms ?? [],
+      hasCI:      d.deployment?.extra?.hasCI ?? false,
+      confidence: d.deployment?.confidence ?? 0,
+      evidence:   d.deployment?.evidence ?? [],
     },
     permissions: {
-      exists: hasPermissions,
-      hasRoles: hasPermissions,
+      exists:     d.permissions?.exists ?? false,
+      hasRoles:   d.permissions?.extra?.hasRoles ?? false,
+      confidence: d.permissions?.confidence ?? 0,
+      evidence:   d.permissions?.evidence ?? [],
     },
     testing: {
-      exists: hasTestFiles,
-      coverage: hasTestFiles ? 'unknown' : 'none',
+      exists:     d.testing?.exists ?? false,
+      coverage:   d.testing?.extra?.coverage ?? 'none',
+      confidence: d.testing?.confidence ?? 0,
+      evidence:   d.testing?.evidence ?? [],
     },
     errorHandling: {
-      exists: hasErrorHandler,
-      hasGlobalHandler: hasErrorHandler,
+      exists:           d.errorHandling?.exists ?? false,
+      hasGlobalHandler: d.errorHandling?.extra?.hasGlobalHandler ?? false,
+      confidence:       d.errorHandling?.confidence ?? 0,
+      evidence:         d.errorHandling?.evidence ?? [],
     },
     envConfig: {
-      exists: hasEnvExample,
-      hasExample: hasEnvExample,
-      missingVars: [],
+      exists:      d.envConfig?.exists ?? false,
+      hasExample:  d.envConfig?.extra?.hasExample ?? false,
+      missingVars: d.envConfig?.extra?.missingVars ?? [],
+      confidence:  d.envConfig?.confidence ?? 0,
+      evidence:    d.envConfig?.evidence ?? [],
     },
   };
 }
@@ -734,7 +741,7 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
         const tier = decideTier(sizeForTier, rank);
         if (tier) {
           const contentTokens = estimateTokens(content);
-          const skeleton = extractSkeleton(content);
+          const skeleton = extractSkeleton(content, 4000, { path: f.path });
           const skeletonTokens = estimateTokens(skeleton);
 
           await safeDb(() => analysisFiles.updateTier(analysisId, f.path, {
@@ -786,11 +793,25 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
     });
   }
 
+  // P2.2: import graph — see note in analyzeRepo above.
+  send({ phase: 'graph', message: 'Computing import graph...' });
+  const importGraph = computeImportGraph(fileContents);
+
+  if (analysisId) {
+    await safeDb(() => analysisFiles.updateGraphMetrics(analysisId, importGraph), 'analysisFiles.updateGraphMetrics');
+    await safeDb(() => analysisEvents.create({
+      analysis_id: analysisId,
+      event_type: 'graph.computed',
+      metadata: { nodes: importGraph.size },
+    }), 'analysisEvents.create graph.computed');
+  }
+
   send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });
 
   const stack = detectStack(allFiles, fileContents);
   const structure = analyzeStructure(allFiles);
-  const gaps = detectGaps(allFiles, fileContents, stack);
+  const detectorResults = await runAllDetectors({ files: allFiles, fileContents, stack });
+  const gaps = projectToLegacyGapShape(detectorResults);
   const deployInfo = detectDeploymentFiles(unfilteredFiles);
   const features = detectFeatures(allFiles, fileContents);
   const existingContext = detectExistingContext(allFiles);

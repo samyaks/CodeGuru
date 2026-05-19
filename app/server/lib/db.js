@@ -1323,7 +1323,7 @@ const analysisFiles = {
         const chunk = rows.slice(i, i + BATCH);
         const values = [];
         const placeholders = chunk.map((r, idx) => {
-          const base = idx * 8;
+          const base = idx * 10;
           values.push(
             crypto.randomUUID(),
             analysisId,
@@ -1332,13 +1332,15 @@ const analysisFiles = {
             r.size_bytes ?? 0,
             r.language ?? null,
             r.score ?? null,
-            r.depth ?? null
+            r.depth ?? null,
+            r.inbound_degree ?? 0,
+            r.outbound_degree ?? 0
           );
-          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`;
         });
         await client.query(
           `INSERT INTO analysis_files
-            (id, analysis_id, path, sha, size_bytes, language, score, depth)
+            (id, analysis_id, path, sha, size_bytes, language, score, depth, inbound_degree, outbound_degree)
             VALUES ${placeholders.join(', ')}
             ON CONFLICT (analysis_id, path) DO NOTHING`,
           values
@@ -1347,8 +1349,51 @@ const analysisFiles = {
     });
   },
 
+  async updateGraphMetrics(analysisId, metricsByPath) {
+    const entries = metricsByPath instanceof Map
+      ? Array.from(metricsByPath.entries())
+      : Object.entries(metricsByPath || {});
+    if (entries.length === 0) return;
+
+    await withTransaction(async (client) => {
+      const BATCH = 500;
+      for (let i = 0; i < entries.length; i += BATCH) {
+        const chunk = entries.slice(i, i + BATCH);
+        const values = [];
+        const tuples = chunk.map(([p, m], idx) => {
+          const base = idx * 3;
+          values.push(p, m?.inboundDegree ?? 0, m?.outboundDegree ?? 0);
+          return `($${base + 1}::text, $${base + 2}::int, $${base + 3}::int)`;
+        });
+        values.push(analysisId);
+        const analysisIdParam = `$${values.length}`;
+        await client.query(
+          `UPDATE analysis_files af
+              SET inbound_degree  = t.in_deg,
+                  outbound_degree = t.out_deg
+             FROM (VALUES ${tuples.join(', ')}) AS t(p, in_deg, out_deg)
+            WHERE af.analysis_id = ${analysisIdParam}
+              AND af.path = t.p`,
+          values
+        );
+      }
+    });
+  },
+
+  async getSkeletonsMap(analysisId) {
+    const { rows } = await getDb().query(
+      `SELECT path, skeleton FROM analysis_files
+         WHERE analysis_id = $1 AND skeleton IS NOT NULL AND skeleton <> ''`,
+      [analysisId]
+    );
+    const out = {};
+    for (const r of rows) out[r.path] = r.skeleton;
+    return out;
+  },
+
   async updateTier(analysisId, filePath, fields) {
-    const allowed = ['tier', 'content', 'skeleton', 'content_tokens', 'skeleton_tokens', 'fetched_at', 'skip_reason'];
+    const allowed = ['tier', 'content', 'skeleton', 'content_tokens', 'skeleton_tokens',
+                     'fetched_at', 'skip_reason', 'inbound_degree', 'outbound_degree'];
     const sets = [];
     const params = [];
     for (const k of allowed) {
