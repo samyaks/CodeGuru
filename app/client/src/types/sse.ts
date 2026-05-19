@@ -24,7 +24,20 @@ export interface SSEConnectedMessage {
 }
 
 export interface SSETakeoffMessage {
-  type: 'scored' | 'complete' | 'error' | 'status';
+  // 'product-map-*' events are emitted by `autoCreateProductMap` in the
+  // takeoff route; AnalysisProgress waits on them before navigating so
+  // the user lands on a populated workspace instead of an empty Map tab.
+  // 'context-files-ready' is the analogous event for the
+  // generateContextFiles stage.
+  type:
+    | 'scored'
+    | 'complete'
+    | 'error'
+    | 'status'
+    | 'product-map-ready'
+    | 'product-map-skipped'
+    | 'product-map-failed'
+    | 'context-files-ready';
   [key: string]: unknown;
 }
 

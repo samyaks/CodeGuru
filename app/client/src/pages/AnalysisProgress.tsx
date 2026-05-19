@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import Header from '../components/Header';
@@ -10,6 +10,7 @@ interface ProgressMessage {
   message?: string;
   score?: number;
   error?: string;
+  reason?: string;
   [key: string]: unknown;
 }
 
@@ -22,7 +23,17 @@ const PHASE_LABELS: Record<string, string> = {
   complete: 'Analysis complete',
   scoring: 'Scoring production readiness...',
   planning: 'Generating your plan...',
+  'product-map': 'Mapping personas and jobs to your code…',
 };
+
+// Upper bound on how long we'll wait for `product-map-ready` after the
+// pipeline's main `complete` event lands. If extract-intent stalls (or
+// the SSE connection drops between the two events) we'd otherwise pin
+// the user on the loading screen indefinitely. 60s is generous — the
+// Claude call typically finishes in 30-40s — and worst case the user
+// arrives at the project workspace with an empty personas sidebar,
+// which is the legacy behavior we're improving from.
+const PRODUCT_MAP_WAIT_MS = 60_000;
 
 export default function AnalysisProgress() {
   const { id } = useParams<{ id: string }>();
@@ -34,20 +45,43 @@ export default function AnalysisProgress() {
   const completed = messages.find((m) => m.type === 'complete') as ProgressMessage | undefined;
   const error = messages.find((m) => m.type === 'error') as ProgressMessage | undefined;
 
+  // The product-map stage runs in a setImmediate after `complete` and
+  // emits exactly one of these three events. We treat all three as
+  // "we're done waiting" — `ready` is the happy path; `skipped` means
+  // an existing map was reused (or no description signal); `failed`
+  // means Claude/persistence errored. In all three cases the user
+  // can proceed to the project — the Map tab will either be populated
+  // or fall back to its existing empty-state CTA.
+  const productMapEvent = useMemo(
+    () => messages.find((m) =>
+      m.type === 'product-map-ready'
+      || m.type === 'product-map-skipped'
+      || m.type === 'product-map-failed',
+    ) as ProgressMessage | undefined,
+    [messages],
+  );
+
   useEffect(() => {
-    if (completed && id) {
-      // Takeoff uses the deployment id as the analysis id, so we can jump straight
-      // into Product Map onboarding and prefill the analysisId.
-      const timer = setTimeout(
-        () => navigate(`/projects/${id}/map/onboard?analysisId=${encodeURIComponent(id)}`),
-        800,
-      );
+    if (!completed || !id) return;
+
+    // Both gates met → navigate after a short beat so the "Analysis
+    // complete" copy is visible briefly.
+    if (productMapEvent) {
+      const timer = setTimeout(() => navigate(`/projects/${id}`), 800);
       return () => clearTimeout(timer);
     }
-  }, [completed, id, navigate]);
+
+    // `complete` landed but the product-map event hasn't. Hold on the
+    // loading screen for up to PRODUCT_MAP_WAIT_MS, then navigate
+    // anyway. This is the fallback for SSE drops or a server-side
+    // unhandled error that doesn't broadcast a terminal event.
+    const fallback = setTimeout(() => navigate(`/projects/${id}`), PRODUCT_MAP_WAIT_MS);
+    return () => clearTimeout(fallback);
+  }, [completed, productMapEvent, id, navigate]);
 
   const phase = latestProgress?.phase;
   const message = latestProgress?.message;
+  const waitingForMap = !!completed && !productMapEvent;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -82,10 +116,18 @@ export default function AnalysisProgress() {
 
               <div className="space-y-2">
                 <h2 className="text-xl font-semibold text-text">
-                  {completed ? 'Analysis Complete' : scored ? 'Generating plan...' : 'Analyzing your repo'}
+                  {waitingForMap
+                    ? 'Mapping personas…'
+                    : completed
+                      ? 'Analysis Complete'
+                      : scored
+                        ? 'Generating plan...'
+                        : 'Analyzing your repo'}
                 </h2>
                 <p className="text-text-muted text-sm">
-                  {message || (phase && PHASE_LABELS[phase]) || 'Starting analysis...'}
+                  {waitingForMap
+                    ? 'Figuring out who your app is for and which jobs your code supports.'
+                    : message || (phase && PHASE_LABELS[phase]) || 'Starting analysis...'}
                 </p>
               </div>
 

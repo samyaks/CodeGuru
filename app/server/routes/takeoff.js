@@ -454,9 +454,21 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // this hook the v2 Map tab stays empty forever. We use featuresSummary
   // (or the GitHub repo description) as the seed for Claude's
   // persona/jobs extraction.
+  //
+  // `autoCreateProductMap` broadcasts its own ready/skipped/failed SSE
+  // event so AnalysisProgress can hold the user on the loading screen
+  // until personas exist instead of dumping them on an empty Map tab.
+  // The outer .catch here is for the rare unhandled error path; it
+  // still broadcasts `product-map-failed` so the frontend's wait
+  // unblocks instead of relying solely on the 60s timeout fallback.
   setImmediate(() => {
     autoCreateProductMap(id, codebaseModel, featuresSummary).catch((err) => {
       console.error(`[takeoff] auto product-map for ${id} failed (non-fatal):`, err.message);
+      try {
+        broadcast(id, { type: 'product-map-failed', error: err.message });
+      } catch (broadcastErr) {
+        console.warn(`[takeoff] product-map-failed broadcast failed: ${broadcastErr.message}`);
+      }
     });
   });
 
@@ -635,12 +647,24 @@ async function runPipeline(id, codebaseModel, userId, label) {
 //   - a map already exists (idempotent),
 //   - we don't have a strong description signal (would produce garbage personas),
 //   - Claude or the persistence layer fails (logged as non-fatal).
+//
+// Emits SSE events at each gate so AnalysisProgress can wait on the
+// real result instead of dumping the user onto the v2 Map tab to
+// click "Generate" themselves:
+//   - 'progress' phase='product-map'   when the extract-intent call starts
+//   - 'product-map-ready'              on success (with persona/job counts)
+//   - 'product-map-skipped'            when an existing map blocks us OR
+//                                      no description is available
+//   - 'product-map-failed'             on Claude / persistence error
+// The frontend treats ready/skipped/failed as "we're done waiting"
+// and proceeds with whatever data it has.
 async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
   // Don't overwrite an existing map.
   try {
     const existing = await productMapSvc.getMapByProject(projectId);
     if (existing && existing.map) {
       console.log(`[takeoff] product-map already exists for ${projectId}, skipping auto-extract`);
+      broadcast(projectId, { type: 'product-map-skipped', reason: 'exists' });
       return;
     }
   } catch (err) {
@@ -653,12 +677,32 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
 
   if (!description) {
     console.log(`[takeoff] no description available for ${projectId}; skipping auto product-map`);
+    broadcast(projectId, { type: 'product-map-skipped', reason: 'no-description' });
     return;
   }
 
   console.log(`[takeoff] auto-creating product-map for ${projectId} (description ${description.length} chars)`);
-  const result = await productMapSvc.createProductMap(projectId, null, description);
+  broadcast(projectId, {
+    type: 'progress',
+    phase: 'product-map',
+    message: 'Mapping personas and jobs to your code…',
+  });
+
+  let result;
+  try {
+    result = await productMapSvc.createProductMap(projectId, null, description);
+  } catch (err) {
+    console.error(`[takeoff] auto product-map for ${projectId} failed (non-fatal):`, err.message);
+    broadcast(projectId, { type: 'product-map-failed', error: err.message });
+    return;
+  }
+
   console.log(`[takeoff] auto product-map created for ${projectId}: ${result.personas.length} personas, ${result.jobs.length} jobs`);
+  broadcast(projectId, {
+    type: 'product-map-ready',
+    personasCount: result.personas.length,
+    jobsCount: result.jobs.length,
+  });
 
   // Map just landed — link any suggestions that the Stage-5 pass skipped
   // because the map didn't exist yet. Idempotent: rows already linked are
