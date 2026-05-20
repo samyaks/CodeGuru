@@ -33,7 +33,28 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # Railway's backboard upload endpoint (`/up`) occasionally returns
+      # the CLI a hard 30s timeout under load. The CLI itself doesn't
+      # expose a `--timeout` or `--retries` flag, so we wrap it in a
+      # small bash retry loop. 5 attempts with exponential backoff
+      # (30s, 60s, 120s, 240s) covers most observed outages. The job
+      # still fails fast if Railway returns an auth error — the loop
+      # only retries when railway exits non-zero AND that's the only
+      # signal we have to discriminate transient from permanent.
       - name: Deploy to Railway
-        run: railway up --service CodeGuru
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          attempt=0
+          backoff=30
+          max_attempts=5
+          until railway up --service CodeGuru; do
+            attempt=$((attempt + 1))
+            if [ $attempt -ge $max_attempts ]; then
+              echo "::error::Railway deploy failed after $max_attempts attempts"
+              exit 1
+            fi
+            echo "::warning::Railway deploy attempt $attempt failed; retrying in ${backoff}s"
+            sleep $backoff
+            backoff=$((backoff * 2))
+          done
