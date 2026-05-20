@@ -7,7 +7,7 @@ import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api'
 import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
 import { fetchSecuritySummary, type SecuritySummary } from '../../services/v2Api';
 import {
-  TabBar, MetadataLabel, EmptyState,
+  TabBar, MetadataLabel, EmptyState, ReanalyzeModal,
 } from '../../components/v2';
 import Header from '../../components/Header';
 import GapsSection from './GapsSection';
@@ -54,6 +54,12 @@ export default function ProjectV2() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>(readHashTab);
+  const [reanalyzeModalOpen, setReanalyzeModalOpen] = useState(false);
+
+  const handleReanalyzeTriggered = useCallback((projectId: string) => {
+    setReanalyzeModalOpen(false);
+    navigate(`/takeoff/${projectId}`);
+  }, [navigate]);
 
   // `reload` is the user-triggered Retry path on the load-error view.
   // We only block on the main project fetch for the error UI; the
@@ -204,18 +210,37 @@ export default function ProjectV2() {
   const showRealContext = activeTab === 'context' && !!id;
   const showRealSettings = activeTab === 'settings' && !!id;
 
+  // Local uploads (`local://…`) can't be re-analyzed because we don't
+  // persist the original files. Hide the workspace-header affordance
+  // rather than show a button that always 400s. The same gate is
+  // applied on SecurityReport + ContextSection.
+  const isLocalProject = typeof project.repo_url === 'string' && project.repo_url.startsWith('local://');
+
   return (
     <div className="min-h-screen bg-stone-50 v2-font-sans">
       <Header
         variant="workspace"
         title={project.repo}
         actions={
-          <Link
-            to="/"
-            className="text-sm text-stone-600 hover:text-stone-900 transition-colors px-2"
-          >
-            + New project
-          </Link>
+          <>
+            {!isLocalProject ? (
+              <button
+                type="button"
+                onClick={() => setReanalyzeModalOpen(true)}
+                className="text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+                title="Re-run analysis on the latest commit"
+              >
+                <RefreshCw className="w-3 h-3" aria-hidden />
+                Re-analyze
+              </button>
+            ) : null}
+            <Link
+              to="/"
+              className="text-sm text-stone-600 hover:text-stone-900 transition-colors px-2"
+            >
+              + New project
+            </Link>
+          </>
         }
       />
 
@@ -348,6 +373,16 @@ export default function ProjectV2() {
           </aside>
         </div>
       </main>
+
+      {!isLocalProject && id ? (
+        <ReanalyzeModal
+          open={reanalyzeModalOpen}
+          onClose={() => setReanalyzeModalOpen(false)}
+          projectId={id}
+          projectLabel={project.repo ? `${project.owner}/${project.repo}` : project.repo_url || id}
+          onTriggered={handleReanalyzeTriggered}
+        />
+      ) : null}
     </div>
   );
 }
