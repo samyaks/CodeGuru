@@ -7,6 +7,7 @@ const { suggestions, shippedItems } = require('../../lib/db');
 const { toGap } = require('./gap-mapper');
 const { matchCommitToGap, MIN_CONFIDENCE } = require('./gap-matcher');
 const { verifyGap } = require('./gap-verifier');
+const { scheduleReanalyze } = require('./reanalyze-scheduler');
 
 function uniqueFiles(commit) {
   const set = new Set();
@@ -116,6 +117,32 @@ async function processPush({ project, payload }) {
   for (const commit of commits) {
     // run sequentially so we don't stampede Anthropic on a 50-commit force push
     await processCommit({ project, commit, branch });
+  }
+
+  // After per-commit gap matching is done, schedule a debounced full
+  // re-analysis so the user sees fresh readiness scores / security
+  // findings / context files / NEW gaps discovered from the latest
+  // tree — not just status changes on already-known gaps.
+  //
+  // Gated to the project's default branch (or 'main' as fallback when
+  // unset). PR / feature-branch pushes would otherwise blow ~$0.50 of
+  // LLM cost per branch per push without ever reaching the user-facing
+  // analysis surfaces (which all read from the main-branch project row).
+  //
+  // The scheduler handles debounce, in-flight coordination, and the
+  // local:// gate. We just hand it the context.
+  const defaultBranch = project.branch || 'main';
+  if (branch && branch === defaultBranch && commits.length > 0) {
+    scheduleReanalyze(project.id, {
+      reason: 'push',
+      commits: commits.map((c) => c.id).filter(Boolean),
+      branch,
+    });
+  } else if (branch && branch !== defaultBranch) {
+    console.log(
+      `[v2/shipped-runner] skipping auto-reanalyze for ${project.id}: ` +
+      `push to '${branch}' is not default branch '${defaultBranch}'`
+    );
   }
 }
 

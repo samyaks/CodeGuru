@@ -903,6 +903,41 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
 
   checkProjectAccess(project, req);
 
+  // triggerReanalyzeForProject throws AppError.{badRequest,conflict} for the
+  // same gates as the old inline body; asyncHandler propagates them to the
+  // shared error middleware so the HTTP shape stays identical.
+  const { acceptedStatus } = await triggerReanalyzeForProject(project, {
+    reason: 'manual',
+    requestUserId: req.user?.id || null,
+  });
+
+  res.status(202).json({ projectId: project.id, status: acceptedStatus });
+}));
+
+// Shared trigger guts used by both the manual POST /:id/reanalyze endpoint
+// and the auto-rescan scheduler that fires on GitHub `push` webhooks.
+//
+// Returns `{ acceptedStatus, completion }`:
+//   - acceptedStatus: the new deployments.status row value ('analyzing'),
+//     useful for the route response.
+//   - completion: a Promise that resolves when the underlying runTakeoff
+//     promise settles (success OR failure). The scheduler awaits this to
+//     know when to drain the "another run queued during this one" set.
+//     The HTTP route does NOT await it — it returns 202 immediately and
+//     the pipeline runs in the background via setImmediate, matching the
+//     old behavior.
+//
+// Throws:
+//   - AppError.badRequest when repo_url is a `local://…` upload (no GitHub
+//     URL = nothing to re-analyze).
+//   - AppError.conflict when the project is already in-flight (in-memory
+//     Set check) or the DB status is not in REANALYZABLE_STATUSES.
+//
+// The two-check guard (in-memory Set + DB status) is intentional. The Set
+// catches same-process double-fires (manual + auto colliding) without
+// hitting the DB; the status check catches cross-restart races where the
+// Set was lost but the row is still in 'analyzing'.
+async function triggerReanalyzeForProject(project, { reason, requestUserId } = {}) {
   if (typeof project.repo_url !== 'string' || project.repo_url.startsWith('local://')) {
     throw AppError.badRequest(
       'Re-analyze is only available for GitHub-connected projects. ' +
@@ -936,22 +971,29 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
     event: 'reanalyze_triggered',
     projectId: project.id,
     repoUrl: project.repo_url,
-    userId: req.user?.id || null,
+    reason: reason || 'unknown',
+    userId: requestUserId || null,
     timestamp: new Date().toISOString(),
   }));
 
-  setImmediate(() => {
-    runTakeoff(project.id, project.repo_url)
-      .catch((err) => {
-        console.error(`reanalyze runTakeoff ${project.id} unhandled:`, err);
-      })
-      .finally(() => {
-        inFlightAnalyses.delete(project.id);
-      });
+  // setImmediate so the HTTP route can return 202 without waiting for the
+  // full pipeline. The completion promise lets the scheduler hook into the
+  // settlement (success or failure) to drain queued-during-run requests.
+  const completion = new Promise((resolve) => {
+    setImmediate(() => {
+      runTakeoff(project.id, project.repo_url)
+        .catch((err) => {
+          console.error(`reanalyze runTakeoff ${project.id} unhandled:`, err);
+        })
+        .finally(() => {
+          inFlightAnalyses.delete(project.id);
+          resolve();
+        });
+    });
   });
 
-  res.status(202).json({ projectId: project.id, status: 'analyzing' });
-}));
+  return { acceptedStatus: 'analyzing', completion };
+}
 
 router.get('/:id/env-vars', asyncHandler(async (req, res) => {
   if (!req.user) throw AppError.unauthorized('Login required');
@@ -1053,3 +1095,9 @@ router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+// Exposed for the auto-rescan scheduler (services/v2/reanalyze-scheduler.js).
+// Exporting from a routes module is slightly unusual but avoids a larger
+// refactor of moving runTakeoff/runPipeline out into a dedicated service
+// today. If a third caller appears, extract into services/takeoff-runner.js
+// and have the route import from there.
+module.exports.triggerReanalyzeForProject = triggerReanalyzeForProject;
