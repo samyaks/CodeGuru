@@ -4,10 +4,9 @@ import {
   AlertOctagon, FileText, GitCommit, RefreshCw, Settings, Shield, Users,
 } from 'lucide-react';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
-import { fetchProductMap, clampScore, type ProductMapData } from '../../services/productMapApi';
 import { fetchSecuritySummary, type SecuritySummary } from '../../services/v2Api';
 import {
-  TabBar, MetadataLabel, EmptyState, ReanalyzeModal,
+  TabBar, EmptyState, ReanalyzeModal,
 } from '../../components/v2';
 import Header from '../../components/Header';
 import GapsSection from './GapsSection';
@@ -46,7 +45,6 @@ export default function ProjectV2() {
   const navigate = useNavigate();
 
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
-  const [productMap, setProductMap] = useState<ProductMapData | null>(null);
   // Best-effort fetch — failures don't block the page. The cached
   // `project.security_score` is the fallback for the header score; the
   // tab-badge sub-indicator just stays hidden if we couldn't load.
@@ -77,7 +75,6 @@ export default function ProjectV2() {
     } finally {
       setLoading(false);
     }
-    fetchProductMap(id).then(setProductMap).catch(() => { /* best-effort */ });
     fetchSecuritySummary(id).then(setSecuritySummary).catch(() => { /* best-effort */ });
   }, [id]);
 
@@ -91,10 +88,6 @@ export default function ProjectV2() {
       .then((p) => { if (!cancelled) setProject(p); })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
-
-    fetchProductMap(id)
-      .then((map) => { if (!cancelled) setProductMap(map); })
-      .catch(() => { /* product map is best-effort */ });
 
     fetchSecuritySummary(id)
       .then((s) => { if (!cancelled) setSecuritySummary(s); })
@@ -122,36 +115,6 @@ export default function ProjectV2() {
       setActiveTab(next as TabId);
     }
   }, []);
-
-  const personas = useMemo(() => {
-    if (!productMap) return [] as Array<{ id: string; name: string; emoji: string; readiness: number }>;
-    const personaScores = productMap.scores?.persona ?? {};
-    // Backend `services/job-scorer.js` already returns 0..100 integers;
-    // `clampScore` is the shared guard against the "8700%" / "NaN%" bugs.
-    const appFallback = clampScore(productMap.scores?.app);
-    return productMap.personas.map((p) => {
-      const direct = clampScore(personaScores[p.id]);
-      const readiness = direct ?? appFallback ?? 50;
-      return {
-        id: p.id,
-        name: p.name,
-        emoji: p.emoji ?? '📌',
-        readiness,
-      };
-    });
-  }, [productMap]);
-
-  const stack = useMemo(() => {
-    if (!project?.stack_info) return [] as Array<[string, string]>;
-    const entries: Array<[string, string]> = [];
-    if (project.stack_info.runtime) entries.push(['Runtime', project.stack_info.runtime]);
-    if (project.stack_info.framework) entries.push(['Framework', project.stack_info.framework]);
-    if (project.stack_info.styling) entries.push(['Styling', project.stack_info.styling]);
-    if (project.stack_info.database) entries.push(['Database', project.stack_info.database]);
-    if (project.stack_info.auth) entries.push(['Auth', project.stack_info.auth]);
-    if (project.deploy_type) entries.push(['Deploy', project.deploy_type]);
-    return entries;
-  }, [project]);
 
   const readiness = project?.readiness_score ?? null;
   // Header score: prefer the live recompute (catches any post-analysis
@@ -301,77 +264,19 @@ export default function ProjectV2() {
           className="mb-8"
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3">
-            {showRealGaps ? (
-              <GapsSection projectId={id!} />
-            ) : showRealShipped ? (
-              <ShippedSection projectId={id!} />
-            ) : showRealMap ? (
-              <MapSection projectId={id!} />
-            ) : showRealContext ? (
-              <ContextSection projectId={id!} />
-            ) : showRealSettings ? (
-              <SettingsSection projectId={id!} />
-            ) : (
-              <EmptyState icon={placeholder.icon} title={placeholder.title} />
-            )}
-          </div>
-
-          <aside className="space-y-5">
-            <div className="bg-white border border-stone-200 rounded-lg p-5">
-              <MetadataLabel className="mb-3">Stack</MetadataLabel>
-              {stack.length === 0 ? (
-                <p className="text-xs text-stone-500">Stack details unavailable.</p>
-              ) : (
-                <div className="space-y-2">
-                  {stack.map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-2">
-                      <span className="text-stone-500 text-xs">{k}</span>
-                      <span className="font-medium text-stone-900 text-xs text-right">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white border border-stone-200 rounded-lg p-5">
-              <div className="flex items-center justify-between mb-3">
-                <MetadataLabel>Personas</MetadataLabel>
-                {personas.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setTab('map')}
-                    className="text-[11px] text-stone-500 hover:text-stone-900"
-                  >
-                    Edit →
-                  </button>
-                ) : null}
-              </div>
-              {personas.length === 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setTab('map')}
-                  className="text-xs text-stone-600 hover:text-stone-900 underline-offset-2 hover:underline"
-                >
-                  No personas yet — set them up →
-                </button>
-              ) : (
-                <div className="space-y-2.5">
-                  {personas.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span aria-hidden>{p.emoji}</span>
-                        <span className="text-stone-700 truncate">{p.name}</span>
-                      </div>
-                      <span className="font-medium text-stone-900 flex-shrink-0">{p.readiness}%</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </aside>
-        </div>
+        {showRealGaps ? (
+          <GapsSection projectId={id!} />
+        ) : showRealShipped ? (
+          <ShippedSection projectId={id!} />
+        ) : showRealMap ? (
+          <MapSection projectId={id!} />
+        ) : showRealContext ? (
+          <ContextSection projectId={id!} />
+        ) : showRealSettings ? (
+          <SettingsSection projectId={id!} />
+        ) : (
+          <EmptyState icon={placeholder.icon} title={placeholder.title} />
+        )}
       </main>
 
       {!isLocalProject && id ? (
