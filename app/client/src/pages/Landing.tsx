@@ -11,11 +11,11 @@ import {
   Github,
   Map,
   ArrowLeft,
+  Loader2,
 } from 'lucide-react';
 import Header from '../components/Header';
 import { useAuth } from '../hooks/useAuth';
 import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
-import { Button, DotGridBg } from '../components/ui';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -25,6 +25,34 @@ const EXAMPLES = [
 
 type Mode = 'connect' | 'picker' | 'url' | 'upload';
 
+// Primary CTA used across modes. Stone-900 on stone-50 is the v2 detail-page
+// idiom; full-width is opt-in via className so we can drop it inline next
+// to text inputs in the URL/Upload forms without breaking the layout.
+function PrimaryButton({
+  type = 'button',
+  onClick,
+  disabled,
+  className = '',
+  children,
+}: {
+  type?: 'button' | 'submit';
+  onClick?: () => void;
+  disabled?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex items-center justify-center gap-2 bg-stone-900 text-stone-50 hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors rounded px-5 py-2.5 text-sm font-medium ${className}`.trim()}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const { user, login } = useAuth();
@@ -33,8 +61,6 @@ export default function Landing() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // When signed in we default to the repo picker; otherwise we lead with the
-  // GitHub connect CTA (kit's `mode==='github'`).
   const [mode, setMode] = useState<Mode>(user ? 'picker' : 'connect');
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -201,52 +227,52 @@ export default function Landing() {
     return `${Math.floor(days / 365)}y ago`;
   }
 
+  // Feature strip beneath the hero. Icons share the stone-900 accent so the
+  // page reads as a single design system rather than three accent colors.
   const features = [
     {
-      icon: <Map size={17} className="text-brand" />,
+      icon: <Map className="w-4 h-4 text-stone-900" />,
       title: 'Product Map',
       body: "Jobs and personas scored against your codebase — see what users actually need.",
     },
     {
-      icon: <CheckCircle2 size={17} className="text-brand" />,
+      icon: <CheckCircle2 className="w-4 h-4 text-stone-900" />,
       title: 'Readiness Score',
       body: 'Weighted by real user impact, not just technical completeness.',
     },
     {
-      icon: <Rocket size={17} className="text-brand -rotate-45" />,
+      icon: <Rocket className="w-4 h-4 text-stone-900 -rotate-45" />,
       title: 'One-Click Deploy',
       body: 'From analysis to live URL. Env vars set automatically.',
     },
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-page">
-      <Header />
+    <div className="min-h-screen flex flex-col bg-stone-50 v2-font-sans">
+      <Header variant="workspace" />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 pt-10 relative">
-        <DotGridBg />
-
-        <div className="max-w-[560px] w-full text-center relative z-10">
+      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 pt-10">
+        <div className="max-w-[640px] w-full text-center">
           {/* Early-access pill */}
-          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border border-amber-border bg-amber-bg text-xs font-medium text-amber-fg mb-6">
-            <span className="w-[5px] h-[5px] rounded-full bg-amber animate-ds-pulse" />
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-xs font-medium text-amber-700 mb-8">
+            <span className="w-[5px] h-[5px] rounded-full bg-amber-500 animate-pulse" />
             Now in early access
           </div>
 
           {/* Hero */}
           <h1
-            className="font-extrabold text-text mb-4"
+            className="font-bold text-stone-900 tracking-tight mb-5 v2-font-serif"
             style={{
-              fontSize: 'clamp(2.2rem, 5vw, 3.6rem)',
-              letterSpacing: '-0.05em',
+              fontSize: 'clamp(2.4rem, 5.5vw, 4rem)',
               lineHeight: 1.05,
+              letterSpacing: '-0.03em',
             }}
           >
             You built it,
             <br />
-            <span className="text-amber">now let&rsquo;s ship it.</span>
+            <span className="text-amber-600">now let&rsquo;s ship it.</span>
           </h1>
-          <p className="text-base text-text-muted max-w-[400px] mx-auto leading-relaxed mb-9">
+          <p className="text-base text-stone-600 max-w-[440px] mx-auto leading-relaxed mb-10">
             {user
               ? 'Pick a repo from your GitHub, paste a URL, or upload a folder. We will analyze the code and tell you exactly what to build next.'
               : "Connect your GitHub repo. We'll analyze the code, map it to your users' needs, and tell you exactly what to build next."}
@@ -254,28 +280,29 @@ export default function Landing() {
 
           {/* ── Connect GitHub (default for signed-out users) ── */}
           {mode === 'connect' && (
-            <div className="flex flex-col items-center gap-3.5">
-              <Button
-                size="lg"
+            <div className="flex flex-col items-center gap-4">
+              <PrimaryButton
                 onClick={() => login('github')}
-                className="w-full max-w-[320px]"
+                className="w-full max-w-[320px] !py-3 !text-base"
               >
-                <Github size={18} />
+                <Github className="w-4 h-4" />
                 Connect GitHub
-              </Button>
-              <div className="flex items-center gap-3 text-[13px] text-text-faint">
+              </PrimaryButton>
+              <div className="flex items-center gap-3 text-[13px] text-stone-500">
                 <button
+                  type="button"
                   onClick={() => setMode('url')}
-                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                  className="underline underline-offset-[3px] hover:text-stone-700 transition-colors"
                 >
                   or paste a public repo URL
                 </button>
-                <span className="text-text-disabled" aria-hidden>
+                <span className="text-stone-300" aria-hidden>
                   ·
                 </span>
                 <button
+                  type="button"
                   onClick={() => setMode('upload')}
-                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                  className="underline underline-offset-[3px] hover:text-stone-700 transition-colors"
                 >
                   upload a folder
                 </button>
@@ -285,18 +312,18 @@ export default function Landing() {
 
           {/* ── Repo picker (signed-in default) ── */}
           {mode === 'picker' && (
-            <div className="max-w-[480px] mx-auto">
-              <div className="flex items-center gap-1.5 mb-3 px-3.5 py-2 bg-success-bg border border-success-border rounded-[9px] text-[13px] text-success font-medium">
-                <CheckCircle2 size={14} strokeWidth={2.5} />
+            <div className="max-w-[520px] mx-auto">
+              <div className="flex items-center gap-2 mb-4 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded text-[13px] text-emerald-700 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={2.5} />
                 GitHub connected — pick a repo to analyze
               </div>
 
               <div ref={dropdownRef} className="relative text-left">
                 <div
-                  className="flex items-center gap-2 bg-surface border border-line rounded-[10px] px-3.5 py-2.5 shadow-card cursor-text"
+                  className="flex items-center gap-2 bg-white border border-stone-200 rounded-lg px-3.5 py-3 cursor-text shadow-sm"
                   onClick={() => setShowDropdown(true)}
                 >
-                  <Search size={16} className="text-text-faint shrink-0" />
+                  <Search className="w-4 h-4 text-stone-400 shrink-0" />
                   <input
                     type="text"
                     value={search}
@@ -309,65 +336,66 @@ export default function Landing() {
                       setShowDropdown(true);
                     }}
                     placeholder="Search your repos..."
-                    className="flex-1 bg-transparent outline-none text-[13px] text-text placeholder:text-text-faint"
+                    className="flex-1 bg-transparent outline-none text-sm text-stone-900 placeholder:text-stone-400"
                     disabled={loading}
                   />
                   <ChevronDown
-                    size={16}
-                    className={`text-text-faint transition-transform ${showDropdown ? 'rotate-180' : ''}`}
+                    className={`w-4 h-4 text-stone-400 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
                   />
                 </div>
 
                 {showDropdown && (
-                  <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-surface border border-line rounded-xl overflow-hidden z-50 shadow-card-hov max-h-80 overflow-y-auto">
+                  <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-white border border-stone-200 rounded-lg overflow-hidden z-50 shadow-lg max-h-80 overflow-y-auto">
                     {reposLoading ? (
-                      <div className="px-4 py-6 text-center text-text-muted text-sm">
-                        <span className="inline-block w-4 h-4 border-2 border-line border-t-text-muted rounded-full animate-spin mr-2 align-middle" />
+                      <div className="px-4 py-6 text-center text-stone-600 text-sm">
+                        <Loader2 className="inline-block w-4 h-4 animate-spin mr-2 align-middle text-stone-400" />
                         Loading your repos...
                       </div>
                     ) : needsRelogin ? (
                       <div className="px-4 py-6 text-center text-sm space-y-2">
-                        <p className="text-text-muted">GitHub access needs to be refreshed.</p>
+                        <p className="text-stone-600">GitHub access needs to be refreshed.</p>
                         <button
+                          type="button"
                           onClick={() => login('github')}
-                          className="text-brand hover:text-brand-hov underline underline-offset-2 transition-colors"
+                          className="text-stone-900 hover:text-stone-700 underline underline-offset-2 transition-colors"
                         >
                           Sign in again to load your repos
                         </button>
                       </div>
                     ) : filtered.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-text-muted text-sm">
+                      <div className="px-4 py-6 text-center text-stone-500 text-sm">
                         {search ? 'No repos match your search' : 'No repos found'}
                       </div>
                     ) : (
                       filtered.map((repo) => (
                         <button
                           key={repo.full_name}
+                          type="button"
                           onClick={() => selectRepo(repo)}
                           disabled={loading}
-                          className="w-full text-left px-4 py-3 hover:bg-page border-b border-divider last:border-b-0 transition-colors disabled:opacity-50 group"
+                          className="w-full text-left px-4 py-3 hover:bg-stone-50 border-b border-stone-100 last:border-b-0 transition-colors disabled:opacity-50 group"
                         >
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-[13px] text-text group-hover:text-brand transition-colors truncate">
+                            <span className="font-semibold text-sm text-stone-900 group-hover:text-stone-700 transition-colors truncate">
                               {repo.full_name}
                             </span>
-                            {repo.private && <Lock size={12} className="text-text-faint shrink-0" />}
+                            {repo.private && <Lock className="w-3 h-3 text-stone-400 shrink-0" />}
                             {repo.stargazers_count > 0 && (
-                              <span className="flex items-center gap-0.5 text-[11px] text-text-faint shrink-0">
-                                <Star size={10} /> {repo.stargazers_count}
+                              <span className="flex items-center gap-0.5 text-[11px] text-stone-500 shrink-0">
+                                <Star className="w-2.5 h-2.5" /> {repo.stargazers_count}
                               </span>
                             )}
                           </div>
                           <div className="flex items-center gap-3 mt-0.5">
                             {repo.language && (
-                              <span className="text-[11px] text-text-muted">{repo.language}</span>
+                              <span className="text-[11px] text-stone-600">{repo.language}</span>
                             )}
                             {repo.description && (
-                              <span className="text-[11px] text-text-faint truncate">
+                              <span className="text-[11px] text-stone-500 truncate">
                                 {repo.description}
                               </span>
                             )}
-                            <span className="text-[11px] text-text-disabled shrink-0 ml-auto">
+                            <span className="text-[11px] text-stone-300 shrink-0 ml-auto">
                               {timeAgo(repo.updated_at)}
                             </span>
                           </div>
@@ -379,25 +407,27 @@ export default function Landing() {
               </div>
 
               {loading && (
-                <div className="mt-3 flex items-center justify-center gap-2 text-brand text-sm">
-                  <span className="w-4 h-4 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
+                <div className="mt-3 flex items-center justify-center gap-2 text-stone-700 text-sm">
+                  <Loader2 className="w-4 h-4 animate-spin text-stone-400" />
                   Analyzing...
                 </div>
               )}
 
-              <div className="mt-4 flex items-center justify-center gap-3 text-[13px] text-text-faint">
+              <div className="mt-5 flex items-center justify-center gap-3 text-[13px] text-stone-500">
                 <button
+                  type="button"
                   onClick={() => setMode('url')}
-                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                  className="underline underline-offset-[3px] hover:text-stone-700 transition-colors"
                 >
                   paste a URL
                 </button>
-                <span className="text-text-disabled" aria-hidden>
+                <span className="text-stone-300" aria-hidden>
                   ·
                 </span>
                 <button
+                  type="button"
                   onClick={() => setMode('upload')}
-                  className="underline underline-offset-[3px] hover:text-text-muted transition-colors"
+                  className="underline underline-offset-[3px] hover:text-stone-700 transition-colors"
                 >
                   upload a folder
                 </button>
@@ -407,7 +437,7 @@ export default function Landing() {
 
           {/* ── Paste URL ── */}
           {mode === 'url' && (
-            <div className="max-w-[480px] mx-auto text-left">
+            <div className="max-w-[520px] mx-auto text-left">
               <form onSubmit={handleSubmit} className="flex gap-2">
                 <input
                   type="text"
@@ -415,40 +445,42 @@ export default function Landing() {
                   onChange={(e) => setRepoUrl(e.target.value)}
                   placeholder="https://github.com/owner/repo"
                   disabled={loading}
-                  className="flex-1 px-4 py-3 rounded-[10px] bg-surface border border-line text-text text-[13px] font-mono outline-none shadow-card focus:border-brand focus:ring-2 focus:ring-brand/10 transition-all"
+                  className="flex-1 px-4 py-3 rounded-lg bg-white border border-stone-200 text-stone-900 text-sm font-mono outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-100 transition-all shadow-sm"
                 />
-                <Button type="submit" disabled={loading || !repoUrl.trim()}>
+                <PrimaryButton type="submit" disabled={loading || !repoUrl.trim()}>
                   {loading ? (
                     <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin" />
                       Analyzing...
                     </>
                   ) : (
                     'Analyze'
                   )}
-                </Button>
+                </PrimaryButton>
               </form>
-              <div className="mt-3 text-[13px] text-text-faint">
+              <div className="mt-3 text-[13px] text-stone-500">
                 Try:
                 {EXAMPLES.map((ex, i) => (
                   <button
                     key={i}
+                    type="button"
                     onClick={() => {
                       setRepoUrl(ex.url);
                       analyze(ex.url);
                     }}
                     disabled={loading}
-                    className="ml-1.5 text-brand hover:text-brand-hov underline underline-offset-2 transition-colors disabled:opacity-50"
+                    className="ml-1.5 text-stone-900 hover:text-stone-700 underline underline-offset-2 transition-colors disabled:opacity-50"
                   >
                     {ex.label}
                   </button>
                 ))}
               </div>
               <button
+                type="button"
                 onClick={() => setMode(user ? 'picker' : 'connect')}
-                className="mt-4 inline-flex items-center gap-1 text-[13px] text-text-faint hover:text-text-muted underline underline-offset-[3px] transition-colors"
+                className="mt-4 inline-flex items-center gap-1 text-[13px] text-stone-500 hover:text-stone-700 underline underline-offset-[3px] transition-colors"
               >
-                <ArrowLeft size={12} />
+                <ArrowLeft className="w-3 h-3" />
                 {user ? 'Back to my repos' : 'Connect GitHub instead'}
               </button>
             </div>
@@ -456,7 +488,7 @@ export default function Landing() {
 
           {/* ── Upload folder ── */}
           {mode === 'upload' && (
-            <div className="max-w-[480px] mx-auto text-left space-y-3">
+            <div className="max-w-[520px] mx-auto text-left space-y-3">
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -471,17 +503,17 @@ export default function Landing() {
                 onDrop={handleDrop}
                 onClick={() => folderInputRef.current?.click()}
                 className={[
-                  'rounded-[14px] p-10 text-center cursor-pointer transition-all border bg-surface shadow-card',
-                  dragOver ? 'border-brand bg-brand-tint' : 'border-line hover:border-brand',
+                  'rounded-lg p-10 text-center cursor-pointer transition-all border bg-white shadow-sm',
+                  dragOver ? 'border-stone-900 bg-stone-50' : 'border-stone-200 hover:border-stone-400',
                 ].join(' ')}
               >
-                <FolderUp size={32} className="text-brand mx-auto mb-3" />
-                <p className="text-sm text-text font-semibold mb-1">
+                <FolderUp className="w-8 h-8 text-stone-900 mx-auto mb-3" />
+                <p className="text-sm text-stone-900 font-semibold mb-1">
                   {selectedFiles.length > 0
                     ? `${selectedFiles.length} files selected`
                     : 'Drop a folder here or click to browse'}
                 </p>
-                <p className="text-xs text-text-muted">
+                <p className="text-xs text-stone-600">
                   {selectedFiles.length > 0
                     ? uploadProjectName || 'Ready to analyze'
                     : "Select your project folder \u2014 we'll analyze it locally"}
@@ -504,56 +536,56 @@ export default function Landing() {
                     value={uploadProjectName}
                     onChange={(e) => setUploadProjectName(e.target.value)}
                     placeholder="Project name (optional)"
-                    className="flex-1 px-4 py-3 rounded-[10px] bg-surface border border-line text-text placeholder:text-text-faint outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 text-sm transition-all"
+                    className="flex-1 px-4 py-3 rounded-lg bg-white border border-stone-200 text-stone-900 placeholder:text-stone-400 outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-100 text-sm transition-all shadow-sm"
                   />
-                  <Button onClick={handleUpload} disabled={loading}>
+                  <PrimaryButton onClick={handleUpload} disabled={loading}>
                     {loading ? (
                       <>
-                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <Loader2 className="w-4 h-4 animate-spin" />
                         Uploading {selectedFiles.length} files...
                       </>
                     ) : (
                       'Analyze'
                     )}
-                  </Button>
+                  </PrimaryButton>
                 </div>
               )}
               <button
+                type="button"
                 onClick={() => setMode(user ? 'picker' : 'connect')}
-                className="inline-flex items-center gap-1 text-[13px] text-text-faint hover:text-text-muted underline underline-offset-[3px] transition-colors"
+                className="inline-flex items-center gap-1 text-[13px] text-stone-500 hover:text-stone-700 underline underline-offset-[3px] transition-colors"
               >
-                <ArrowLeft size={12} />
+                <ArrowLeft className="w-3 h-3" />
                 {user ? 'Back to my repos' : 'Connect GitHub instead'}
               </button>
             </div>
           )}
 
           {error && (
-            <div className="mt-5 max-w-[480px] mx-auto text-danger text-sm bg-danger-bg border border-danger-border rounded-lg px-4 py-2 text-left">
+            <div className="mt-5 max-w-[520px] mx-auto text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-left">
               {error}
             </div>
           )}
 
           {/* ── Feature strip ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-13" style={{ marginTop: 52 }}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-14">
             {features.map((card) => (
               <div
                 key={card.title}
-                className="bg-surface border border-line rounded-[14px] px-4 py-4.5 text-left shadow-card transition-all hover:border-brand hover:-translate-y-px hover:shadow-card-hov"
-                style={{ padding: '18px 16px' }}
+                className="bg-white border border-stone-200 rounded-lg p-5 text-left transition-all hover:border-stone-400 hover:shadow-sm"
               >
-                <div className="w-[34px] h-[34px] rounded-lg bg-surface-2 flex items-center justify-center mb-3">
+                <div className="w-9 h-9 rounded bg-stone-100 flex items-center justify-center mb-3">
                   {card.icon}
                 </div>
-                <div className="text-[13px] font-semibold text-text mb-1">{card.title}</div>
-                <div className="text-xs text-text-muted leading-relaxed">{card.body}</div>
+                <div className="text-sm font-semibold text-stone-900 mb-1">{card.title}</div>
+                <div className="text-xs text-stone-600 leading-relaxed">{card.body}</div>
               </div>
             ))}
           </div>
         </div>
       </main>
 
-      <footer className="text-center py-4 text-xs text-text-faint border-t border-line bg-page">
+      <footer className="text-center py-4 text-xs text-stone-500 border-t border-stone-200 bg-stone-50">
         Takeoff &middot; From vibe code to production
       </footer>
     </div>
