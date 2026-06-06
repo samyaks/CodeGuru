@@ -13,7 +13,11 @@ import {
   ArrowLeft,
   Loader2,
 } from 'lucide-react';
-import Header from '../components/Header';
+import { Link } from 'react-router-dom';
+import PageMeta from '../components/marketing/PageMeta';
+import FaqAccordion from '../components/marketing/FaqAccordion';
+import CtaBand from '../components/marketing/CtaBand';
+import { MARKETING_FAQ, STACK_LOGOS } from '../components/marketing/marketingContent';
 import { useAuth } from '../hooks/useAuth';
 import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
 
@@ -248,11 +252,14 @@ export default function Landing() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-stone-50 v2-font-sans">
-      <Header variant="workspace" />
+    <>
+      <PageMeta
+        title="Takeoff — From vibe code to production"
+        description="Analyze your GitHub repo, map it to user needs, and get AI context files to finish the last 40% of your app."
+      />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 pb-24 pt-10">
-        <div className="max-w-[640px] w-full text-center">
+      <div className="flex flex-col items-center px-6 pb-16 pt-10">
+        <div id="analyze" className="max-w-[640px] w-full text-center">
           {/* Early-access pill */}
           <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-xs font-medium text-amber-700 mb-8">
             <span className="w-[5px] h-[5px] rounded-full bg-amber-500 animate-pulse" />
@@ -582,12 +589,44 @@ export default function Landing() {
               </div>
             ))}
           </div>
+          <p className="mt-6 text-sm text-stone-500">
+            <Link to="/features" className="underline underline-offset-2 hover:text-stone-700 transition-colors">
+              See all features
+            </Link>
+            {' · '}
+            <Link to="/demo" className="underline underline-offset-2 hover:text-stone-700 transition-colors">
+              View demo report
+            </Link>
+          </p>
         </div>
-      </main>
 
-      <footer className="text-center py-4 text-xs text-stone-500 border-t border-stone-200 bg-stone-50">
-        Takeoff &middot; From vibe code to production
-      </footer>
-    </div>
+        {/* ── Stacks ── */}
+        <div className="max-w-3xl w-full mt-24 text-center">
+          <p className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-4">
+            Works with your stack
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {STACK_LOGOS.map((name) => (
+              <span
+                key={name}
+                className="px-3 py-1.5 bg-white border border-stone-200 rounded-full text-xs font-medium text-stone-600"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* ── FAQ ── */}
+        <div className="max-w-3xl w-full mt-24">
+          <FaqAccordion items={MARKETING_FAQ} />
+        </div>
+
+        {/* ── CTA ── */}
+        <div className="max-w-3xl w-full mt-24">
+          <CtaBand />
+        </div>
+      </div>
+    </>
   );
 }

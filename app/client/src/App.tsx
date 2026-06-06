@@ -13,6 +13,14 @@ import NotFound from './pages/NotFound';
 import StyleGuideV2 from './pages/v2/StyleGuide';
 import ProjectV2 from './pages/v2/Project';
 import SecurityReportV2 from './pages/v2/SecurityReport';
+import MarketingLayout from './layouts/MarketingLayout';
+import Features from './pages/marketing/Features';
+import HowItWorks from './pages/marketing/HowItWorks';
+import Pricing from './pages/marketing/Pricing';
+import UseCasePage from './pages/marketing/UseCasePage';
+import Demo from './pages/marketing/Demo';
+import GapsIndex from './pages/marketing/GapsIndex';
+import GapExplainerPage from './pages/marketing/GapExplainerPage';
 
 function NavigateToProject() {
   const { id } = useParams();
@@ -38,7 +46,16 @@ export default function App() {
           <TakeoffAnnotate defaultMode="clean" position="bottom-right">
           <Routes>
             <Route path="/auth/callback" element={<AuthCallback />} />
-            <Route path="/" element={<Landing />} />
+            <Route element={<MarketingLayout />}>
+              <Route path="/" element={<Landing />} />
+              <Route path="/features" element={<Features />} />
+              <Route path="/demo" element={<Demo />} />
+              <Route path="/how-it-works" element={<HowItWorks />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/gaps" element={<GapsIndex />} />
+              <Route path="/gaps/:slug" element={<GapExplainerPage />} />
+              <Route path="/for/:slug" element={<UseCasePage />} />
+            </Route>
             <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
 
             {/* Public story (no auth required) */}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://takeoff.dev/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://takeoff.dev/features</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://takeoff.dev/demo</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://takeoff.dev/how-it-works</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://takeoff.dev/pricing</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://takeoff.dev/gaps</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-auth</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-database</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-deployment</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-env-config</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-testing</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-error-handling</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/gaps/missing-permissions</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://takeoff.dev/for/vibe-coders</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://takeoff.dev/for/pms</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://takeoff.dev/for/agencies</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+</urlset>
