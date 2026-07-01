@@ -13,7 +13,7 @@
  */
 
 const { CLAUDE_MODEL, anthropic, truncate } = require('../../lib/constants');
-const { createMessageTracked } = require('../../lib/anthropic-tracked');
+const { createMessageTracked, extractText } = require('../../lib/anthropic-tracked');
 const { stripJsonFence } = require('../map-extractor');
 const { intentStatements } = require('../../lib/db');
 
@@ -199,7 +199,7 @@ async function generateForArea(projectId, featureArea, areaAnchors, fileContents
     },
   });
 
-  const rawText = response.content?.[0]?.text || '';
+  const rawText = extractText(response);
   const parsed = JSON.parse(stripJsonFence(rawText));
   if (!Array.isArray(parsed)) {
     throw new Error('model response was not a JSON array');

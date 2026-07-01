@@ -52,3 +52,8 @@ Postgres, not ANSI SQL.
   agents claim a statement or feature area; consumed by the MCP tools
   (`claim_intent`, `get_my_gaps`). Partial unique indexes enforce one active
   claim per statement/area.
+- `021_intent_group_label.sql` — adds `intent_statements.group_label`: a coarse,
+  product-level grouping produced by an LLM pass after bootstrap
+  (`services/intent/grouping.js`). `feature_area` (path-derived) stays for
+  bootstrap idempotency/reconciliation; the Context tab groups by `group_label`
+  and falls back to `feature_area` when null.

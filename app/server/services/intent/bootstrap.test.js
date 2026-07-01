@@ -44,6 +44,15 @@ require.cache[trackedPath] = {
       const text = responder ? responder() : '[]';
       return { content: [{ type: 'text', text }] };
     },
+    // Mirror the real helper: return the first text block (bootstrap uses this
+    // to stay robust against a leading `thinking` block from sonnet-5).
+    extractText(response) {
+      const blocks = Array.isArray(response?.content) ? response.content : [];
+      for (const b of blocks) {
+        if (b && b.type === 'text' && typeof b.text === 'string') return b.text;
+      }
+      return typeof blocks[0]?.text === 'string' ? blocks[0].text : '';
+    },
   },
 };
 

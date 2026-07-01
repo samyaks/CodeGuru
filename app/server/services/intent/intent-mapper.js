@@ -26,6 +26,9 @@ function toStatement(row) {
     status: row.status,
     source: row.source,
     featureArea: row.feature_area ?? null,
+    // Coarse, product-level grouping (services/intent/grouping.js). Presentation
+    // only; falls back to feature_area for grouping when null.
+    groupLabel: row.group_label ?? null,
     links,
     satisfied: row.satisfied === null || row.satisfied === undefined ? null : Boolean(row.satisfied),
     lastCheckedAt: row.last_checked_at ?? null,
@@ -34,14 +37,15 @@ function toStatement(row) {
   };
 }
 
-// Group mapped statements by feature area into the IntentListResponse shape.
-// `statements` are already camelCase (post-toStatement). Areas are sorted
-// alphabetically with the null area (uncategorized) pinned last; per-area and
-// top-level counts drive the UI's review-progress display.
+// Group mapped statements into the IntentListResponse shape. Grouping prefers
+// the semantic `groupLabel` (services/intent/grouping.js) and falls back to the
+// path-derived `featureArea` when a statement hasn't been grouped yet. `areas`
+// are sorted alphabetically with the null group (uncategorized) pinned last;
+// per-area and top-level counts drive the UI's review-progress display.
 function groupByArea(statements) {
   const byArea = new Map();
   for (const s of statements) {
-    const key = s.featureArea ?? null;
+    const key = s.groupLabel ?? s.featureArea ?? null;
     if (!byArea.has(key)) {
       byArea.set(key, {
         featureArea: key,

@@ -105,6 +105,17 @@ async function recordUsage({
   }
 }
 
+// Pull the assistant's text out of a non-streaming response. Robust against
+// `claude-sonnet-5` emitting a leading `thinking` content block (in which case
+// content[0] has no `.text`) — always return the first actual text block.
+function extractText(response) {
+  const blocks = Array.isArray(response?.content) ? response.content : [];
+  for (const b of blocks) {
+    if (b && b.type === 'text' && typeof b.text === 'string') return b.text;
+  }
+  return typeof blocks[0]?.text === 'string' ? blocks[0].text : '';
+}
+
 async function createMessageTracked({
   client,
   analysisId,
@@ -218,6 +229,7 @@ async function streamMessageTracked({
 module.exports = {
   createMessageTracked,
   streamMessageTracked,
+  extractText,
   estimateCost,
   PRICING,
   getSharedClient,

@@ -1982,7 +1982,7 @@ const webhookEvents = {
 
 // Columns the generic `update()` may set. Excludes id/project_id/created_at.
 const INTENT_STATEMENTS_ALLOWED = new Set([
-  'text', 'kind', 'status', 'source', 'feature_area',
+  'text', 'kind', 'status', 'source', 'feature_area', 'group_label',
   'links', 'code_hash', 'satisfied', 'last_checked_at', 'updated_at',
 ]);
 const INTENT_STATEMENTS_JSONB = new Set(['links']);
@@ -1995,9 +1995,9 @@ const intentStatements = {
       for (const row of items) {
         await client.query(
           `INSERT INTO intent_statements
-            (id, project_id, text, kind, status, source, feature_area, links,
-             code_hash, satisfied, last_checked_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            (id, project_id, text, kind, status, source, feature_area, group_label,
+             links, code_hash, satisfied, last_checked_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (id) DO NOTHING`,
           [
             row.id || crypto.randomUUID(),
@@ -2007,6 +2007,7 @@ const intentStatements = {
             row.status || 'candidate',
             row.source || 'inferred',
             row.feature_area ?? null,
+            row.group_label ?? null,
             toJsonb(row.links ?? []),
             row.code_hash ?? null,
             toBool(row.satisfied),
@@ -2127,6 +2128,30 @@ const intentStatements = {
       'DELETE FROM intent_statements WHERE id = $1 AND project_id = $2',
       [id, projectId]
     );
+  },
+
+  // Persist semantic grouping (services/intent/grouping.js). `assignments` is an
+  // array of { id, groupLabel }. Applied in one transaction, project-scoped so a
+  // stale/foreign id can never touch another project's rows. Returns the count
+  // of rows actually updated.
+  async setGroupLabels(projectId, assignments) {
+    const rows = (Array.isArray(assignments) ? assignments : [])
+      .filter((a) => a && typeof a.id === 'string');
+    if (rows.length === 0) return 0;
+    let updated = 0;
+    const now = new Date().toISOString();
+    await withTransaction(async (client) => {
+      for (const a of rows) {
+        const res = await client.query(
+          `UPDATE intent_statements
+             SET group_label = $1, updated_at = $2
+             WHERE id = $3 AND project_id = $4`,
+          [a.groupLabel ?? null, now, a.id, projectId]
+        );
+        updated += res.rowCount || 0;
+      }
+    });
+    return updated;
   },
 };
 

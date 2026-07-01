@@ -36,6 +36,8 @@ export interface IntentStatement {
   status: IntentStatus;
   source: IntentSource;
   featureArea: string | null;
+  /** Coarse, product-level grouping (server-derived). Presentation only. */
+  groupLabel?: string | null;
   links: IntentLink[];
   /** Satisfaction (Phase 6). `null` = not yet checked / no baseline. */
   satisfied: boolean | null;
