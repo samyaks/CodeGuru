@@ -57,3 +57,8 @@ Postgres, not ANSI SQL.
   (`services/intent/grouping.js`). `feature_area` (path-derived) stays for
   bootstrap idempotency/reconciliation; the Context tab groups by `group_label`
   and falls back to `feature_area` when null.
+- `022_intent_features.sql` — adds `intent_features`: a synthesized feature /
+  job-to-be-done roll-up over statements (`services/intent/features.js`). Each
+  feature carries a summary + inline persona/job (denormalized; regenerated per
+  analysis) and joins to statements via `label = group_label`. `job_id` links to
+  a product-map job (`map_jobs.id`) when one was reused, else null.

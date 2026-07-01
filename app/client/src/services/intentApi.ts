@@ -46,9 +46,28 @@ export interface IntentStatement {
   updatedAt: string | null;
 }
 
-/** Statements for one feature area, plus review progress for the UI. */
+/** A persona the feature serves (synthesized or reused from the product map). */
+export interface IntentPersona {
+  name: string;
+  emoji: string | null;
+}
+
+/** The job-to-be-done a feature enables. */
+export interface IntentJob {
+  title: string;
+  priority: 'high' | 'medium' | 'low' | null;
+}
+
+/** Statements for one feature (== group), plus its synthesized JTBD metadata
+ * and review progress. `featureArea` is the feature title; persona/job/summary
+ * are populated once feature synthesis has run (null otherwise). */
 export interface IntentAreaGroup {
   featureArea: string | null;
+  summary?: string | null;
+  persona?: IntentPersona | null;
+  job?: IntentJob | null;
+  priority?: 'high' | 'medium' | 'low' | null;
+  sortOrder?: number | null;
   statements: IntentStatement[];
   candidateCount: number;
   confirmedCount: number;

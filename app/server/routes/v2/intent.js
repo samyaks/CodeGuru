@@ -1,5 +1,5 @@
 const express = require('express');
-const { deployments, intentStatements, analysisFiles } = require('../../lib/db');
+const { deployments, intentStatements, intentFeatures, analysisFiles } = require('../../lib/db');
 const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
@@ -61,11 +61,14 @@ async function computeBaselineHash(projectId, links) {
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
   const { status, featureArea } = req.query;
-  const rows = await intentStatements.findByProjectId(req.params.id, {
-    status: typeof status === 'string' ? status : undefined,
-    featureArea: typeof featureArea === 'string' ? featureArea : undefined,
-  });
-  res.json(groupByArea(rows.map(toStatement)));
+  const [rows, features] = await Promise.all([
+    intentStatements.findByProjectId(req.params.id, {
+      status: typeof status === 'string' ? status : undefined,
+      featureArea: typeof featureArea === 'string' ? featureArea : undefined,
+    }),
+    intentFeatures.findByProjectId(req.params.id),
+  ]);
+  res.json(groupByArea(rows.map(toStatement), features));
 }));
 
 // POST /:statementId/confirm -> status=confirmed + freeze satisfaction baseline
@@ -159,8 +162,11 @@ router.post('/:statementId/restore', requireUser, writeLimit, asyncHandler(async
 // GET /spec -> generated markdown living spec from confirmed statements
 router.get('/spec', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
-  const confirmed = await intentStatements.findConfirmedByProjectId(req.params.id);
-  res.json({ markdown: buildLivingSpec(confirmed) });
+  const [confirmed, features] = await Promise.all([
+    intentStatements.findConfirmedByProjectId(req.params.id),
+    intentFeatures.findByProjectId(req.params.id),
+  ]);
+  res.json({ markdown: buildLivingSpec(confirmed, features) });
 }));
 
 // Null-safe match of a stored link by its current (file_path, symbol) identity.

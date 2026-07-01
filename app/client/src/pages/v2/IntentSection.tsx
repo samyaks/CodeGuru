@@ -28,6 +28,56 @@ function areaTitle(area: IntentAreaGroup): string {
   return area.featureArea ?? 'Unassigned';
 }
 
+type VisibleArea = { area: IntentAreaGroup; statements: IntentStatement[] };
+
+interface JobGroup {
+  key: string;
+  title: string | null;
+  priority: 'high' | 'medium' | 'low' | null;
+  areas: VisibleArea[];
+}
+interface PersonaGroup {
+  key: string;
+  name: string | null;
+  emoji: string | null;
+  jobs: JobGroup[];
+}
+
+// Fold the flat feature areas into a Persona -> Job -> Feature tree, preserving
+// the server's (sort_order-based) area ordering. Used to render intent as a
+// plan. When no synthesis metadata is present every area lands under a single
+// null persona/job, which the renderer shows as a flat list (back-compat).
+function groupByPersonaJob(visible: VisibleArea[]): PersonaGroup[] {
+  const personas: PersonaGroup[] = [];
+  const personaByKey = new Map<string, PersonaGroup>();
+
+  for (const v of visible) {
+    const pName = v.area.persona?.name ?? null;
+    const pKey = pName ?? '__none__';
+    let persona = personaByKey.get(pKey);
+    if (!persona) {
+      persona = { key: pKey, name: pName, emoji: v.area.persona?.emoji ?? null, jobs: [] };
+      personaByKey.set(pKey, persona);
+      personas.push(persona);
+    }
+    const jTitle = v.area.job?.title ?? null;
+    const jKey = jTitle ?? '__none__';
+    let job = persona.jobs.find((j) => j.key === jKey);
+    if (!job) {
+      job = { key: jKey, title: jTitle, priority: v.area.job?.priority ?? null, areas: [] };
+      persona.jobs.push(job);
+    }
+    job.areas.push(v);
+  }
+  return personas;
+}
+
+const PRIORITY_STYLES: Record<string, string> = {
+  high: 'bg-rose-50 text-rose-700 border-rose-200',
+  medium: 'bg-amber-50 text-amber-700 border-amber-200',
+  low: 'bg-stone-100 text-stone-500 border-stone-200',
+};
+
 // Edited links come back from the form without a health status; until Phase 5
 // reconciles them we treat every human-supplied anchor as healthy.
 function toLinks(links: NonNullable<IntentEditPayload['links']>): IntentLink[] {
@@ -367,6 +417,8 @@ export function IntentSection({ projectId }: IntentSectionProps) {
       .filter((x) => x.statements.length > 0);
   }, [areas, filter]);
 
+  const personaGroups = useMemo(() => groupByPersonaJob(visibleAreas), [visibleAreas]);
+
   if (loading && areas.length === 0) {
     return <div className="text-sm text-stone-500">Loading intent…</div>;
   }
@@ -515,60 +567,71 @@ export function IntentSection({ projectId }: IntentSectionProps) {
           }
         />
       ) : (
-        <div className="space-y-3">
-          {visibleAreas.map(({ area, statements }) => {
-            const key = areaKey(area);
-            const pending = area.statements.filter((s) => s.status === 'candidate').length;
-            const confirmed = area.statements.filter((s) => s.status === 'confirmed').length;
-            const subtitle = `${pending} to review · ${confirmed} confirmed`;
-            return (
-              <AreaCollapsible
-                // Key includes the filter so switching filters re-evaluates the
-                // "open when there are pending candidates" default.
-                key={`${filter}-${key}`}
-                title={areaTitle(area)}
-                subtitle={subtitle}
-                defaultOpen={filter === 'candidate' ? pending > 0 : true}
-                action={
-                  filter === 'candidate' && pending > 0 ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => { e.stopPropagation(); void onConfirmArea(key); }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault(); e.stopPropagation(); void onConfirmArea(key);
+        <div className="space-y-6">
+          {personaGroups.map((persona) => (
+            <div key={`${filter}-p-${persona.key}`} className="space-y-3">
+              {persona.name ? <PersonaHeader name={persona.name} emoji={persona.emoji} /> : null}
+              {persona.jobs.map((job) => (
+                <div key={`j-${job.key}`} className={persona.name ? 'space-y-3 sm:pl-3' : 'space-y-3'}>
+                  {job.title ? <JobHeader title={job.title} priority={job.priority} /> : null}
+                  {job.areas.map(({ area, statements }) => {
+                    const key = areaKey(area);
+                    const pending = area.statements.filter((s) => s.status === 'candidate').length;
+                    const confirmed = area.statements.filter((s) => s.status === 'confirmed').length;
+                    const subtitle = `${pending} to review · ${confirmed} confirmed`;
+                    return (
+                      <AreaCollapsible
+                        // Key includes the filter so switching filters re-evaluates the
+                        // "open when there are pending candidates" default.
+                        key={`${filter}-${key}`}
+                        title={areaTitle(area)}
+                        subtitle={subtitle}
+                        summary={area.summary ?? null}
+                        defaultOpen={filter === 'candidate' ? pending > 0 : true}
+                        action={
+                          filter === 'candidate' && pending > 0 ? (
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); void onConfirmArea(key); }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault(); e.stopPropagation(); void onConfirmArea(key);
+                                }
+                              }}
+                              aria-label={`Confirm all ${pending} statements in ${areaTitle(area)}`}
+                              className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                                busyArea === key
+                                  ? 'border-stone-200 text-stone-400'
+                                  : 'border-stone-300 text-stone-700 hover:bg-stone-100 cursor-pointer'
+                              }`}
+                            >
+                              <CheckCheck className="w-3 h-3" />
+                              {busyArea === key ? 'Confirming…' : 'Confirm all'}
+                            </span>
+                          ) : null
                         }
-                      }}
-                      aria-label={`Confirm all ${pending} statements in ${areaTitle(area)}`}
-                      className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
-                        busyArea === key
-                          ? 'border-stone-200 text-stone-400'
-                          : 'border-stone-300 text-stone-700 hover:bg-stone-100 cursor-pointer'
-                      }`}
-                    >
-                      <CheckCheck className="w-3 h-3" />
-                      {busyArea === key ? 'Confirming…' : 'Confirm all'}
-                    </span>
-                  ) : null
-                }
-              >
-                <div className="space-y-3" aria-busy={busyId !== null || busyArea === key}>
-                  {statements.map((s) => (
-                    <IntentStatementCard
-                      key={s.id}
-                      statement={s}
-                      busy={busyId === s.id || busyArea === key}
-                      showLinkHealth
-                      onAccept={onAccept}
-                      onReject={onReject}
-                      onEdit={onEdit}
-                    />
-                  ))}
+                      >
+                        <div className="space-y-3" aria-busy={busyId !== null || busyArea === key}>
+                          {statements.map((s) => (
+                            <IntentStatementCard
+                              key={s.id}
+                              statement={s}
+                              busy={busyId === s.id || busyArea === key}
+                              showLinkHealth
+                              onAccept={onAccept}
+                              onReject={onReject}
+                              onEdit={onEdit}
+                            />
+                          ))}
+                        </div>
+                      </AreaCollapsible>
+                    );
+                  })}
                 </div>
-              </AreaCollapsible>
-            );
-          })}
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
@@ -752,10 +815,11 @@ function TriageRow({
 // Local collapsible matching ContextSection's pattern, extended with an
 // optional right-aligned `action` slot for the per-area "Confirm all" control.
 function AreaCollapsible({
-  title, subtitle, defaultOpen = false, action, children,
+  title, subtitle, summary, defaultOpen = false, action, children,
 }: {
   title: string;
   subtitle?: string;
+  summary?: string | null;
   defaultOpen?: boolean;
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -763,26 +827,64 @@ function AreaCollapsible({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-      <div className="w-full px-5 py-3.5 flex items-center gap-3 hover:bg-stone-50 transition-colors">
+      <div className="w-full px-5 py-3.5 flex items-start gap-3 hover:bg-stone-50 transition-colors">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex items-center gap-3 text-left flex-1 min-w-0"
+          className="flex items-start gap-3 text-left flex-1 min-w-0"
         >
           {open ? (
-            <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0" />
+            <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0 mt-0.5" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0 mt-0.5" />
           )}
-          <span className="text-sm font-semibold text-stone-900">{title}</span>
-          {subtitle ? (
-            <span className="text-xs text-stone-500 truncate">{subtitle}</span>
-          ) : null}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-stone-900">{title}</span>
+              {subtitle ? (
+                <span className="text-xs text-stone-500 truncate">{subtitle}</span>
+              ) : null}
+            </span>
+            {summary ? (
+              <span className="block text-xs text-stone-500 mt-0.5 leading-snug">{summary}</span>
+            ) : null}
+          </span>
         </button>
         {action ? <div className="flex-shrink-0">{action}</div> : null}
       </div>
       {open ? <div className="px-5 pb-5">{children}</div> : null}
+    </div>
+  );
+}
+
+// Persona section header for the plan hierarchy.
+function PersonaHeader({ name, emoji }: { name: string; emoji: string | null }) {
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <span className="text-lg leading-none" aria-hidden>{emoji || '\u{1F464}'}</span>
+      <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">{name}</h4>
+    </div>
+  );
+}
+
+// Job-to-be-done sub-header, with an optional priority pill.
+function JobHeader({
+  title, priority,
+}: { title: string; priority: 'high' | 'medium' | 'low' | null }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <Target className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" aria-hidden />
+      <span className="text-sm font-semibold text-stone-800 v2-font-serif">{title}</span>
+      {priority ? (
+        <span
+          className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium ${
+            PRIORITY_STYLES[priority] || PRIORITY_STYLES.low
+          }`}
+        >
+          {priority}
+        </span>
+      ) : null}
     </div>
   );
 }

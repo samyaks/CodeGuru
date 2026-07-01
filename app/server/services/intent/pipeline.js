@@ -11,7 +11,7 @@
 // individually non-fatal: a failure logs and the pipeline resolves.
 
 const { bootstrapIntent } = require('./bootstrap');
-const { runGrouping } = require('./grouping');
+const { runFeatureSynthesis } = require('./features');
 const { runLinkReconciliation } = require('./reconcile-runner');
 const { runSatisfactionRecheck } = require('./satisfaction');
 
@@ -31,13 +31,14 @@ async function runIntentPipeline(projectId, codebaseModel) {
     console.error(`[intent.pipeline] bootstrap failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
-  // Stage 1b: assign coarse, product-level group labels so the Context tab
-  // shows a handful of meaningful areas instead of dozens of file-named ones.
+  // Stage 1b: synthesize features (persona + job-to-be-done + summary) over the
+  // statements and set each statement's group_label, so the Context tab reads
+  // like a plan instead of dozens of file-named buckets.
   let grouping = null;
   try {
-    grouping = await runGrouping(projectId, codebaseModel);
+    grouping = await runFeatureSynthesis(projectId, codebaseModel);
   } catch (err) {
-    console.error(`[intent.pipeline] grouping failed for ${projectId} (non-fatal): ${err.message}`);
+    console.error(`[intent.pipeline] feature synthesis failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
   // Stage 2: reconcile existing links against the fresh anchors (self-heal

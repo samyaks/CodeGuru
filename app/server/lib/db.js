@@ -2228,6 +2228,65 @@ const claims = {
   },
 };
 
+// ── Intent features (Takeoff intent substrate — JTBD roll-up) ──────
+//
+// A synthesized feature groups statements (via label = group_label) under a
+// persona / job-to-be-done and carries a one-line summary + priority. Fully
+// derived: services/intent/features.js regenerates the whole set per analysis,
+// so writes go through replaceForProject (wipe + insert) rather than upserts.
+// See migration 022_intent_features.sql.
+
+const intentFeatures = {
+  // Replace the entire feature set for a project in one transaction. `features`
+  // is an array of { label, summary, personaName, personaEmoji, jobTitle,
+  // priority, jobId }. Returns the number of rows inserted.
+  async replaceForProject(projectId, features) {
+    const rows = Array.isArray(features) ? features : [];
+    let inserted = 0;
+    const now = new Date().toISOString();
+    await withTransaction(async (client) => {
+      await client.query('DELETE FROM intent_features WHERE project_id = $1', [projectId]);
+      let order = 0;
+      for (const f of rows) {
+        if (!f || typeof f.label !== 'string' || f.label.length === 0) continue;
+        const priority = ['high', 'medium', 'low'].includes(f.priority) ? f.priority : null;
+        await client.query(
+          `INSERT INTO intent_features
+            (id, project_id, label, summary, persona_name, persona_emoji,
+             job_title, priority, job_id, sort_order, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+            ON CONFLICT (project_id, label) DO NOTHING`,
+          [
+            crypto.randomUUID(),
+            projectId,
+            f.label,
+            f.summary ?? null,
+            f.personaName ?? null,
+            f.personaEmoji ?? null,
+            f.jobTitle ?? null,
+            priority,
+            f.jobId ?? null,
+            order,
+            now,
+          ]
+        );
+        order += 1;
+        inserted += 1;
+      }
+    });
+    return inserted;
+  },
+
+  async findByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM intent_features WHERE project_id = $1
+        ORDER BY sort_order ASC, label ASC`,
+      [projectId]
+    );
+    return rows;
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -2236,5 +2295,5 @@ module.exports = {
   commitReviews,
   productMap,
   shippedItems, webhookEvents, securityShares,
-  intentStatements, claims,
+  intentStatements, claims, intentFeatures,
 };

@@ -37,18 +37,44 @@ function toStatement(row) {
   };
 }
 
+// Turn intent_features DB rows (snake_case) into a label -> metadata lookup for
+// enriching area groups with the synthesized persona / job-to-be-done spine.
+function featureIndex(features) {
+  const idx = new Map();
+  for (const f of Array.isArray(features) ? features : []) {
+    if (!f || typeof f.label !== 'string') continue;
+    idx.set(f.label, {
+      summary: f.summary ?? null,
+      persona: f.persona_name ? { name: f.persona_name, emoji: f.persona_emoji ?? null } : null,
+      job: f.job_title ? { title: f.job_title, priority: f.priority ?? null } : null,
+      priority: f.priority ?? null,
+      sortOrder: typeof f.sort_order === 'number' ? f.sort_order : null,
+    });
+  }
+  return idx;
+}
+
 // Group mapped statements into the IntentListResponse shape. Grouping prefers
-// the semantic `groupLabel` (services/intent/grouping.js) and falls back to the
-// path-derived `featureArea` when a statement hasn't been grouped yet. `areas`
-// are sorted alphabetically with the null group (uncategorized) pinned last;
-// per-area and top-level counts drive the UI's review-progress display.
-function groupByArea(statements) {
+// the semantic `groupLabel` (= feature title, services/intent/features.js) and
+// falls back to the path-derived `featureArea` when a statement hasn't been
+// grouped yet. When `features` are supplied, each area carries its synthesized
+// summary + persona + job so the UI can render a Persona -> Job -> Feature plan.
+// `areas` are sorted by feature sort_order (falling back to alphabetical), with
+// the null group (uncategorized) pinned last; counts drive review progress.
+function groupByArea(statements, features = []) {
+  const featureMeta = featureIndex(features);
   const byArea = new Map();
   for (const s of statements) {
     const key = s.groupLabel ?? s.featureArea ?? null;
     if (!byArea.has(key)) {
+      const meta = key != null ? featureMeta.get(key) : null;
       byArea.set(key, {
         featureArea: key,
+        summary: meta?.summary ?? null,
+        persona: meta?.persona ?? null,
+        job: meta?.job ?? null,
+        priority: meta?.priority ?? null,
+        sortOrder: meta?.sortOrder ?? null,
         statements: [],
         candidateCount: 0,
         confirmedCount: 0,
@@ -65,6 +91,12 @@ function groupByArea(statements) {
   const areas = [...byArea.values()].sort((a, b) => {
     if (a.featureArea === null) return 1;
     if (b.featureArea === null) return -1;
+    // Prefer the synthesized feature order; fall back to alphabetical.
+    if (a.sortOrder != null && b.sortOrder != null && a.sortOrder !== b.sortOrder) {
+      return a.sortOrder - b.sortOrder;
+    }
+    if (a.sortOrder != null && b.sortOrder == null) return -1;
+    if (a.sortOrder == null && b.sortOrder != null) return 1;
     return a.featureArea.localeCompare(b.featureArea);
   });
 

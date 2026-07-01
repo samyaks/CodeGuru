@@ -69,3 +69,49 @@ test('groupByArea groups, counts, sorts and totals', () => {
   assert.strictEqual(auth.rejectedCount, 0);
   assert.strictEqual(auth.statements.length, 2);
 });
+
+test('groupByArea groups by group_label, attaches feature metadata, sorts by sort_order', () => {
+  const statements = [
+    row({ id: 'a', group_label: 'Repo Analysis', status: 'candidate' }),
+    row({ id: 'b', group_label: 'Authentication', status: 'candidate' }),
+  ].map(toStatement);
+
+  const features = [
+    {
+      label: 'Authentication',
+      summary: 'Sign in and access control',
+      persona_name: 'Developer',
+      persona_emoji: '\u{1F9D1}',
+      job_title: 'Sign in securely',
+      priority: 'high',
+      sort_order: 0,
+    },
+    {
+      label: 'Repo Analysis',
+      summary: 'Analyze a repository',
+      persona_name: 'Developer',
+      persona_emoji: '\u{1F9D1}',
+      job_title: 'Understand a codebase',
+      priority: 'medium',
+      sort_order: 1,
+    },
+  ];
+
+  const res = groupByArea(statements, features);
+  // Ordered by feature sort_order, not alphabetically.
+  assert.deepStrictEqual(res.areas.map((a) => a.featureArea), ['Authentication', 'Repo Analysis']);
+
+  const auth = res.areas[0];
+  assert.strictEqual(auth.summary, 'Sign in and access control');
+  assert.deepStrictEqual(auth.persona, { name: 'Developer', emoji: '\u{1F9D1}' });
+  assert.deepStrictEqual(auth.job, { title: 'Sign in securely', priority: 'high' });
+  assert.strictEqual(auth.priority, 'high');
+});
+
+test('groupByArea leaves metadata null when no feature matches', () => {
+  const statements = [row({ id: 'a', group_label: 'Orphan', status: 'candidate' })].map(toStatement);
+  const res = groupByArea(statements, []);
+  assert.strictEqual(res.areas[0].summary, null);
+  assert.strictEqual(res.areas[0].persona, null);
+  assert.strictEqual(res.areas[0].job, null);
+});
