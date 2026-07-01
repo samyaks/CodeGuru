@@ -9,11 +9,14 @@ import type { IntentListResponse } from '../../services/intentApi';
 // keep them in sync if the contract changes.
 //
 // Notes on the fixture's shape:
-//   - `satisfied` is null everywhere (Phase 6 populates it) so the satisfaction
-//     badge stays hidden.
-//   - `links[].linkStatus` is mostly 'healthy'; one 'needs_relink' and one
-//     'broken' link exist so the (optional) link-health decoration is visible
-//     during development without pretending Phase 5 has run.
+//   - `satisfied` is null on most statements (Phase 6 populates it), but one
+//     confirmed statement carries `satisfied: false` so the "Drifted" badge is
+//     visible during development.
+//   - `links[].linkStatus` is mostly 'healthy'; one 'needs_relink' (with a
+//     `suggestedSymbol`) and one 'broken' link exist so the link-health
+//     decoration is visible during development without pretending Phase 5 has
+//     run. (The triage drawer / drift banner ride on separate endpoints that
+//     501 on the mock, so they stay empty here by design.)
 
 const now = '2026-06-28T18:04:00.000Z';
 
@@ -70,8 +73,8 @@ export const INTENT_MOCK: IntentListResponse = {
           links: [
             { filePath: 'app/server/middleware/requireAuth.js', symbol: 'requireAuth', linkStatus: 'healthy' },
           ],
-          satisfied: null,
-          lastCheckedAt: null,
+          satisfied: false,
+          lastCheckedAt: now,
           createdAt: now,
           updatedAt: now,
         },

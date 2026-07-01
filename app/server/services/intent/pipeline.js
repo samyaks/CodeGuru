@@ -11,13 +11,15 @@
 // individually non-fatal: a failure logs and the pipeline resolves.
 
 const { bootstrapIntent } = require('./bootstrap');
+const { runLinkReconciliation } = require('./reconcile-runner');
+const { runSatisfactionRecheck } = require('./satisfaction');
 
 /**
  * Run the intent substrate stages for a project after analysis.
  * @param {string} projectId - deployments.id
  * @param {object} codebaseModel - the model returned by analyzeRepo/analyzeFromFiles,
  *   carrying `structureAnchors` (Phase 2) and the in-memory `fileContents` map.
- * @returns {Promise<{ ran: boolean, bootstrap?: object }>}
+ * @returns {Promise<{ ran: boolean, bootstrap?: object, reconcile?: object, satisfaction?: object }>}
  */
 async function runIntentPipeline(projectId, codebaseModel) {
   // Stage 1: bootstrap candidate intent statements from structure anchors.
@@ -28,7 +30,25 @@ async function runIntentPipeline(projectId, codebaseModel) {
     console.error(`[intent.pipeline] bootstrap failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
-  return { ran: true, bootstrap };
+  // Stage 2: reconcile existing links against the fresh anchors (self-heal
+  // moves, flag renames/deletions). Persists link health for the triage view.
+  let reconcile = null;
+  try {
+    reconcile = await runLinkReconciliation(projectId, codebaseModel);
+  } catch (err) {
+    console.error(`[intent.pipeline] link reconciliation failed for ${projectId} (non-fatal): ${err.message}`);
+  }
+
+  // Stage 3: two-tier satisfaction re-check for confirmed statements (free hash
+  // compare first; bounded LLM only where linked code changed).
+  let satisfaction = null;
+  try {
+    satisfaction = await runSatisfactionRecheck(projectId);
+  } catch (err) {
+    console.error(`[intent.pipeline] satisfaction recheck failed for ${projectId} (non-fatal): ${err.message}`);
+  }
+
+  return { ran: true, bootstrap, reconcile, satisfaction };
 }
 
 module.exports = { runIntentPipeline };

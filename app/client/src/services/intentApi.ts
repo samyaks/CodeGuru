@@ -75,6 +75,35 @@ export interface IntentEditPayload {
   links?: Array<{ filePath: string; symbol: string | null }>;
 }
 
+/** Identifies a specific link on a statement by its current (filePath, symbol). */
+export interface IntentLinkRef {
+  filePath: string;
+  symbol: string | null;
+}
+
+/** Payload to reconcile a needs_relink link. Omit newSymbol/newFilePath to
+ *  accept the reconciler's suggestedSymbol. */
+export interface IntentRelinkPayload extends IntentLinkRef {
+  newSymbol?: string | null;
+  newFilePath?: string;
+}
+
+/** A gap synthesized (Phase 6) from a confirmed statement whose linked code no
+ *  longer satisfies it. Computed fresh on read — never stored. `id` is
+ *  `intent-<statementId>` so the Gaps surface can route it distinctly. */
+export interface IntentGap {
+  id: string;
+  statementId: string;
+  title: string;
+  description: string;
+  kind: IntentKind;
+  featureArea: string | null;
+  links: IntentLink[];
+  /** Why it surfaced: 'unsatisfied' (code drifted) or 'broken_link'. */
+  reason: 'unsatisfied' | 'broken_link';
+  lastCheckedAt: string | null;
+}
+
 // ── Client functions (Phase 4/4b/5 implement the backends) ────────
 
 export async function fetchIntent(
@@ -154,4 +183,48 @@ export async function fetchIntentTriage(projectId: string): Promise<IntentTriage
   const res = await authFetch(`${API_BASE}/projects/${projectId}/intent/triage`);
   const data = await handleApiResponse<{ items: IntentTriageItem[] }>(res);
   return data.items ?? [];
+}
+
+/** Apply a relink (Phase 5): repoint a needs_relink link at a real symbol. */
+export async function applyRelink(
+  projectId: string,
+  statementId: string,
+  payload: IntentRelinkPayload,
+): Promise<IntentStatement> {
+  const res = await authFetch(
+    `${API_BASE}/projects/${projectId}/intent/${statementId}/relink`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await handleApiResponse<{ statement: IntentStatement }>(res);
+  return data.statement;
+}
+
+/** Confirm a link is genuinely broken (Phase 5): the code it described is gone. */
+export async function markLinkBroken(
+  projectId: string,
+  statementId: string,
+  link: IntentLinkRef,
+): Promise<IntentStatement> {
+  const res = await authFetch(
+    `${API_BASE}/projects/${projectId}/intent/${statementId}/mark-broken`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(link),
+    },
+  );
+  const data = await handleApiResponse<{ statement: IntentStatement }>(res);
+  return data.statement;
+}
+
+/** Intent gaps (Phase 6): confirmed statements whose code drifted out of
+ *  satisfaction, computed fresh on read. */
+export async function fetchIntentGaps(projectId: string): Promise<IntentGap[]> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/intent/gaps`);
+  const data = await handleApiResponse<{ gaps: IntentGap[] }>(res);
+  return data.gaps ?? [];
 }

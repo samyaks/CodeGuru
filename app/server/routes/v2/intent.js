@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const express = require('express');
 const { deployments, intentStatements, analysisFiles } = require('../../lib/db');
 const { AppError } = require('../../lib/app-error');
@@ -7,6 +6,8 @@ const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
 const { toStatement, groupByArea } = require('../../services/intent/intent-mapper');
 const { buildLivingSpec } = require('../../services/intent/spec-generator');
+const { hashLinkedFiles } = require('../../services/intent/satisfaction');
+const { synthesizeIntentGaps } = require('../../services/intent/intent-gaps');
 
 // Takeoff intent substrate router (Phase 4/4b/5 fill in the handlers).
 //
@@ -43,47 +44,16 @@ async function loadProjectAndAuthorize(req) {
   return project;
 }
 
-// Placeholder until the owning phase implements the handler. Keeps the route
-// surface (and thus the frontend contract) stable during the multi-agent build.
-function notImplemented(feature) {
-  return asyncHandler(async (req) => {
-    await loadProjectAndAuthorize(req);
-    throw new AppError(`${feature} is not implemented yet`, 501, 'NOT_IMPLEMENTED');
-  });
-}
-
 const VALID_KINDS = new Set(['behavior', 'constraint', 'non_goal']);
 
 // Compute the satisfaction baseline hash for a statement: sha256 over the
-// CURRENT contents of its linked files. Links may point at the same file
-// multiple times (different symbols), so we dedupe by file_path and hash each
-// file's content once, in stable (sorted) order. For Takeoff projects the
-// analysis id equals the project id. If no linked content is available
-// (unlinked statement, or files not captured), returns null — a null baseline
-// means "confirmed but nothing to check against yet".
+// CURRENT contents of its linked files. For Takeoff projects the analysis id
+// equals the project id. Delegates the hashing to services/intent/satisfaction
+// so confirm (baseline) and the Phase 6 re-check hash on an identical basis. A
+// null result means "confirmed but nothing to check against yet".
 async function computeBaselineHash(projectId, links) {
-  const paths = [
-    ...new Set(
-      (Array.isArray(links) ? links : [])
-        .map((l) => l && l.file_path)
-        .filter((p) => typeof p === 'string' && p.length > 0)
-    ),
-  ].sort();
-  if (paths.length === 0) return null;
-
   const contents = await analysisFiles.getContentsMap(projectId);
-  const hash = crypto.createHash('sha256');
-  let hashedAny = false;
-  for (const p of paths) {
-    const content = contents[p];
-    if (typeof content !== 'string') continue; // hash over the available subset
-    hash.update(p);
-    hash.update('\0');
-    hash.update(content);
-    hash.update('\0');
-    hashedAny = true;
-  }
-  return hashedAny ? hash.digest('hex') : null;
+  return hashLinkedFiles(contents, links);
 }
 
 // ── Phase 4: list / confirm / edit / reject / restore ─────────────
@@ -193,12 +163,109 @@ router.get('/spec', readLimit, asyncHandler(async (req, res) => {
   res.json({ markdown: buildLivingSpec(confirmed) });
 }));
 
+// Null-safe match of a stored link by its current (file_path, symbol) identity.
+function linkMatches(link, filePath, symbol) {
+  const wantSymbol = symbol === undefined ? null : symbol;
+  return link.file_path === filePath && (link.symbol ?? null) === wantSymbol;
+}
+
+// ── Phase 6: gaps-as-views ─────────────────────────────────────────
+// GET /gaps -> confirmed statements whose linked code has drifted (unsatisfied
+// or broken links), synthesized fresh from the substrate. Never stored.
+router.get('/gaps', readLimit, asyncHandler(async (req, res) => {
+  await loadProjectAndAuthorize(req);
+  const confirmed = await intentStatements.findConfirmedByProjectId(req.params.id);
+  res.json({ gaps: synthesizeIntentGaps(confirmed) });
+}));
+
 // ── Phase 5: link reconciliation triage ───────────────────────────
-// GET /triage -> links needing attention (needs_relink / broken)
-router.get('/triage', readLimit, notImplemented('Link triage list'));
-// POST /:statementId/relink -> apply a suggested relink
-router.post('/:statementId/relink', requireUser, writeLimit, notImplemented('Apply relink'));
-// POST /:statementId/mark-broken -> confirm a link as broken
-router.post('/:statementId/mark-broken', requireUser, writeLimit, notImplemented('Mark link broken'));
+// GET /triage -> every link a human should adjudicate (needs_relink / broken),
+// read straight from persisted link health (set by the pipeline's reconcile
+// stage) so this is a cheap read with no re-analysis.
+router.get('/triage', readLimit, asyncHandler(async (req, res) => {
+  await loadProjectAndAuthorize(req);
+  const rows = await intentStatements.findByProjectId(req.params.id);
+  const items = [];
+  for (const row of rows) {
+    if (row.status === 'rejected') continue;
+    const statement = toStatement(row);
+    for (const link of statement.links) {
+      if (link.linkStatus === 'needs_relink' || link.linkStatus === 'broken') {
+        items.push({
+          statementId: statement.id,
+          statementText: statement.text,
+          featureArea: statement.featureArea,
+          link,
+        });
+      }
+    }
+  }
+  res.json({ items });
+}));
+
+// POST /:statementId/relink -> repoint a needs_relink link at a real symbol.
+// Body: { filePath, symbol, newSymbol?, newFilePath? }. Omit newSymbol to accept
+// the reconciler's suggested_symbol.
+router.post('/:statementId/relink', requireUser, writeLimit, asyncHandler(async (req, res) => {
+  await loadProjectAndAuthorize(req);
+  const { filePath, symbol, newSymbol, newFilePath } = req.body || {};
+  if (typeof filePath !== 'string' || filePath.length === 0) {
+    throw AppError.badRequest('`filePath` is required to identify the link');
+  }
+  if (newFilePath !== undefined && (typeof newFilePath !== 'string' || newFilePath.length === 0)) {
+    throw AppError.badRequest('`newFilePath` must be a non-empty string when provided');
+  }
+
+  const existing = await intentStatements.findById(req.params.statementId, req.params.id);
+  if (!existing) throw AppError.notFound('Statement not found');
+
+  const links = Array.isArray(existing.links) ? existing.links : [];
+  let matched = false;
+  const updatedLinks = links.map((link) => {
+    if (matched || !linkMatches(link, filePath, symbol)) return link;
+    matched = true;
+    // Resolve the target symbol: explicit newSymbol wins, else accept the
+    // reconciler's suggestion, else keep the current symbol.
+    const resolvedSymbol = newSymbol !== undefined
+      ? newSymbol
+      : (link.suggested_symbol ?? link.symbol ?? null);
+    return {
+      file_path: newFilePath || link.file_path,
+      symbol: resolvedSymbol,
+      link_status: 'healthy',
+    };
+  });
+  if (!matched) throw AppError.notFound('Link not found on this statement');
+
+  const updated = await intentStatements.update(req.params.statementId, req.params.id, { links: updatedLinks });
+  if (!updated) throw AppError.notFound('Statement not found');
+  res.json({ statement: toStatement(updated) });
+}));
+
+// POST /:statementId/mark-broken -> confirm a link is genuinely broken.
+// Body: { filePath, symbol }.
+router.post('/:statementId/mark-broken', requireUser, writeLimit, asyncHandler(async (req, res) => {
+  await loadProjectAndAuthorize(req);
+  const { filePath, symbol } = req.body || {};
+  if (typeof filePath !== 'string' || filePath.length === 0) {
+    throw AppError.badRequest('`filePath` is required to identify the link');
+  }
+
+  const existing = await intentStatements.findById(req.params.statementId, req.params.id);
+  if (!existing) throw AppError.notFound('Statement not found');
+
+  const links = Array.isArray(existing.links) ? existing.links : [];
+  let matched = false;
+  const updatedLinks = links.map((link) => {
+    if (matched || !linkMatches(link, filePath, symbol)) return link;
+    matched = true;
+    return { file_path: link.file_path, symbol: link.symbol ?? null, link_status: 'broken' };
+  });
+  if (!matched) throw AppError.notFound('Link not found on this statement');
+
+  const updated = await intentStatements.update(req.params.statementId, req.params.id, { links: updatedLinks });
+  if (!updated) throw AppError.notFound('Statement not found');
+  res.json({ statement: toStatement(updated) });
+}));
 
 module.exports = router;

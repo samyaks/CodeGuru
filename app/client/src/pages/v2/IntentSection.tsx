@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown, ChevronRight, RefreshCw, Target, CheckCheck, Download, Sparkles,
+  Wrench, Unlink, AlertTriangle, X,
 } from 'lucide-react';
 import { EmptyState, ProgressBar } from '../../components/v2';
 import { IntentStatementCard } from '../../components/v2/IntentStatementCard';
 import { INTENT_MOCK } from '../../components/v2/intentMock';
 import {
   fetchIntent, confirmStatement, editStatement, rejectStatement, restoreStatement,
-  fetchIntentSpec,
+  fetchIntentSpec, fetchIntentTriage, applyRelink, markLinkBroken, fetchIntentGaps,
   type IntentListResponse, type IntentAreaGroup, type IntentStatement,
   type IntentEditPayload, type IntentStatus, type IntentLink,
+  type IntentTriageItem, type IntentGap,
 } from '../../services/intentApi';
 
 type Filter = 'candidate' | 'confirmed' | 'rejected';
@@ -32,6 +34,11 @@ function toLinks(links: NonNullable<IntentEditPayload['links']>): IntentLink[] {
   return links.map((l) => ({ filePath: l.filePath, symbol: l.symbol, linkStatus: 'healthy' as const }));
 }
 
+// Uniquely identifies a triage row by the statement + the specific link on it.
+function triageKey(item: IntentTriageItem): string {
+  return `${item.statementId}::${item.link.filePath}::${item.link.symbol ?? ''}`;
+}
+
 export function IntentSection({ projectId }: IntentSectionProps) {
   const [areas, setAreas] = useState<IntentAreaGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +53,14 @@ export function IntentSection({ projectId }: IntentSectionProps) {
   const [usingMock, setUsingMock] = useState(false);
   const usingMockRef = useRef(false);
   usingMockRef.current = usingMock;
+
+  // Phase 5 (link triage) + Phase 6 (drift) surfaces. These ride on separate
+  // endpoints that may 501 independently of the main list, so they get their
+  // own state and degrade to empty rather than taking down the whole section.
+  const [triage, setTriage] = useState<IntentTriageItem[]>([]);
+  const [triageBusyKey, setTriageBusyKey] = useState<string | null>(null);
+  const [gaps, setGaps] = useState<IntentGap[]>([]);
+  const [driftDismissed, setDriftDismissed] = useState(false);
 
   const applyResponse = useCallback((data: IntentListResponse) => {
     setAreas(data.areas);
@@ -74,6 +89,38 @@ export function IntentSection({ projectId }: IntentSectionProps) {
   }, [projectId, applyResponse]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Link-triage list (Phase 5). Guarded so we never call it while on the dev
+  // fixture (the endpoint 501s there); on any handled failure we quietly show
+  // no triage rather than a hard error.
+  const reloadTriage = useCallback(async () => {
+    if (usingMockRef.current) { setTriage([]); return; }
+    try {
+      setTriage(await fetchIntentTriage(projectId));
+    } catch {
+      setTriage([]);
+    }
+  }, [projectId]);
+
+  // Drift gaps (Phase 6). Same degrade-to-empty contract as triage.
+  const reloadGaps = useCallback(async () => {
+    if (usingMockRef.current) { setGaps([]); return; }
+    try {
+      setGaps(await fetchIntentGaps(projectId));
+    } catch {
+      setGaps([]);
+    }
+  }, [projectId]);
+
+  // Fetch the additive surfaces once the main list settles. On the mock
+  // fixture (or a load error) we skip them entirely so a handled 501 doesn't
+  // spam the network tab.
+  useEffect(() => {
+    if (loading || error) return;
+    if (usingMock) { setTriage([]); setGaps([]); return; }
+    void reloadTriage();
+    void reloadGaps();
+  }, [loading, error, usingMock, reloadTriage, reloadGaps]);
 
   useEffect(() => {
     if (!toast) return;
@@ -232,6 +279,67 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     }
   }, [projectId]);
 
+  // Shared optimistic helper for triage rows. We drop the row immediately for a
+  // snappy feel, then reconcile the real statement + triage list on success.
+  // On failure we revert by re-fetching triage — unless we're on the mock, in
+  // which case the endpoint is expected to 501 and the optimistic drop stands.
+  const runTriageAction = useCallback(
+    async (
+      item: IntentTriageItem,
+      apiCall: () => Promise<IntentStatement>,
+      errLabel: string,
+    ) => {
+      const key = triageKey(item);
+      setTriageBusyKey(key);
+      setTriage((prev) => prev.filter((t) => triageKey(t) !== key));
+      try {
+        const updated = await apiCall();
+        replaceStatement(updated);
+        await Promise.all([reloadTriage(), reload()]);
+      } catch (err) {
+        if (!usingMockRef.current) {
+          setToast(`${errLabel}: ${(err as Error).message}`);
+          await reloadTriage();
+        }
+      } finally {
+        setTriageBusyKey(null);
+      }
+    },
+    [replaceStatement, reloadTriage, reload],
+  );
+
+  const onAcceptRelink = useCallback(
+    (item: IntentTriageItem) => runTriageAction(
+      item,
+      // Omit newSymbol/newFilePath to accept the reconciler's suggestion.
+      () => applyRelink(projectId, item.statementId, {
+        filePath: item.link.filePath,
+        symbol: item.link.symbol,
+      }),
+      "Couldn't relink",
+    ),
+    [projectId, runTriageAction],
+  );
+
+  const onMarkBroken = useCallback(
+    (item: IntentTriageItem) => runTriageAction(
+      item,
+      () => markLinkBroken(projectId, item.statementId, {
+        filePath: item.link.filePath,
+        symbol: item.link.symbol,
+      }),
+      "Couldn't mark broken",
+    ),
+    [projectId, runTriageAction],
+  );
+
+  // Broken links have no server-side dismiss; clearing one is a local-only
+  // acknowledgement so the reviewer can hide rows they've already noted.
+  const onDismissTriage = useCallback((item: IntentTriageItem) => {
+    const key = triageKey(item);
+    setTriage((prev) => prev.filter((t) => triageKey(t) !== key));
+  }, []);
+
   const totals = useMemo(() => {
     let total = 0, confirmed = 0, candidates = 0, rejected = 0;
     for (const a of areas) {
@@ -324,6 +432,33 @@ export function IntentSection({ projectId }: IntentSectionProps) {
         <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
           <Sparkles className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
           <span>Preview data — the intent backend isn't implemented yet, so this is a local mock.</span>
+        </div>
+      ) : null}
+
+      {gaps.length > 0 && !driftDismissed ? (
+        <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <span>
+              <span className="font-semibold">{gaps.length}</span> confirmed{' '}
+              {gaps.length === 1 ? 'behavior has' : 'behaviors have'} drifted out of sync with the code.
+            </span>{' '}
+            <button
+              type="button"
+              onClick={() => setFilter('confirmed')}
+              className="font-medium underline underline-offset-2 hover:text-amber-900"
+            >
+              Review confirmed
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDriftDismissed(true)}
+            aria-label="Dismiss drift notice"
+            className="text-amber-500 hover:text-amber-800 transition-colors flex-shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       ) : null}
 
@@ -424,6 +559,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
                       key={s.id}
                       statement={s}
                       busy={busyId === s.id || busyArea === key}
+                      showLinkHealth
                       onAccept={onAccept}
                       onReject={onReject}
                       onEdit={onEdit}
@@ -435,6 +571,30 @@ export function IntentSection({ projectId }: IntentSectionProps) {
           })}
         </div>
       )}
+
+      {/* Link triage (Phase 5): anchors reconciliation flagged as stale or
+          gone. Rendered only when there's something to adjudicate, so a handled
+          501 (or the dev mock) simply hides the surface. */}
+      {triage.length > 0 ? (
+        <AreaCollapsible
+          title="Link health"
+          subtitle={`${triage.length} ${triage.length === 1 ? 'link needs' : 'links need'} attention`}
+          defaultOpen
+        >
+          <div className="space-y-3" aria-busy={triageBusyKey !== null}>
+            {triage.map((item) => (
+              <TriageRow
+                key={triageKey(item)}
+                item={item}
+                busy={triageBusyKey === triageKey(item)}
+                onAcceptRelink={onAcceptRelink}
+                onMarkBroken={onMarkBroken}
+                onDismiss={onDismissTriage}
+              />
+            ))}
+          </div>
+        </AreaCollapsible>
+      ) : null}
 
       {/* Persistent quick-restore drawer, shown while triaging so a mistaken
           reject is one click from coming back. Hidden on the dedicated
@@ -483,6 +643,109 @@ function FilterChip({
     >
       {children} <span className={active ? 'text-stone-300' : 'text-stone-400'}>{count}</span>
     </button>
+  );
+}
+
+// One row in the Link health drawer. `needs_relink` offers Accept relink
+// (repoint at the reconciler's suggestion) or Mark broken; a `broken` link
+// offers Mark broken (confirm) or a local-only Dismiss.
+function TriageRow({
+  item, busy, onAcceptRelink, onMarkBroken, onDismiss,
+}: {
+  item: IntentTriageItem;
+  busy: boolean;
+  onAcceptRelink: (item: IntentTriageItem) => void;
+  onMarkBroken: (item: IntentTriageItem) => void;
+  onDismiss: (item: IntentTriageItem) => void;
+}) {
+  const { link } = item;
+  const isRelink = link.linkStatus === 'needs_relink';
+  const anchor = link.symbol ? `${link.filePath} \u00b7 ${link.symbol}` : link.filePath;
+  return (
+    <div className="border border-stone-200 rounded-lg p-3.5 bg-white">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span
+          className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1 ${
+            isRelink
+              ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-red-50 text-red-600 border-red-200'
+          }`}
+        >
+          {isRelink ? (
+            <AlertTriangle className="w-3 h-3" aria-hidden />
+          ) : (
+            <Unlink className="w-3 h-3" aria-hidden />
+          )}
+          {isRelink ? 'Needs relink' : 'Broken link'}
+        </span>
+        {item.featureArea ? (
+          <span className="text-[10px] uppercase tracking-wider text-stone-400">{item.featureArea}</span>
+        ) : null}
+      </div>
+
+      <p className="text-sm text-stone-800 leading-relaxed v2-font-serif mb-2">{item.statementText}</p>
+
+      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        <code
+          className="text-xs px-2 py-1 rounded border font-mono bg-stone-50 border-stone-200 text-stone-700"
+          title={anchor}
+        >
+          <span className="text-stone-500">{link.filePath}</span>
+          {link.symbol ? <span className="text-stone-400"> · </span> : null}
+          {link.symbol ? <span>{link.symbol}</span> : null}
+        </code>
+        {isRelink && link.suggestedSymbol ? (
+          <span className="text-xs text-amber-700 font-mono">{`\u2192 ${link.suggestedSymbol}`}</span>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-1 flex-wrap">
+        {isRelink ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onAcceptRelink(item)}
+              disabled={busy}
+              aria-label={link.suggestedSymbol ? `Relink to ${link.suggestedSymbol}` : 'Accept relink'}
+              className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              <Wrench className="w-4 h-4" />
+              {link.suggestedSymbol ? `Relink \u2192 ${link.suggestedSymbol}` : 'Accept relink'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onMarkBroken(item)}
+              disabled={busy}
+              aria-label="Mark link broken"
+              className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-red-600 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+            >
+              <Unlink className="w-4 h-4" /> Mark broken
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onMarkBroken(item)}
+              disabled={busy}
+              aria-label="Confirm link broken"
+              className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+            >
+              <Unlink className="w-4 h-4" /> Mark broken
+            </button>
+            <button
+              type="button"
+              onClick={() => onDismiss(item)}
+              disabled={busy}
+              aria-label="Dismiss broken link"
+              className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+            >
+              <X className="w-4 h-4" /> Dismiss
+            </button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

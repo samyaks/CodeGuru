@@ -47,23 +47,39 @@ export interface IntentStatementCardProps {
   className?: string;
 }
 
-function LinkChip({ link, showHealth }: { link: IntentLink; showHealth: boolean }) {
-  const unhealthy = showHealth && link.linkStatus !== 'healthy'
-    ? LINK_HEALTH_META[link.linkStatus]
-    : null;
-  const HealthIcon = unhealthy?.icon;
+// Small pill that sits next to a link chip when reconciliation (Phase 5) has
+// flagged the anchor. `needs_relink` also surfaces the reconciler's suggested
+// symbol inline so the reviewer can see the proposed fix at a glance.
+function LinkHealthBadge({ link }: { link: IntentLink }) {
+  if (link.linkStatus === 'healthy') return null;
+  const meta = LINK_HEALTH_META[link.linkStatus];
+  const HealthIcon = meta.icon;
+  const suggests = link.linkStatus === 'needs_relink' && link.suggestedSymbol;
   return (
-    <code
-      className={`text-xs px-2 py-1 rounded border font-mono inline-flex items-center gap-1 ${
-        unhealthy ? unhealthy.chip : 'bg-stone-50 border-stone-200 text-stone-700'
-      }`}
-      title={unhealthy ? `${anchorLabel(link)} — ${unhealthy.label}${link.suggestedSymbol ? `, suggested: ${link.suggestedSymbol}` : ''}` : anchorLabel(link)}
+    <span
+      className={`text-[10px] font-semibold border rounded-full px-1.5 py-0.5 inline-flex items-center gap-1 ${meta.chip}`}
+      aria-label={`${anchorLabel(link)} — ${meta.label}${suggests ? `, suggested ${link.suggestedSymbol}` : ''}`}
     >
-      {HealthIcon ? <HealthIcon className="w-3 h-3 flex-shrink-0" aria-hidden /> : null}
-      <span className="text-stone-500">{link.filePath}</span>
-      {link.symbol ? <span className="text-stone-400">·</span> : null}
-      {link.symbol ? <span>{link.symbol}</span> : null}
-    </code>
+      <HealthIcon className="w-3 h-3 flex-shrink-0" aria-hidden />
+      {meta.label}
+      {suggests ? <span className="font-mono">{`\u2192 ${link.suggestedSymbol}`}</span> : null}
+    </span>
+  );
+}
+
+function LinkChip({ link, showHealth }: { link: IntentLink; showHealth: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <code
+        className="text-xs px-2 py-1 rounded border font-mono inline-flex items-center gap-1 bg-stone-50 border-stone-200 text-stone-700"
+        title={anchorLabel(link)}
+      >
+        <span className="text-stone-500">{link.filePath}</span>
+        {link.symbol ? <span className="text-stone-400">·</span> : null}
+        {link.symbol ? <span>{link.symbol}</span> : null}
+      </code>
+      {showHealth ? <LinkHealthBadge link={link} /> : null}
+    </span>
   );
 }
 
@@ -121,9 +137,10 @@ export function IntentStatementCard({
     setEditing(false);
   };
 
-  // Satisfaction badge (Phase 6). Hidden entirely until a baseline check
-  // populates `satisfied` — null means "not yet checked".
-  const satisfactionBadge = statement.satisfied === null ? null : statement.satisfied ? (
+  // Satisfaction badge (Phase 6). Only meaningful on confirmed statements, and
+  // hidden entirely until a baseline check populates `satisfied` — null means
+  // "not yet checked".
+  const satisfactionBadge = !isConfirmed || statement.satisfied === null ? null : statement.satisfied ? (
     <span
       className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200"
       title="The code still satisfies this statement"
