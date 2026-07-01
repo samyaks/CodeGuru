@@ -19,6 +19,7 @@ const { computeSecurityScore } = require('../services/security/score');
 const { connectWebhook } = require('../services/github-webhook-manager');
 const productMapSvc = require('../services/product-map');
 const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
+const { runIntentPipeline } = require('../services/intent/pipeline');
 const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
@@ -748,6 +749,15 @@ async function runPipeline(id, codebaseModel, userId, label) {
     }).catch((err) => {
       console.error(`[takeoff] gap-job linker for ${id} failed (non-fatal):`, err.message);
       tStage5.end({ ok: false, error: err.message });
+    });
+  });
+
+  // Intent substrate stages (bootstrap / reconcile / satisfaction). Runs
+  // non-blocking after the pipeline so it never delays the user-facing
+  // readiness/gaps result. No-op until Phase 3 lands (foundation hook).
+  setImmediate(() => {
+    runIntentPipeline(id, codebaseModel).catch((err) => {
+      console.error(`[takeoff] intent pipeline for ${id} failed (non-fatal):`, err.message);
     });
   });
 

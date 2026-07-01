@@ -1970,6 +1970,166 @@ const webhookEvents = {
   },
 };
 
+// ── Intent statements (Takeoff intent substrate) ──────────────────
+//
+// The first-class "what this app is meant to do" object. Gaps and
+// satisfaction are computed as views over confirmed statements (see
+// services/v2/gap-mapper.js synthesizeMapGaps and Phase 6). Code links
+// live inline as a JSONB array — they're re-derived deterministically on
+// every analysis, so they're a cache, not precious relational data. Only
+// human decisions (confirm/edit/reject) are precious; everything else is
+// rebuildable. See migration 019_intent_substrate.sql.
+
+// Columns the generic `update()` may set. Excludes id/project_id/created_at.
+const INTENT_STATEMENTS_ALLOWED = new Set([
+  'text', 'kind', 'status', 'source', 'feature_area',
+  'links', 'code_hash', 'satisfied', 'last_checked_at', 'updated_at',
+]);
+const INTENT_STATEMENTS_JSONB = new Set(['links']);
+const INTENT_STATEMENTS_BOOL = new Set(['satisfied']);
+
+const intentStatements = {
+  async createBatch(items) {
+    if (!items || items.length === 0) return;
+    await withTransaction(async (client) => {
+      for (const row of items) {
+        await client.query(
+          `INSERT INTO intent_statements
+            (id, project_id, text, kind, status, source, feature_area, links,
+             code_hash, satisfied, last_checked_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ON CONFLICT (id) DO NOTHING`,
+          [
+            row.id || crypto.randomUUID(),
+            row.project_id,
+            row.text,
+            row.kind,
+            row.status || 'candidate',
+            row.source || 'inferred',
+            row.feature_area ?? null,
+            toJsonb(row.links ?? []),
+            row.code_hash ?? null,
+            toBool(row.satisfied),
+            row.last_checked_at ?? null,
+            row.created_at || new Date().toISOString(),
+            row.updated_at ?? null,
+          ]
+        );
+      }
+    });
+  },
+
+  async findByProjectId(projectId, { status, featureArea } = {}) {
+    const params = [projectId];
+    let where = 'project_id = $1';
+    if (status) {
+      params.push(status);
+      where += ` AND status = $${params.length}`;
+    }
+    if (featureArea) {
+      params.push(featureArea);
+      where += ` AND feature_area = $${params.length}`;
+    }
+    const { rows } = await getDb().query(
+      `SELECT * FROM intent_statements WHERE ${where}
+        ORDER BY feature_area NULLS LAST, created_at ASC`,
+      params
+    );
+    return rows;
+  },
+
+  async findConfirmedByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM intent_statements
+        WHERE project_id = $1 AND status = 'confirmed'
+        ORDER BY feature_area NULLS LAST, created_at ASC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  async findById(id, projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM intent_statements WHERE id = $1 AND project_id = $2',
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  // Generic field update, project-scoped, returns the updated row.
+  async update(id, projectId, fields) {
+    const sets = [];
+    const params = [];
+    for (const [key, value] of Object.entries(fields)) {
+      if (!INTENT_STATEMENTS_ALLOWED.has(key)) {
+        console.warn(`[db] intentStatements.update: ignoring unknown column "${key}"`);
+        continue;
+      }
+      // Skip undefined so partial updates never accidentally null a column
+      // (e.g. the NOT NULL `text`). Callers pass explicit null to clear.
+      if (value === undefined) continue;
+      let v = value;
+      if (INTENT_STATEMENTS_JSONB.has(key)) v = toJsonb(value);
+      else if (INTENT_STATEMENTS_BOOL.has(key)) v = toBool(value);
+      params.push(v);
+      sets.push(`${key} = $${params.length}`);
+    }
+    if (sets.length === 0) return this.findById(id, projectId);
+    // Always bump updated_at unless the caller set it explicitly.
+    if (!('updated_at' in fields)) {
+      params.push(new Date().toISOString());
+      sets.push(`updated_at = $${params.length}`);
+    }
+    params.push(id);
+    params.push(projectId);
+    const { rows } = await getDb().query(
+      `UPDATE intent_statements SET ${sets.join(', ')}
+        WHERE id = $${params.length - 1} AND project_id = $${params.length}
+        RETURNING *`,
+      params
+    );
+    return rows[0] || null;
+  },
+
+  async setStatus(id, projectId, status) {
+    return this.update(id, projectId, { status });
+  },
+
+  // Freeze / refresh the satisfaction baseline (Phase 4 confirm, Phase 6 recheck).
+  async setSatisfaction(id, projectId, { codeHash, satisfied, lastCheckedAt } = {}) {
+    return this.update(id, projectId, {
+      code_hash: codeHash ?? null,
+      satisfied,
+      last_checked_at: lastCheckedAt ?? new Date().toISOString(),
+    });
+  },
+
+  // Bootstrap idempotency: replace only the machine-proposed candidates for
+  // an area, leaving confirmed and rejected (human decisions) untouched.
+  async deleteCandidatesByArea(projectId, featureArea) {
+    if (featureArea === null || featureArea === undefined) {
+      await getDb().query(
+        `DELETE FROM intent_statements
+          WHERE project_id = $1 AND status = 'candidate' AND feature_area IS NULL`,
+        [projectId]
+      );
+      return;
+    }
+    await getDb().query(
+      `DELETE FROM intent_statements
+        WHERE project_id = $1 AND status = 'candidate' AND feature_area = $2`,
+      [projectId, featureArea]
+    );
+  },
+
+  async delete(id, projectId) {
+    await getDb().query(
+      'DELETE FROM intent_statements WHERE id = $1 AND project_id = $2',
+      [id, projectId]
+    );
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -1978,4 +2138,5 @@ module.exports = {
   commitReviews,
   productMap,
   shippedItems, webhookEvents, securityShares,
+  intentStatements,
 };

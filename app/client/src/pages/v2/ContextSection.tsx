@@ -14,6 +14,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { MetadataLabel, EmptyState, ProgressBar, ReanalyzeModal } from '../../components/v2';
+import IntentSection from './IntentSection';
 import {
   fetchProjectDetail,
   fetchBuildStory,
@@ -485,6 +486,8 @@ export function ContextSection({ projectId }: ContextSectionProps) {
 
   return (
     <div className="space-y-6">
+      <IntentSection projectId={projectId} />
+
       <div>
         <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What you've built</h3>
         <p className="text-stone-600 text-sm leading-relaxed">

@@ -45,3 +45,6 @@ Postgres, not ANSI SQL.
 - `003_fk_indexes.sql` — indexes on FK / hot-path columns.
 - `004_schema_fixes.sql` — `features_summary` JSONB→TEXT, tree-rollup defaults,
   chunk `UNIQUE(file_id, ordinal)` constraint.
+- `019_intent_substrate.sql` — `intent_statements` table (Takeoff intent
+  substrate). Statements are the first-class "what this app is meant to do"
+  object; gaps/satisfaction are views over them. Code links inline as JSONB.

@@ -4,6 +4,18 @@ const { analyses, analysisFiles, analysisEvents } = require('../lib/db');
 const { estimateTokens, extractSkeleton, inferLanguage, computeDepth } = require('../lib/capture-utils');
 const { runAllDetectors } = require('./capability-detectors');
 const { computeImportGraph } = require('./import-graph');
+const { extractStructureAnchors } = require('./structure-extractor');
+
+// Deterministic structure extraction. Wrapped so a parser failure can never
+// break an analysis — a missing/empty anchor list is always acceptable.
+function safeStructureAnchors(fileContents, fileTree) {
+  try {
+    return extractStructureAnchors(fileContents, fileTree);
+  } catch (err) {
+    console.error('[analyzer] extractStructureAnchors failed:', err?.message || err);
+    return [];
+  }
+}
 
 const MAX_FILES_TO_READ = parseInt(process.env.MAX_FILES_TO_READ, 10) || 150;
 const CAPTURE_FULL_TIER_LIMIT = parseInt(process.env.CAPTURE_FULL_TIER_LIMIT, 10) || 50;
@@ -399,6 +411,8 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
     }), 'analysisEvents.create graph.computed');
   }
 
+  const structureAnchors = safeStructureAnchors(fileContents, allFiles.map((f) => f.path));
+
   send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });
 
   const stack = detectStack(allFiles, fileContents);
@@ -442,6 +456,7 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
     existingContext,
     fileContents,
     fileTree: allFiles.map((f) => f.path),
+    structureAnchors,
   };
 }
 
@@ -806,6 +821,8 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
     }), 'analysisEvents.create graph.computed');
   }
 
+  const structureAnchors = safeStructureAnchors(fileContents, allFiles.map((f) => f.path));
+
   send({ phase: 'analyzing', message: 'Detecting tech stack and capabilities...' });
 
   const stack = detectStack(allFiles, fileContents);
@@ -849,6 +866,7 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
     existingContext,
     fileContents,
     fileTree: allFiles.map(f => f.path),
+    structureAnchors,
   };
 }
 
