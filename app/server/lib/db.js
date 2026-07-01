@@ -2130,6 +2130,79 @@ const intentStatements = {
   },
 };
 
+// ── Claims (Takeoff intent substrate — Phase 7 coordination) ──────
+//
+// A claim signals "someone (human or agent) is working on this intent or
+// area". Consumed only by the MCP tools (claim_intent / get_my_gaps). A claim
+// targets either a single statement_id OR a whole feature_area. See migration
+// 020_claims.sql.
+
+const claims = {
+  async create({ projectId, statementId = null, featureArea = null, claimantType, claimantId }) {
+    const id = crypto.randomUUID();
+    const { rows } = await getDb().query(
+      `INSERT INTO claims
+        (id, project_id, statement_id, feature_area, claimant_type, claimant_id, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'active', now())
+        RETURNING *`,
+      [id, projectId, statementId, featureArea, claimantType, claimantId]
+    );
+    return rows[0];
+  },
+
+  // The single active claim on a specific statement, if any.
+  async findActiveByStatement(projectId, statementId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM claims
+        WHERE project_id = $1 AND statement_id = $2 AND status = 'active'
+        LIMIT 1`,
+      [projectId, statementId]
+    );
+    return rows[0] || null;
+  },
+
+  // The single active area-wide claim (statement_id IS NULL), if any.
+  async findActiveByArea(projectId, featureArea) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM claims
+        WHERE project_id = $1 AND feature_area = $2
+          AND statement_id IS NULL AND status = 'active'
+        LIMIT 1`,
+      [projectId, featureArea]
+    );
+    return rows[0] || null;
+  },
+
+  async findActiveByClaimant(projectId, claimantId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM claims
+        WHERE project_id = $1 AND claimant_id = $2 AND status = 'active'
+        ORDER BY created_at ASC`,
+      [projectId, claimantId]
+    );
+    return rows;
+  },
+
+  async findActiveByProject(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM claims WHERE project_id = $1 AND status = 'active'
+        ORDER BY created_at ASC`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  async release(id, projectId) {
+    const { rows } = await getDb().query(
+      `UPDATE claims SET status = 'released', released_at = now()
+        WHERE id = $1 AND project_id = $2 AND status = 'active'
+        RETURNING *`,
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -2138,5 +2211,5 @@ module.exports = {
   commitReviews,
   productMap,
   shippedItems, webhookEvents, securityShares,
-  intentStatements,
+  intentStatements, claims,
 };

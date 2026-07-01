@@ -48,3 +48,7 @@ Postgres, not ANSI SQL.
 - `019_intent_substrate.sql` — `intent_statements` table (Takeoff intent
   substrate). Statements are the first-class "what this app is meant to do"
   object; gaps/satisfaction are views over them. Code links inline as JSONB.
+- `020_claims.sql` — `claims` table (Takeoff Phase 7 coordination). Humans/
+  agents claim a statement or feature area; consumed by the MCP tools
+  (`claim_intent`, `get_my_gaps`). Partial unique indexes enforce one active
+  claim per statement/area.
