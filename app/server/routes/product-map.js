@@ -9,6 +9,7 @@ const {
   getScores,
   simulateForModule,
   getMapByProject,
+  loadInvariantCountsByJob,
 } = require('../services/product-map');
 const { extractProductIntent } = require('../services/map-extractor');
 
@@ -93,7 +94,7 @@ function mapRowToApi(map) {
   };
 }
 
-function formatFullMap(full) {
+function formatFullMap(full, invariantCounts = {}) {
   if (!full) return null;
   const { map, personas, jobs, entities, edges } = full;
   return {
@@ -115,6 +116,7 @@ function formatFullMap(full) {
       weight: j.weight,
       confirmed: j.confirmed,
       sortOrder: j.sort_order,
+      invariantCounts: invariantCounts[j.id] || { total: 0, candidates: 0, confirmed: 0, broken: 0 },
     })),
     entities: (entities || []).map((e) => ({
       id: e.id,
@@ -314,7 +316,8 @@ router.get(
       if (!full) {
         return res.json({ map: null, message: 'No product map for this project yet' });
       }
-      res.json(formatFullMap(full));
+      const invariantCounts = await loadInvariantCountsByJob(projectId).catch(() => ({}));
+      res.json(formatFullMap(full, invariantCounts));
     } catch (err) {
       if (err.statusCode) {
         return res.status(err.statusCode).json({ error: err.message, code: err.code || 'ERROR' });

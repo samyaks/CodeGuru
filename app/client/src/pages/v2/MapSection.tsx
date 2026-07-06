@@ -19,6 +19,8 @@ import {
   addJob,
   removeJob,
   setJobPriority,
+  confirmPersona,
+  confirmJob,
   parsePriority,
   clampScore,
   type ProductMapData,
@@ -38,25 +40,29 @@ interface JobNeed {
   status: NeedStatus;
 }
 
+interface PersonaJobs {
+  id: string;
+  name: string;
+  emoji: string;
+  description?: string;
+  confirmed: boolean;
+  jobs: JobView[];
+  readiness: number;
+}
+
 interface JobView {
   id: string;
   title: string;
   priority: Priority;
+  confirmed: boolean;
+  invariantTotal: number;
+  invariantBroken: number;
   /** 0..100 integer (matches `services/job-scorer.js#scoreJob`). */
   score: number;
   needs: JobNeed[];
   builtCount: number;
   partialCount: number;
   missingCount: number;
-}
-
-interface PersonaJobs {
-  id: string;
-  name: string;
-  emoji: string;
-  description?: string;
-  jobs: JobView[];
-  readiness: number;
 }
 
 // Backend `services/job-scorer.js#buildScoresObject` already rounds scores
@@ -149,6 +155,9 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
       id: job.id,
       title: job.title,
       priority: parsePriority(job.priority),
+      confirmed: Boolean(job.confirmed),
+      invariantTotal: job.invariantCounts?.total ?? 0,
+      invariantBroken: job.invariantCounts?.broken ?? 0,
       score,
       needs,
       builtCount,
@@ -163,6 +172,7 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
     name: p.name,
     emoji: p.emoji ?? '📌',
     description: p.description,
+    confirmed: Boolean(p.confirmed),
     jobs: jobsByPersona.get(p.id) ?? [],
     readiness: readinessFor(p.id, data),
   }));
@@ -323,6 +333,38 @@ export function MapSection({ projectId }: MapSectionProps) {
     [data, reload],
   );
 
+  const handleConfirmPersona = useCallback(
+    async (personaId: string) => {
+      if (!data) return;
+      setBusyId(personaId);
+      try {
+        await confirmPersona(data.id, personaId);
+        await reload();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [data, reload],
+  );
+
+  const handleConfirmJob = useCallback(
+    async (jobId: string) => {
+      if (!data) return;
+      setBusyId(jobId);
+      try {
+        await confirmJob(data.id, jobId);
+        await reload();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [data, reload],
+  );
+
   if (loading) {
     return <div className="text-sm text-stone-500">Loading personas…</div>;
   }
@@ -420,9 +462,11 @@ export function MapSection({ projectId }: MapSectionProps) {
             expanded={expandedPersonaId === p.id}
             onToggle={() => setExpandedPersonaId((cur) => (cur === p.id ? null : p.id))}
             onRemovePersona={() => handleRemovePersona(p.id)}
+            onConfirmPersona={() => handleConfirmPersona(p.id)}
             onAddJob={(input) => handleAddJob(p.id, input)}
             onRemoveJob={handleRemoveJob}
             onSetPriority={handleSetPriority}
+            onConfirmJob={handleConfirmJob}
             busyId={busyId}
           />
         ))}
@@ -463,9 +507,11 @@ interface PersonaEditorProps {
   expanded: boolean;
   onToggle: () => void;
   onRemovePersona: () => void;
+  onConfirmPersona: () => void;
   onAddJob: (input: { title: string; priority: Priority }) => void;
   onRemoveJob: (jobId: string) => void;
   onSetPriority: (jobId: string, priority: Priority) => void;
+  onConfirmJob: (jobId: string) => void;
   busyId: string | null;
 }
 
@@ -474,9 +520,11 @@ function PersonaEditor({
   expanded,
   onToggle,
   onRemovePersona,
+  onConfirmPersona,
   onAddJob,
   onRemoveJob,
   onSetPriority,
+  onConfirmJob,
   busyId,
 }: PersonaEditorProps) {
   const [showAddJob, setShowAddJob] = useState(false);
@@ -510,6 +558,20 @@ function PersonaEditor({
             </p>
             <p className="text-[11px] text-stone-500">ready</p>
           </div>
+          {!persona.confirmed ? (
+            <button
+              type="button"
+              onClick={onConfirmPersona}
+              disabled={personaIsBusy}
+              title="Confirm persona"
+              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border border-stone-300 text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Confirm
+            </button>
+          ) : (
+            <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-label="Persona confirmed" />
+          )}
           <button
             type="button"
             onClick={onRemovePersona}
@@ -539,6 +601,7 @@ function PersonaEditor({
                 busy={busyId === job.id}
                 onRemove={() => onRemoveJob(job.id)}
                 onSetPriority={(priority) => onSetPriority(job.id, priority)}
+                onConfirm={() => onConfirmJob(job.id)}
               />
             ))
           )}
@@ -572,9 +635,10 @@ interface JobRowProps {
   busy: boolean;
   onRemove: () => void;
   onSetPriority: (priority: Priority) => void;
+  onConfirm: () => void;
 }
 
-function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
+function JobRow({ job, busy, onRemove, onSetPriority, onConfirm }: JobRowProps) {
   // Auto-expand jobs that still have work, so "what's not built yet" is
   // visible without a click. Built-out jobs collapse by default to keep
   // the persona card scannable.
@@ -615,6 +679,12 @@ function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
           aria-expanded={hasNeeds ? expanded : undefined}
         >
           <span className="flex-1 min-w-0 text-stone-700 truncate">{job.title}</span>
+          {job.invariantTotal > 0 ? (
+            <span className="text-[10px] text-stone-500 whitespace-nowrap">
+              {job.invariantTotal} guarantees
+              {job.invariantBroken > 0 ? ` · ${job.invariantBroken} broken` : ''}
+            </span>
+          ) : null}
           <span className={`text-xs font-semibold tabular-nums ${tone.text}`}>{job.score}%</span>
           {hasNeeds ? (
             <ChevronDown
@@ -623,6 +693,20 @@ function JobRow({ job, busy, onRemove, onSetPriority }: JobRowProps) {
             />
           ) : null}
         </button>
+
+        {!job.confirmed ? (
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            title="Confirm job"
+            className="text-xs font-medium text-stone-700 border border-stone-300 rounded px-1.5 py-0.5 hover:bg-white disabled:opacity-50"
+          >
+            Confirm
+          </button>
+        ) : (
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" aria-label="Job confirmed" />
+        )}
 
         <button
           type="button"

@@ -1,48 +1,54 @@
 // Intent substrate pipeline orchestrator.
 //
-// Wave 0 scaffolding: a single entry point that takeoff.js calls once at the
-// tail of runPipeline. Later phases fill in the stages WITHOUT editing
-// takeoff.js again:
-//   - Phase 3: bootstrap candidate intent statements from structure anchors.
-//   - Phase 5: reconcile intent_code_links against re-extracted anchors.
-//   - Phase 6: two-tier satisfaction re-check + gaps-as-views refresh.
+// Job/invariant model (v2):
+//   1. Reconcile which jobs need regeneration (hash-gated on re-analysis).
+//   2. Job-conditioned invariant generation (findings-first, analysis-time).
+//   3. Global guarantees sweep (security/infra cross-cutting).
+//   4. Link reconciliation against fresh anchors.
+//   5. Satisfaction re-check for confirmed statements.
 //
-// Called non-blocking from takeoff's runPipeline tail, so every stage must be
-// individually non-fatal: a failure logs and the pipeline resolves.
+// Called non-blocking from takeoff's runPipeline tail — every stage is
+// individually non-fatal.
 
-const { bootstrapIntent } = require('./bootstrap');
-const { runFeatureSynthesis } = require('./features');
+const { reconcileIntentOnReanalysis } = require('./reconcile-analysis');
+const { runJobInvariantGeneration } = require('./generate-invariants');
+const { runGlobalGuarantees } = require('./global-guarantees');
 const { runLinkReconciliation } = require('./reconcile-runner');
 const { runSatisfactionRecheck } = require('./satisfaction');
 
 /**
- * Run the intent substrate stages for a project after analysis.
  * @param {string} projectId - deployments.id
- * @param {object} codebaseModel - the model returned by analyzeRepo/analyzeFromFiles,
- *   carrying `structureAnchors` (Phase 2) and the in-memory `fileContents` map.
- * @returns {Promise<{ ran: boolean, bootstrap?: object, grouping?: object, reconcile?: object, satisfaction?: object }>}
+ * @param {object} codebaseModel - analyzer output with structureAnchors + fileContents
  */
 async function runIntentPipeline(projectId, codebaseModel) {
-  // Stage 1: bootstrap candidate intent statements from structure anchors.
-  let bootstrap = null;
+  let reconciliation = null;
   try {
-    bootstrap = await bootstrapIntent(projectId, codebaseModel);
+    reconciliation = await reconcileIntentOnReanalysis(projectId, codebaseModel);
   } catch (err) {
-    console.error(`[intent.pipeline] bootstrap failed for ${projectId} (non-fatal): ${err.message}`);
+    console.error(`[intent.pipeline] reconciliation failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
-  // Stage 1b: synthesize features (persona + job-to-be-done + summary) over the
-  // statements and set each statement's group_label, so the Context tab reads
-  // like a plan instead of dozens of file-named buckets.
-  let grouping = null;
-  try {
-    grouping = await runFeatureSynthesis(projectId, codebaseModel);
-  } catch (err) {
-    console.error(`[intent.pipeline] feature synthesis failed for ${projectId} (non-fatal): ${err.message}`);
+  let generation = null;
+  const skipGen = reconciliation && reconciliation.unchanged;
+  if (!skipGen) {
+    try {
+      generation = await runJobInvariantGeneration(projectId, codebaseModel, {
+        jobIds: reconciliation && reconciliation.jobsToRegenerate,
+      });
+    } catch (err) {
+      console.error(`[intent.pipeline] job invariant generation failed for ${projectId} (non-fatal): ${err.message}`);
+    }
+  } else {
+    generation = { skipped: true, reason: 'unchanged' };
   }
 
-  // Stage 2: reconcile existing links against the fresh anchors (self-heal
-  // moves, flag renames/deletions). Persists link health for the triage view.
+  let globals = null;
+  try {
+    globals = await runGlobalGuarantees(projectId, codebaseModel);
+  } catch (err) {
+    console.error(`[intent.pipeline] global guarantees failed for ${projectId} (non-fatal): ${err.message}`);
+  }
+
   let reconcile = null;
   try {
     reconcile = await runLinkReconciliation(projectId, codebaseModel);
@@ -50,8 +56,6 @@ async function runIntentPipeline(projectId, codebaseModel) {
     console.error(`[intent.pipeline] link reconciliation failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
-  // Stage 3: two-tier satisfaction re-check for confirmed statements (free hash
-  // compare first; bounded LLM only where linked code changed).
   let satisfaction = null;
   try {
     satisfaction = await runSatisfactionRecheck(projectId);
@@ -59,7 +63,14 @@ async function runIntentPipeline(projectId, codebaseModel) {
     console.error(`[intent.pipeline] satisfaction recheck failed for ${projectId} (non-fatal): ${err.message}`);
   }
 
-  return { ran: true, bootstrap, grouping, reconcile, satisfaction };
+  return {
+    ran: true,
+    reconciliation,
+    generation,
+    globals,
+    reconcile,
+    satisfaction,
+  };
 }
 
 module.exports = { runIntentPipeline };

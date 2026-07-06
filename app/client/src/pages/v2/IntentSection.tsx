@@ -9,7 +9,7 @@ import { INTENT_MOCK } from '../../components/v2/intentMock';
 import {
   fetchIntent, confirmStatement, editStatement, rejectStatement, restoreStatement,
   fetchIntentSpec, fetchIntentTriage, applyRelink, markLinkBroken, fetchIntentGaps,
-  type IntentListResponse, type IntentAreaGroup, type IntentStatement,
+  type IntentListResponse, type IntentPersonaGroup, type IntentJobGroup, type IntentStatement,
   type IntentEditPayload, type IntentStatus, type IntentLink,
   type IntentTriageItem, type IntentGap,
 } from '../../services/intentApi';
@@ -20,56 +20,10 @@ export interface IntentSectionProps {
   projectId: string;
 }
 
-function areaKey(area: IntentAreaGroup): string {
-  return area.featureArea ?? '__unassigned__';
-}
-
-function areaTitle(area: IntentAreaGroup): string {
-  return area.featureArea ?? 'Unassigned';
-}
-
-type VisibleArea = { area: IntentAreaGroup; statements: IntentStatement[] };
-
-interface JobGroup {
-  key: string;
-  title: string | null;
-  priority: 'high' | 'medium' | 'low' | null;
-  areas: VisibleArea[];
-}
-interface PersonaGroup {
-  key: string;
-  name: string | null;
-  emoji: string | null;
-  jobs: JobGroup[];
-}
-
-// Fold the flat feature areas into a Persona -> Job -> Feature tree, preserving
-// the server's (sort_order-based) area ordering. Used to render intent as a
-// plan. When no synthesis metadata is present every area lands under a single
-// null persona/job, which the renderer shows as a flat list (back-compat).
-function groupByPersonaJob(visible: VisibleArea[]): PersonaGroup[] {
-  const personas: PersonaGroup[] = [];
-  const personaByKey = new Map<string, PersonaGroup>();
-
-  for (const v of visible) {
-    const pName = v.area.persona?.name ?? null;
-    const pKey = pName ?? '__none__';
-    let persona = personaByKey.get(pKey);
-    if (!persona) {
-      persona = { key: pKey, name: pName, emoji: v.area.persona?.emoji ?? null, jobs: [] };
-      personaByKey.set(pKey, persona);
-      personas.push(persona);
-    }
-    const jTitle = v.area.job?.title ?? null;
-    const jKey = jTitle ?? '__none__';
-    let job = persona.jobs.find((j) => j.key === jKey);
-    if (!job) {
-      job = { key: jKey, title: jTitle, priority: v.area.job?.priority ?? null, areas: [] };
-      persona.jobs.push(job);
-    }
-    job.areas.push(v);
-  }
-  return personas;
+function filterStatements(stmts: IntentStatement[], filter: Filter): IntentStatement[] {
+  if (filter === 'rejected') return stmts.filter((s) => s.status === 'rejected');
+  const wanted: IntentStatus = filter === 'confirmed' ? 'confirmed' : 'candidate';
+  return stmts.filter((s) => s.status === wanted);
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -90,7 +44,7 @@ function triageKey(item: IntentTriageItem): string {
 }
 
 export function IntentSection({ projectId }: IntentSectionProps) {
-  const [areas, setAreas] = useState<IntentAreaGroup[]>([]);
+  const [intentData, setIntentData] = useState<IntentListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('candidate');
@@ -113,7 +67,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
   const [driftDismissed, setDriftDismissed] = useState(false);
 
   const applyResponse = useCallback((data: IntentListResponse) => {
-    setAreas(data.areas);
+    setIntentData(data);
   }, []);
 
   const reload = useCallback(async () => {
@@ -180,22 +134,37 @@ export function IntentSection({ projectId }: IntentSectionProps) {
 
   const findStatement = useCallback(
     (id: string): IntentStatement | undefined => {
-      for (const a of areas) {
-        const s = a.statements.find((st) => st.id === id);
-        if (s) return s;
+      if (!intentData) return undefined;
+      for (const p of intentData.personas) {
+        for (const j of p.jobs) {
+          const s = j.statements.find((st) => st.id === id);
+          if (s) return s;
+        }
       }
-      return undefined;
+      return intentData.globals.statements.find((s) => s.id === id);
     },
-    [areas],
+    [intentData],
   );
 
   const replaceStatement = useCallback((updated: IntentStatement) => {
-    setAreas((prev) =>
-      prev.map((a) => ({
-        ...a,
-        statements: a.statements.map((s) => (s.id === updated.id ? updated : s)),
-      })),
-    );
+    setIntentData((prev) => {
+      if (!prev) return prev;
+      const mapStmt = (s: IntentStatement) => (s.id === updated.id ? updated : s);
+      return {
+        ...prev,
+        personas: prev.personas.map((p) => ({
+          ...p,
+          jobs: p.jobs.map((j) => ({
+            ...j,
+            statements: j.statements.map(mapStmt),
+          })),
+        })),
+        globals: {
+          ...prev.globals,
+          statements: prev.globals.statements.map(mapStmt),
+        },
+      };
+    });
   }, []);
 
   // Shared optimistic-transition helper. We flip local state immediately for a
@@ -276,20 +245,17 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     [projectId, runMutation],
   );
 
-  const onConfirmArea = useCallback(async (key: string) => {
-    const area = areas.find((a) => areaKey(a) === key);
-    if (!area) return;
-    const pending = area.statements.filter((s) => s.status === 'candidate');
+  const onConfirmJob = useCallback(async (jobId: string) => {
+    if (!intentData) return;
+    let job: IntentJobGroup | undefined;
+    for (const p of intentData.personas) {
+      job = p.jobs.find((j) => j.id === jobId);
+      if (job) break;
+    }
+    if (!job) return;
+    const pending = job.statements.filter((s) => s.status === 'candidate');
     if (pending.length === 0) return;
-    setBusyArea(key);
-    // Optimistically confirm every candidate in the area at once.
-    setAreas((prev) =>
-      prev.map((a) =>
-        areaKey(a) === key
-          ? { ...a, statements: a.statements.map((s) => (s.status === 'candidate' ? { ...s, status: 'confirmed' } : s)) }
-          : a,
-      ),
-    );
+    setBusyArea(jobId);
     try {
       const results = await Promise.all(pending.map((s) => confirmStatement(projectId, s.id)));
       results.forEach((r) => replaceStatement(r));
@@ -301,7 +267,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     } finally {
       setBusyArea(null);
     }
-  }, [areas, projectId, replaceStatement, reload]);
+  }, [intentData, projectId, replaceStatement, reload]);
 
   const onExportSpec = useCallback(async () => {
     setSpecBusy(true);
@@ -391,35 +357,50 @@ export function IntentSection({ projectId }: IntentSectionProps) {
   }, []);
 
   const totals = useMemo(() => {
-    let total = 0, confirmed = 0, candidates = 0, rejected = 0;
-    for (const a of areas) {
-      for (const s of a.statements) {
-        total += 1;
-        if (s.status === 'confirmed') confirmed += 1;
-        else if (s.status === 'candidate') candidates += 1;
-        else rejected += 1;
-      }
+    if (!intentData) {
+      return { total: 0, confirmed: 0, candidates: 0, rejected: 0, holds: 0, broken: 0, jobCount: 0 };
     }
-    return { total, confirmed, candidates, rejected, areaCount: areas.length };
-  }, [areas]);
+    const jobCount = intentData.personas.reduce((n, p) => n + p.jobs.length, 0);
+    return {
+      total: intentData.total,
+      confirmed: intentData.confirmed,
+      candidates: intentData.candidates,
+      rejected: intentData.rejected,
+      holds: intentData.holds,
+      broken: intentData.broken,
+      jobCount,
+    };
+  }, [intentData]);
 
-  const rejectedStatements = useMemo(
-    () => areas.flatMap((a) => a.statements.filter((s) => s.status === 'rejected')),
-    [areas],
-  );
+  const rejectedStatements = useMemo(() => {
+    if (!intentData) return [];
+    const out: IntentStatement[] = [];
+    for (const p of intentData.personas) {
+      for (const j of p.jobs) out.push(...j.statements.filter((s) => s.status === 'rejected'));
+    }
+    out.push(...intentData.globals.statements.filter((s) => s.status === 'rejected'));
+    return out;
+  }, [intentData]);
 
-  // For candidate/confirmed filters, keep only areas that have a statement in
-  // the active status; each area renders just its matching statements.
-  const visibleAreas = useMemo(() => {
-    const wanted: IntentStatus = filter === 'confirmed' ? 'confirmed' : 'candidate';
-    return areas
-      .map((a) => ({ area: a, statements: a.statements.filter((s) => s.status === wanted) }))
-      .filter((x) => x.statements.length > 0);
-  }, [areas, filter]);
+  const visiblePersonas = useMemo((): IntentPersonaGroup[] => {
+    if (!intentData) return [];
+    if (filter === 'rejected') return [];
+    return intentData.personas
+      .map((p) => ({
+        ...p,
+        jobs: p.jobs
+          .map((j) => ({ ...j, statements: filterStatements(j.statements, filter) }))
+          .filter((j) => j.statements.length > 0),
+      }))
+      .filter((p) => p.jobs.length > 0);
+  }, [intentData, filter]);
 
-  const personaGroups = useMemo(() => groupByPersonaJob(visibleAreas), [visibleAreas]);
+  const visibleGlobals = useMemo(() => {
+    if (!intentData || filter === 'rejected') return [];
+    return filterStatements(intentData.globals.statements, filter);
+  }, [intentData, filter]);
 
-  if (loading && areas.length === 0) {
+  if (loading && !intentData) {
     return <div className="text-sm text-stone-500">Loading intent…</div>;
   }
 
@@ -447,8 +428,8 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     return (
       <EmptyState
         icon={Target}
-        title="No intent captured yet"
-        description="Once Takeoff drafts intent statements from your codebase, they'll show up here for review."
+        title="No guarantees captured yet"
+        description="Once Takeoff analyzes your codebase, things that must hold for your app to work will show up here — with what's broken highlighted first."
       />
     );
   }
@@ -459,11 +440,10 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What this app is meant to do</h3>
+          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What must hold for your app to work</h3>
           <p className="text-stone-600 text-sm leading-relaxed max-w-2xl">
-            Takeoff drafted these intent statements from your code. Confirm the ones that match your
-            product, edit the ones that are close, and reject anything that's wrong. Confirmed
-            statements become your living spec.
+            Takeoff found guarantee-level behaviors linked to your code. Broken items need fixing;
+            confirm jobs in the Map tab to inherit the rest. Confirmed guarantees become your living spec.
           </p>
         </div>
         <button
@@ -517,11 +497,13 @@ export function IntentSection({ projectId }: IntentSectionProps) {
       <div className="bg-white border border-stone-200 rounded-lg p-5">
         <div className="flex items-baseline justify-between gap-3 mb-2">
           <p className="text-sm text-stone-700">
-            Takeoff drafted <span className="font-semibold text-stone-900">{totals.total}</span>{' '}
-            {totals.total === 1 ? 'statement' : 'statements'} across{' '}
-            <span className="font-semibold text-stone-900">{totals.areaCount}</span>{' '}
-            {totals.areaCount === 1 ? 'area' : 'areas'} —{' '}
-            <span className="font-semibold text-stone-900">{totals.confirmed}</span> of {totals.total} confirmed
+            <span className="font-semibold text-stone-900">{totals.total}</span>{' '}
+            {totals.total === 1 ? 'guarantee' : 'guarantees'} across{' '}
+            <span className="font-semibold text-stone-900">{totals.jobCount}</span>{' '}
+            {totals.jobCount === 1 ? 'job' : 'jobs'} —{' '}
+            <span className="font-semibold text-emerald-700">{totals.holds}</span> hold,{' '}
+            <span className="font-semibold text-rose-700">{totals.broken}</span> broken —{' '}
+            <span className="font-semibold text-stone-900">{totals.confirmed}</span> confirmed
           </p>
           <span className="text-xs font-semibold text-stone-700">{confirmPct}%</span>
         </div>
@@ -557,7 +539,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
             ))}
           </div>
         )
-      ) : visibleAreas.length === 0 ? (
+      ) : visiblePersonas.length === 0 && visibleGlobals.length === 0 ? (
         <EmptyState
           title={filter === 'confirmed' ? 'Nothing confirmed yet' : 'All caught up'}
           description={
@@ -568,70 +550,79 @@ export function IntentSection({ projectId }: IntentSectionProps) {
         />
       ) : (
         <div className="space-y-6">
-          {personaGroups.map((persona) => (
-            <div key={`${filter}-p-${persona.key}`} className="space-y-3">
-              {persona.name ? <PersonaHeader name={persona.name} emoji={persona.emoji} /> : null}
-              {persona.jobs.map((job) => (
-                <div key={`j-${job.key}`} className={persona.name ? 'space-y-3 sm:pl-3' : 'space-y-3'}>
-                  {job.title ? <JobHeader title={job.title} priority={job.priority} /> : null}
-                  {job.areas.map(({ area, statements }) => {
-                    const key = areaKey(area);
-                    const pending = area.statements.filter((s) => s.status === 'candidate').length;
-                    const confirmed = area.statements.filter((s) => s.status === 'confirmed').length;
-                    const subtitle = `${pending} to review · ${confirmed} confirmed`;
-                    return (
-                      <AreaCollapsible
-                        // Key includes the filter so switching filters re-evaluates the
-                        // "open when there are pending candidates" default.
-                        key={`${filter}-${key}`}
-                        title={areaTitle(area)}
-                        subtitle={subtitle}
-                        summary={area.summary ?? null}
-                        defaultOpen={filter === 'candidate' ? pending > 0 : true}
-                        action={
-                          filter === 'candidate' && pending > 0 ? (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); void onConfirmArea(key); }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault(); e.stopPropagation(); void onConfirmArea(key);
-                                }
-                              }}
-                              aria-label={`Confirm all ${pending} statements in ${areaTitle(area)}`}
-                              className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
-                                busyArea === key
-                                  ? 'border-stone-200 text-stone-400'
-                                  : 'border-stone-300 text-stone-700 hover:bg-stone-100 cursor-pointer'
-                              }`}
-                            >
-                              <CheckCheck className="w-3 h-3" />
-                              {busyArea === key ? 'Confirming…' : 'Confirm all'}
-                            </span>
-                          ) : null
-                        }
-                      >
-                        <div className="space-y-3" aria-busy={busyId !== null || busyArea === key}>
-                          {statements.map((s) => (
-                            <IntentStatementCard
-                              key={s.id}
-                              statement={s}
-                              busy={busyId === s.id || busyArea === key}
-                              showLinkHealth
-                              onAccept={onAccept}
-                              onReject={onReject}
-                              onEdit={onEdit}
-                            />
-                          ))}
-                        </div>
-                      </AreaCollapsible>
-                    );
-                  })}
-                </div>
-              ))}
+          {visiblePersonas.map((persona) => (
+            <div key={`${filter}-p-${persona.id}`} className="space-y-3">
+              <PersonaHeader name={persona.name} emoji={persona.emoji} confirmed={persona.confirmed} />
+              {persona.jobs.map((job) => {
+                const pending = job.statements.filter((s) => s.status === 'candidate').length;
+                const confirmed = job.statements.filter((s) => s.status === 'confirmed').length;
+                const broken = job.statements.filter((s) => s.satisfied === false).length;
+                const subtitle = `${pending} to review · ${confirmed} confirmed${broken ? ` · ${broken} broken` : ''}`;
+                return (
+                  <AreaCollapsible
+                    key={`${filter}-${job.id}`}
+                    title={job.title}
+                    subtitle={subtitle}
+                    defaultOpen={filter === 'candidate' ? pending > 0 : true}
+                    action={
+                      filter === 'candidate' && pending > 0 ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); void onConfirmJob(job.id); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault(); e.stopPropagation(); void onConfirmJob(job.id);
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
+                            busyArea === job.id
+                              ? 'border-stone-200 text-stone-400'
+                              : 'border-stone-300 text-stone-700 hover:bg-stone-100 cursor-pointer'
+                          }`}
+                        >
+                          <CheckCheck className="w-3 h-3" />
+                          {busyArea === job.id ? 'Confirming…' : 'Confirm all'}
+                        </span>
+                      ) : null
+                    }
+                  >
+                    <div className="space-y-3" aria-busy={busyId !== null || busyArea === job.id}>
+                      {job.statements.map((s) => (
+                        <IntentStatementCard
+                          key={s.id}
+                          statement={s}
+                          busy={busyId === s.id || busyArea === job.id}
+                          showLinkHealth
+                          onAccept={onAccept}
+                          onReject={onReject}
+                          onEdit={onEdit}
+                        />
+                      ))}
+                    </div>
+                  </AreaCollapsible>
+                );
+              })}
             </div>
           ))}
+          {visibleGlobals.length > 0 ? (
+            <div className="space-y-3">
+              <PersonaHeader name="Security & safety basics" emoji="🛡️" confirmed={false} />
+              <div className="space-y-3 sm:pl-3">
+                {visibleGlobals.map((s) => (
+                  <IntentStatementCard
+                    key={s.id}
+                    statement={s}
+                    busy={busyId === s.id}
+                    showLinkHealth
+                    onAccept={onAccept}
+                    onReject={onReject}
+                    onEdit={onEdit}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -859,11 +850,16 @@ function AreaCollapsible({
 }
 
 // Persona section header for the plan hierarchy.
-function PersonaHeader({ name, emoji }: { name: string; emoji: string | null }) {
+function PersonaHeader({ name, emoji, confirmed }: { name: string; emoji: string | null; confirmed?: boolean }) {
   return (
     <div className="flex items-center gap-2 pt-1">
       <span className="text-lg leading-none" aria-hidden>{emoji || '\u{1F464}'}</span>
       <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">{name}</h4>
+      {confirmed ? (
+        <span className="text-[10px] uppercase tracking-wider text-emerald-700 font-medium">Confirmed</span>
+      ) : (
+        <span className="text-[10px] uppercase tracking-wider text-stone-400 font-medium">Draft</span>
+      )}
     </div>
   );
 }

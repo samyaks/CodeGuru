@@ -1,18 +1,5 @@
-// Living-spec generator (Phase 4b, restructured for the JTBD feature layer).
-//
-// Renders CONFIRMED intent statements into a read-only markdown "living spec"
-// organized as a product plan: Persona -> Job-to-be-done -> Feature -> the
-// confirmed statements that implement it, each citing the code it's grounded in.
-// This is a pure derived VIEW: the confirmed statements ARE the truth; this just
-// projects them (plus the synthesized feature/persona/job spine from
-// services/intent/features.js) into a doc shape.
-//
-// Statements join to features via `group_label = intent_features.label`. When no
-// features are available (e.g. an un-synthesized project) it degrades to a flat
-// grouping by group_label so the spec still renders.
+// Living-spec generator — Persona -> Job -> Invariant + Global section.
 
-// Render the code anchors for a statement as a compact citation suffix, e.g.
-// "(server/auth.js:login, server/db.js)". Skips broken/empty links quietly.
 function citation(links) {
   if (!Array.isArray(links) || links.length === 0) return '';
   const parts = links
@@ -22,7 +9,6 @@ function citation(links) {
   return ` (${parts.join(', ')})`;
 }
 
-// Non-behavior kinds get a light inline tag so meaning survives the flattening.
 function kindPrefix(kind) {
   if (kind === 'constraint') return 'Constraint: ';
   if (kind === 'non_goal') return 'Non-goal: ';
@@ -33,103 +19,67 @@ function statementLine(s) {
   return `- ${kindPrefix(s.kind)}${s.text}${citation(s.links)}`;
 }
 
-// A statement's feature label (the synthesis join key), null-safe.
-function labelOf(s) {
-  return s.group_label ?? null;
-}
-
-// Build the full living-spec markdown.
-// @param {Array} statements - confirmed intent_statements rows (snake_case).
-// @param {Array} features   - intent_features rows (snake_case), sort-ordered.
-function buildLivingSpec(statements, features = []) {
-  const rows = Array.isArray(statements) ? statements : [];
-  const featureRows = Array.isArray(features) ? features : [];
+function buildLivingSpec(confirmedStatements, mapFull = null, links = []) {
+  const rows = (Array.isArray(confirmedStatements) ? confirmedStatements : [])
+    .filter((s) => s && s.status === 'confirmed' && !s.archived);
   const lines = ['# Living spec', ''];
 
   if (rows.length === 0) {
-    lines.push('_No confirmed intent statements yet. Confirm candidates in the Context tab to build the spec._');
+    lines.push('_No confirmed guarantees yet. Confirm jobs in the Map tab to build your spec._');
     lines.push('');
     return lines.join('\n');
   }
 
-  // Bucket confirmed statements by feature label.
-  const byLabel = new Map();
-  for (const s of rows) {
-    const key = labelOf(s);
-    if (!byLabel.has(key)) byLabel.set(key, []);
-    byLabel.get(key).push(s);
+  const byJob = new Map();
+  for (const l of links || []) {
+    if (!l || !l.job_id || !l.statement_id) continue;
+    if (!byJob.has(l.job_id)) byJob.set(l.job_id, []);
+    byJob.get(l.job_id).push(l.statement_id);
   }
+  const stmtById = new Map(rows.map((s) => [s.id, s]));
+  const used = new Set();
 
-  // Group features (in sort order) into persona -> job -> [feature]. Only keep
-  // features that have at least one confirmed statement.
-  const personaOrder = [];
-  const personas = new Map(); // personaName -> { emoji, jobs: Map<jobTitle, feature[]>, jobOrder: [] }
-  const usedLabels = new Set();
+  const personaRows = mapFull && Array.isArray(mapFull.personas) ? mapFull.personas : [];
+  const jobRows = mapFull && Array.isArray(mapFull.jobs) ? mapFull.jobs : [];
 
-  function personaBucket(name, emoji) {
-    if (!personas.has(name)) {
-      personas.set(name, { emoji: emoji || null, jobs: new Map(), jobOrder: [] });
-      personaOrder.push(name);
-    }
-    return personas.get(name);
-  }
-
-  for (const f of featureRows) {
-    const confirmed = byLabel.get(f.label);
-    if (!confirmed || confirmed.length === 0) continue;
-    usedLabels.add(f.label);
-    const personaName = f.persona_name || 'General';
-    const jobTitle = f.job_title || 'General';
-    const bucket = personaBucket(personaName, f.persona_emoji);
-    if (!bucket.jobs.has(jobTitle)) {
-      bucket.jobs.set(jobTitle, []);
-      bucket.jobOrder.push(jobTitle);
-    }
-    bucket.jobs.get(jobTitle).push({ feature: f, statements: confirmed });
-  }
-
-  // Render persona -> job -> feature -> statements.
-  for (const personaName of personaOrder) {
-    const bucket = personas.get(personaName);
-    const heading = bucket.emoji ? `${bucket.emoji} ${personaName}` : personaName;
+  for (const p of personaRows.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))) {
+    const heading = p.emoji ? `${p.emoji} ${p.name}` : p.name;
     lines.push(`## ${heading}`);
     lines.push('');
-    for (const jobTitle of bucket.jobOrder) {
-      lines.push(`### ${jobTitle}`);
-      lines.push('');
-      for (const { feature, statements: stmts } of bucket.jobs.get(jobTitle)) {
-        lines.push(`#### ${feature.label}`);
-        if (feature.summary) {
-          lines.push(`_${feature.summary}_`);
+    const jobs = jobRows.filter((j) => j.persona_id === p.id);
+    for (const j of jobs.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))) {
+      lines.push(`### ${j.title}`);
+      const ids = byJob.get(j.id) || [];
+      const stmts = ids.map((id) => stmtById.get(id)).filter(Boolean);
+      if (stmts.length === 0) {
+        lines.push('_No confirmed guarantees for this job yet._');
+      } else {
+        for (const s of stmts) {
+          lines.push(statementLine(s));
+          used.add(s.id);
         }
-        for (const s of stmts) lines.push(statementLine(s));
-        lines.push('');
       }
+      lines.push('');
     }
   }
 
-  // Anything confirmed but not covered by a feature (no synthesis yet, or a
-  // straggler label) is listed flat so nothing is silently dropped.
-  const leftover = [];
-  for (const [label, stmts] of byLabel.entries()) {
-    if (label !== null && usedLabels.has(label)) continue;
-    for (const s of stmts) leftover.push({ label, s });
+  const globals = rows.filter((s) => s.scope === 'global');
+  if (globals.length > 0) {
+    lines.push('## Security & safety basics');
+    lines.push('');
+    for (const s of globals) {
+      lines.push(statementLine(s));
+      used.add(s.id);
+    }
+    lines.push('');
   }
+
+  const leftover = rows.filter((s) => !used.has(s.id));
   if (leftover.length > 0) {
     lines.push('## Other');
     lines.push('');
-    // Preserve label grouping for readability.
-    const byLeftoverLabel = new Map();
-    for (const { label, s } of leftover) {
-      const key = label ?? 'Uncategorized';
-      if (!byLeftoverLabel.has(key)) byLeftoverLabel.set(key, []);
-      byLeftoverLabel.get(key).push(s);
-    }
-    for (const [label, stmts] of byLeftoverLabel.entries()) {
-      lines.push(`### ${label}`);
-      for (const s of stmts) lines.push(statementLine(s));
-      lines.push('');
-    }
+    for (const s of leftover) lines.push(statementLine(s));
+    lines.push('');
   }
 
   return lines.join('\n');

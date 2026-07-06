@@ -117,6 +117,12 @@ export interface ProductMapData {
     priority: 'high' | 'medium' | 'low' | string;
     weight: number;
     confirmed?: boolean;
+    invariantCounts?: {
+      total?: number;
+      candidates?: number;
+      confirmed?: number;
+      broken?: number;
+    };
   }[];
   entities: {
     id: string;
@@ -235,6 +241,14 @@ function normalizeMapPayload(raw: Record<string, unknown>): ProductMapData {
           priority: pr as 'high' | 'medium' | 'low',
           weight,
           confirmed: Boolean(o.confirmed),
+          invariantCounts: o.invariantCounts && typeof o.invariantCounts === 'object'
+            ? {
+                total: Number((o.invariantCounts as Record<string, unknown>).total) || 0,
+                candidates: Number((o.invariantCounts as Record<string, unknown>).candidates) || 0,
+                confirmed: Number((o.invariantCounts as Record<string, unknown>).confirmed) || 0,
+                broken: Number((o.invariantCounts as Record<string, unknown>).broken) || 0,
+              }
+            : undefined,
         };
       })
     : [];
@@ -479,6 +493,14 @@ export async function setJobPriority(
   priority: 'high' | 'medium' | 'low',
 ): Promise<void> {
   await patchProductMap(mapId, 'setPriority', { jobId, priority });
+}
+
+export async function confirmPersona(mapId: string, personaId: string): Promise<void> {
+  await patchProductMap(mapId, 'confirmPersona', { personaId });
+}
+
+export async function confirmJob(mapId: string, jobId: string): Promise<void> {
+  await patchProductMap(mapId, 'confirmJob', { jobId });
 }
 
 /**

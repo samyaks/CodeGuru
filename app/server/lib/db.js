@@ -1984,9 +1984,10 @@ const webhookEvents = {
 const INTENT_STATEMENTS_ALLOWED = new Set([
   'text', 'kind', 'status', 'source', 'feature_area', 'group_label',
   'links', 'code_hash', 'satisfied', 'last_checked_at', 'updated_at',
+  'scope', 'confirmed_via', 'confidence', 'archived',
 ]);
 const INTENT_STATEMENTS_JSONB = new Set(['links']);
-const INTENT_STATEMENTS_BOOL = new Set(['satisfied']);
+const INTENT_STATEMENTS_BOOL = new Set(['satisfied', 'archived']);
 
 const intentStatements = {
   async createBatch(items) {
@@ -1996,8 +1997,10 @@ const intentStatements = {
         await client.query(
           `INSERT INTO intent_statements
             (id, project_id, text, kind, status, source, feature_area, group_label,
-             links, code_hash, satisfied, last_checked_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             links, code_hash, satisfied, last_checked_at, created_at, updated_at,
+             scope, confirmed_via, confidence, archived)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18)
             ON CONFLICT (id) DO NOTHING`,
           [
             row.id || crypto.randomUUID(),
@@ -2014,13 +2017,17 @@ const intentStatements = {
             row.last_checked_at ?? null,
             row.created_at || new Date().toISOString(),
             row.updated_at ?? null,
+            row.scope || 'job',
+            row.confirmed_via ?? null,
+            row.confidence ?? null,
+            toBool(row.archived),
           ]
         );
       }
     });
   },
 
-  async findByProjectId(projectId, { status, featureArea } = {}) {
+  async findByProjectId(projectId, { status, featureArea, scope, archived } = {}) {
     const params = [projectId];
     let where = 'project_id = $1';
     if (status) {
@@ -2030,6 +2037,16 @@ const intentStatements = {
     if (featureArea) {
       params.push(featureArea);
       where += ` AND feature_area = $${params.length}`;
+    }
+    if (scope) {
+      params.push(scope);
+      where += ` AND scope = $${params.length}`;
+    }
+    // `archived` is opt-in: callers that don't pass it get every row (back-compat
+    // for reconciliation/suppression); the job/invariant views pass `false`.
+    if (archived === true || archived === false) {
+      params.push(archived);
+      where += ` AND archived = $${params.length}`;
     }
     const { rows } = await getDb().query(
       `SELECT * FROM intent_statements WHERE ${where}
@@ -2228,59 +2245,80 @@ const claims = {
   },
 };
 
-// ── Intent features (Takeoff intent substrate — JTBD roll-up) ──────
+// ── Statement<->Job links (Takeoff intent substrate — jobs as the unit) ──────
 //
-// A synthesized feature groups statements (via label = group_label) under a
-// persona / job-to-be-done and carries a one-line summary + priority. Fully
-// derived: services/intent/features.js regenerates the whole set per analysis,
-// so writes go through replaceForProject (wipe + insert) rather than upserts.
-// See migration 022_intent_features.sql.
+// A many-to-many join between intent_statements (invariants) and map_jobs. An
+// invariant serving multiple jobs (a shared model, a cross-job constraint) has
+// several rows here — the future boundary/collision signal. Global guarantees
+// (scope='global') have NO rows here. See migration 023_job_invariants.sql.
 
-const intentFeatures = {
-  // Replace the entire feature set for a project in one transaction. `features`
-  // is an array of { label, summary, personaName, personaEmoji, jobTitle,
-  // priority, jobId }. Returns the number of rows inserted.
-  async replaceForProject(projectId, features) {
-    const rows = Array.isArray(features) ? features : [];
-    let inserted = 0;
-    const now = new Date().toISOString();
-    await withTransaction(async (client) => {
-      await client.query('DELETE FROM intent_features WHERE project_id = $1', [projectId]);
-      let order = 0;
-      for (const f of rows) {
-        if (!f || typeof f.label !== 'string' || f.label.length === 0) continue;
-        const priority = ['high', 'medium', 'low'].includes(f.priority) ? f.priority : null;
-        await client.query(
-          `INSERT INTO intent_features
-            (id, project_id, label, summary, persona_name, persona_emoji,
-             job_title, priority, job_id, sort_order, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
-            ON CONFLICT (project_id, label) DO NOTHING`,
-          [
-            crypto.randomUUID(),
-            projectId,
-            f.label,
-            f.summary ?? null,
-            f.personaName ?? null,
-            f.personaEmoji ?? null,
-            f.jobTitle ?? null,
-            priority,
-            f.jobId ?? null,
-            order,
-            now,
-          ]
-        );
-        order += 1;
-        inserted += 1;
-      }
-    });
-    return inserted;
+const statementJobs = {
+  // Link a statement to a job (idempotent).
+  async link(statementId, jobId) {
+    await getDb().query(
+      `INSERT INTO statement_jobs (id, statement_id, job_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (statement_id, job_id) DO NOTHING`,
+      [crypto.randomUUID(), statementId, jobId]
+    );
   },
 
-  async findByProjectId(projectId) {
+  // Link one statement to many jobs in a single transaction.
+  async linkMany(statementId, jobIds) {
+    const ids = [...new Set((Array.isArray(jobIds) ? jobIds : []).filter(Boolean))];
+    if (ids.length === 0) return;
+    await withTransaction(async (client) => {
+      for (const jobId of ids) {
+        await client.query(
+          `INSERT INTO statement_jobs (id, statement_id, job_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (statement_id, job_id) DO NOTHING`,
+          [crypto.randomUUID(), statementId, jobId]
+        );
+      }
+    });
+  },
+
+  // Remove every link for a job (used before regenerating that job's invariants).
+  async deleteByJob(jobId) {
+    await getDb().query('DELETE FROM statement_jobs WHERE job_id = $1', [jobId]);
+  },
+
+  // Full statement rows linked to a job (optionally filtered by status).
+  async findStatementsForJob(jobId, { status } = {}) {
+    const params = [jobId];
+    let extra = '';
+    if (status) {
+      params.push(status);
+      extra = ` AND s.status = $${params.length}`;
+    }
     const { rows } = await getDb().query(
-      `SELECT * FROM intent_features WHERE project_id = $1
-        ORDER BY sort_order ASC, label ASC`,
+      `SELECT s.* FROM intent_statements s
+        JOIN statement_jobs sj ON sj.statement_id = s.id
+        WHERE sj.job_id = $1 AND s.archived = FALSE${extra}
+        ORDER BY s.created_at ASC`,
+      params
+    );
+    return rows;
+  },
+
+  // job_id list a statement is linked to.
+  async findJobIdsForStatement(statementId) {
+    const { rows } = await getDb().query(
+      'SELECT job_id FROM statement_jobs WHERE statement_id = $1',
+      [statementId]
+    );
+    return rows.map((r) => r.job_id);
+  },
+
+  // All (statement_id, job_id) links for a project — lets the read model group
+  // invariants under jobs in one query.
+  async findLinksForProject(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT sj.statement_id, sj.job_id
+         FROM statement_jobs sj
+         JOIN intent_statements s ON s.id = sj.statement_id
+        WHERE s.project_id = $1 AND s.archived = FALSE`,
       [projectId]
     );
     return rows;
@@ -2295,5 +2333,5 @@ module.exports = {
   commitReviews,
   productMap,
   shippedItems, webhookEvents, securityShares,
-  intentStatements, claims, intentFeatures,
+  intentStatements, claims, statementJobs,
 };

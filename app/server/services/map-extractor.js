@@ -2,7 +2,13 @@ const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
 const { createMessageTracked } = require('../lib/anthropic-tracked');
 const { AppError } = require('../lib/app-error');
 
-const EXTRACT_PROMPT = `You are a product strategist analyzing an app description.
+const EXTRACT_PROMPT = `You are a product strategist analyzing an app.
+You are given the app DESCRIPTION and, when available, a summary of the app's
+actual CODE SURFACES (pages, routes, detected capabilities). Ground your output
+in what the code actually does — every job should correspond to real
+functionality present in the code, not aspirational marketing copy. When the
+description and the code disagree, trust the code.
+
 Extract the following in JSON format:
 
 {
@@ -16,13 +22,13 @@ Extract the following in JSON format:
 }
 
 Rules:
-- Extract 2-4 personas (the distinct user types)
-- Extract 3-8 jobs per persona (what they need to accomplish)
+- Extract 2-4 personas (the distinct user types the code actually serves)
+- Extract 3-8 jobs per persona (what they accomplish, evidenced by the code)
 - Priority: "high" = core value prop, "medium" = important but secondary,
   "low" = nice to have
-- Jobs should be concrete actions, not vague goals
+- Jobs should be concrete actions grounded in real pages/routes/capabilities,
+  not vague goals
 - Use emoji that matches the persona's role
-- If the description mentions specific features, map them to jobs
 
 Respond ONLY with the JSON object, no markdown, no preamble.`;
 
@@ -34,11 +40,49 @@ function stripJsonFence(text) {
   return t;
 }
 
+// Compact, prompt-friendly summary of the code surfaces the map extracted, so
+// persona/job derivation is grounded in real functionality rather than only the
+// prose description. Pure — operates on the logical entity list from
+// code-entities.js. Caps each list to keep the prompt bounded.
+function summarizeCodeContext(entities, { perTypeCap = 25 } = {}) {
+  const list = Array.isArray(entities) ? entities : [];
+  if (list.length === 0) return '';
+
+  const byType = { page: [], route: [], component: [], capability: [] };
+  for (const e of list) {
+    if (!e || !byType[e.type]) continue;
+    if (e.type === 'capability') {
+      const name = (e.key || e.label || '').replace(/^cap:/, '');
+      if (name) byType.capability.push(`${name} (${e.status || 'present'})`);
+    } else {
+      const name = e.label || e.key;
+      if (name) byType[e.type].push(String(name));
+    }
+  }
+
+  const lines = [];
+  const push = (heading, arr) => {
+    const items = [...new Set(arr)].slice(0, perTypeCap);
+    if (items.length) lines.push(`${heading}: ${items.join(', ')}`);
+  };
+  push('Pages', byType.page);
+  push('Routes', byType.route);
+  push('Capabilities detected', byType.capability);
+  push('Components', byType.component);
+  return lines.join('\n');
+}
+
 /**
  * @param {string} description
  * @param {string} [analysisId] — for LLM usage tracking
+ * @param {string} [codeContext] — optional summary of real code surfaces
+ *   (from summarizeCodeContext) to ground persona/job derivation.
  */
-async function extractProductIntent(description, analysisId = null) {
+async function extractProductIntent(description, analysisId = null, codeContext = '') {
+  const userContent = codeContext
+    ? `App description:\n${description}\n\nActual code surfaces (ground your jobs in these):\n${codeContext}`
+    : description;
+
   const response = await createMessageTracked({
     client: anthropic,
     analysisId: analysisId || 'map-extract',
@@ -47,7 +91,7 @@ async function extractProductIntent(description, analysisId = null) {
       model: CLAUDE_MODEL,
       max_tokens: 2000,
       system: [{ type: 'text', text: EXTRACT_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: description }],
+      messages: [{ role: 'user', content: userContent }],
     },
   });
 
@@ -83,4 +127,4 @@ async function extractProductIntent(description, analysisId = null) {
   };
 }
 
-module.exports = { extractProductIntent, stripJsonFence };
+module.exports = { extractProductIntent, stripJsonFence, summarizeCodeContext };

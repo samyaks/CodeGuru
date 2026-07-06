@@ -1,12 +1,14 @@
 const crypto = require('crypto');
-const { analyses, deployments, productMap: mapDb, analysisFiles } = require('../lib/db');
+const { analyses, deployments, productMap: mapDb, analysisFiles, getDb } = require('../lib/db');
 const { checkProjectAccess, safeParseJson } = require('../lib/helpers');
 const { AppError } = require('../lib/app-error');
 
 const { extractCodeEntities } = require('./code-entities');
-const { extractProductIntent } = require('./map-extractor');
+const { extractProductIntent, summarizeCodeContext } = require('./map-extractor');
 const { linkAll } = require('./map-linker');
 const { buildScoresObject } = require('./job-scorer');
+const { cascadeConfirmJob } = require('./intent/cascade-confirm');
+const { regenerateJobInvariants } = require('./intent/generate-invariants');
 
 function weightFromPriority(p) {
   if (p === 'high') return 3;
@@ -100,7 +102,7 @@ function remapProductNodes(personas, jobs) {
   return { personas: newPersonas, jobs: newJobs };
 }
 
-function graphFromDbRow(full) {
+function graphFromDbRow(full, invariantCounts = {}) {
   const { personas, jobs, entities, edges } = full;
   return {
     personas: personas.map((p) => ({
@@ -111,15 +113,24 @@ function graphFromDbRow(full) {
       confirmed: p.confirmed,
       sortOrder: p.sort_order,
     })),
-    jobs: jobs.map((j) => ({
-      id: j.id,
-      personaId: j.persona_id,
-      title: j.title,
-      priority: j.priority,
-      weight: j.weight,
-      confirmed: j.confirmed,
-      sortOrder: j.sort_order,
-    })),
+    jobs: jobs.map((j) => {
+      const counts = invariantCounts[j.id] || {};
+      return {
+        id: j.id,
+        personaId: j.persona_id,
+        title: j.title,
+        priority: j.priority,
+        weight: j.weight,
+        confirmed: j.confirmed,
+        sortOrder: j.sort_order,
+        invariantCounts: {
+          total: counts.total || 0,
+          candidates: counts.candidates || 0,
+          confirmed: counts.confirmed || 0,
+          broken: counts.broken || 0,
+        },
+      };
+    }),
     entities: entities.map((e) => ({
       id: e.id,
       type: e.type,
@@ -145,6 +156,38 @@ function graphFromDbRow(full) {
 
 function computeScoresFromGraph(g) {
   return buildScoresObject(g.jobs, g.entities, g.edges);
+}
+
+async function loadInvariantCountsByJob(projectId) {
+  const { rows } = await getDb().query(
+    `SELECT sj.job_id,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE s.status = 'candidate')::int AS candidates,
+            COUNT(*) FILTER (WHERE s.status = 'confirmed')::int AS confirmed,
+            COUNT(*) FILTER (WHERE s.satisfied = FALSE)::int AS broken
+       FROM statement_jobs sj
+       JOIN intent_statements s ON s.id = sj.statement_id
+      WHERE s.project_id = $1 AND s.archived = FALSE
+      GROUP BY sj.job_id`,
+    [projectId]
+  );
+  const out = {};
+  for (const r of rows) {
+    out[r.job_id] = {
+      total: r.total,
+      candidates: r.candidates,
+      confirmed: r.confirmed,
+      broken: r.broken,
+    };
+  }
+  return out;
+}
+
+async function getEnrichedMapByProject(projectId) {
+  const full = await mapDb.getMapByProject(projectId);
+  if (!full) return null;
+  const invariantCounts = await loadInvariantCountsByJob(projectId).catch(() => ({}));
+  return { full, graph: graphFromDbRow(full, invariantCounts), invariantCounts };
 }
 
 /**
@@ -186,7 +229,12 @@ async function createProductMap(projectId, analysisId, description, { req } = {}
 
   const codebaseModel = await loadCodebaseModel(projectId, analysisId);
 
-  const intent = await extractProductIntent(description, analysisId);
+  // Extract code surfaces first so persona/job derivation can be grounded in
+  // what the app actually does, not just the prose description (Phase 2).
+  const entitiesLogical = extractCodeEntities(codebaseModel);
+  const codeContext = summarizeCodeContext(entitiesLogical);
+
+  const intent = await extractProductIntent(description, analysisId, codeContext);
   let { personas, jobs } = remapProductNodes(intent.personas, intent.jobs);
   if (personas.length === 0) {
     personas = [{
@@ -208,7 +256,6 @@ async function createProductMap(projectId, analysisId, description, { req } = {}
     }];
   }
 
-  const entitiesLogical = extractCodeEntities(codebaseModel);
   const edgesLogical = await linkAll(jobs, entitiesLogical, codebaseModel, analysisId);
   const scores = buildScoresObject(jobs, entitiesLogical, edgesLogical);
   const { entities, edges } = remapEntityIdsForPersistence(entitiesLogical, edgesLogical);
@@ -296,6 +343,7 @@ async function updateProductMap(mapId, action, payload, { req } = {}) {
     case 'confirmJob': {
       requireNonEmptyString(p, 'jobId', 'confirmJob');
       await mapDb.updateJob(p.jobId, { confirmed: true });
+      await cascadeConfirmJob(ctx.projectId, p.jobId);
       break;
     }
     case 'addJob': {
@@ -370,6 +418,8 @@ module.exports = {
   simulateForModule,
   graphFromDbRow,
   getMapByProject: (projectId) => mapDb.getMapByProject(projectId),
+  getEnrichedMapByProject,
+  loadInvariantCountsByJob,
   getProductMap: (mapId) => mapDb.getProductMap(mapId),
   loadCodebaseModel,
 };

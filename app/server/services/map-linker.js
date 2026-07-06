@@ -16,11 +16,21 @@ Respond with JSON array only:
 
 Only include matches with confidence >= 0.5.`;
 
+// Meaningful tokens from a name/title for overlap matching.
+function nameTokens(s) {
+  return String(s || '')
+    .replace(/[/:_.-]/g, ' ')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+}
+
 function heuristicLink(jobs, entities) {
   const edges = [];
 
   for (const job of jobs) {
     const title = (job.title || '').toLowerCase();
+    const titleWords = nameTokens(job.title);
 
     const keywordMap = {
       'sign up|log in|login|register|auth|account': 'cap:auth',
@@ -47,17 +57,24 @@ function heuristicLink(jobs, entities) {
       }
     }
 
-    for (const entity of entities.filter((e) => e.type === 'page')) {
-      const pageName = (entity.key || '').replace(/[/:_-]/g, ' ').toLowerCase();
-      const words = title.split(/\s+/);
-      const overlap = words.filter((w) => w.length > 3 && pageName.includes(w));
+    // Substring-overlap match against every named surface (pages, routes,
+    // components) — not just pages — so more jobs resolve to real code.
+    // Slightly lower base confidence for non-page surfaces.
+    for (const entity of entities) {
+      if (entity.type === 'capability') continue; // handled by keywordMap above
+      const entName = String(entity.key || entity.label || '')
+        .replace(/[/:_.-]/g, ' ')
+        .toLowerCase();
+      if (!entName) continue;
+      const overlap = titleWords.filter((w) => entName.includes(w));
       if (overlap.length > 0) {
+        const base = entity.type === 'page' ? 0.5 : 0.45;
         edges.push({
           fromId: job.id,
           toId: entity.id,
           type: 'needs',
-          label: `Job mentions "${overlap.join(', ')}" — page matches`,
-          confidence: Math.min(0.95, 0.5 + overlap.length * 0.1),
+          label: `Job mentions "${[...new Set(overlap)].join(', ')}" — ${entity.type} matches`,
+          confidence: Math.min(0.95, base + overlap.length * 0.1),
           method: 'heuristic',
         });
       }
@@ -227,4 +244,5 @@ module.exports = {
   claudeLink,
   linkCodeEntities,
   linkAll,
+  nameTokens,
 };

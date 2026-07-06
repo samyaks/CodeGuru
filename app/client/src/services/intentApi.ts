@@ -36,50 +36,72 @@ export interface IntentStatement {
   status: IntentStatus;
   source: IntentSource;
   featureArea: string | null;
-  /** Coarse, product-level grouping (server-derived). Presentation only. */
   groupLabel?: string | null;
+  scope?: 'job' | 'global';
+  confidence?: number | null;
+  confirmedVia?: 'direct' | 'job' | null;
   links: IntentLink[];
-  /** Satisfaction (Phase 6). `null` = not yet checked / no baseline. */
   satisfied: boolean | null;
   lastCheckedAt: string | null;
   createdAt: string;
   updatedAt: string | null;
 }
 
-/** A persona the feature serves (synthesized or reused from the product map). */
-export interface IntentPersona {
-  name: string;
-  emoji: string | null;
-}
-
-/** The job-to-be-done a feature enables. */
-export interface IntentJob {
+export interface IntentJobGroup {
+  id: string;
   title: string;
-  priority: 'high' | 'medium' | 'low' | null;
-}
-
-/** Statements for one feature (== group), plus its synthesized JTBD metadata
- * and review progress. `featureArea` is the feature title; persona/job/summary
- * are populated once feature synthesis has run (null otherwise). */
-export interface IntentAreaGroup {
-  featureArea: string | null;
-  summary?: string | null;
-  persona?: IntentPersona | null;
-  job?: IntentJob | null;
-  priority?: 'high' | 'medium' | 'low' | null;
-  sortOrder?: number | null;
+  priority: string;
+  confirmed: boolean;
   statements: IntentStatement[];
   candidateCount: number;
   confirmedCount: number;
   rejectedCount: number;
+  holdsCount: number;
+  brokenCount: number;
+}
+
+export interface IntentPersonaGroup {
+  id: string;
+  name: string;
+  emoji: string | null;
+  description?: string | null;
+  confirmed: boolean;
+  jobs: IntentJobGroup[];
+  candidateCount: number;
+  confirmedCount: number;
+  rejectedCount: number;
+  holdsCount: number;
+  brokenCount: number;
+}
+
+export interface IntentGlobalsGroup {
+  title: string;
+  statements: IntentStatement[];
+  candidateCount: number;
+  confirmedCount: number;
+  rejectedCount: number;
+  holdsCount: number;
+  brokenCount: number;
 }
 
 export interface IntentListResponse {
-  areas: IntentAreaGroup[];
+  personas: IntentPersonaGroup[];
+  globals: IntentGlobalsGroup;
   total: number;
   confirmed: number;
   candidates: number;
   rejected: number;
+  holds: number;
+  broken: number;
+}
+
+/** @deprecated legacy area grouping — kept for mock/back-compat only */
+export interface IntentAreaGroup {
+  featureArea: string | null;
+  statements: IntentStatement[];
+  candidateCount: number;
+  confirmedCount: number;
+  rejectedCount: number;
 }
 
 /** A link flagged by Phase 5 reconciliation as needing human adjudication. */
@@ -242,8 +264,28 @@ export async function markLinkBroken(
   return data.statement;
 }
 
-/** Intent gaps (Phase 6): confirmed statements whose code drifted out of
- *  satisfaction, computed fresh on read. */
+export async function fetchIntentFindings(projectId: string): Promise<IntentFinding[]> {
+  const res = await authFetch(`${API_BASE}/projects/${projectId}/intent/findings`);
+  const data = await handleApiResponse<{ findings: IntentFinding[] }>(res);
+  return data.findings ?? [];
+}
+
+/** Broken guarantees (findings-first UX). */
+export interface IntentFinding {
+  id: string;
+  statementId: string;
+  title: string;
+  description: string;
+  kind: IntentKind;
+  scope: 'job' | 'global';
+  status: IntentStatus;
+  featureArea: string | null;
+  links: IntentLink[];
+  reason: 'broken';
+  confidence: number | null;
+}
+
+/** Intent gaps (Phase 6): confirmed statements whose code drifted. */
 export async function fetchIntentGaps(projectId: string): Promise<IntentGap[]> {
   const res = await authFetch(`${API_BASE}/projects/${projectId}/intent/gaps`);
   const data = await handleApiResponse<{ gaps: IntentGap[] }>(res);

@@ -1,13 +1,14 @@
 const express = require('express');
-const { deployments, intentStatements, intentFeatures, analysisFiles } = require('../../lib/db');
+const { deployments, intentStatements, analysisFiles, productMap, statementJobs } = require('../../lib/db');
 const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
-const { toStatement, groupByArea } = require('../../services/intent/intent-mapper');
+const { toStatement, groupByJob } = require('../../services/intent/intent-mapper');
 const { buildLivingSpec } = require('../../services/intent/spec-generator');
 const { hashLinkedFiles } = require('../../services/intent/satisfaction');
-const { synthesizeIntentGaps } = require('../../services/intent/intent-gaps');
+const { synthesizeIntentGaps, synthesizeFindings } = require('../../services/intent/intent-gaps');
+const { confirmStatementDirect } = require('../../services/intent/cascade-confirm');
 
 // Takeoff intent substrate router (Phase 4/4b/5 fill in the handlers).
 //
@@ -60,15 +61,18 @@ async function computeBaselineHash(projectId, links) {
 // GET /  -> statements grouped by feature_area with links + status
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
-  const { status, featureArea } = req.query;
-  const [rows, features] = await Promise.all([
-    intentStatements.findByProjectId(req.params.id, {
+  const projectId = req.params.id;
+  const { status } = req.query;
+  const [rows, mapFull, links] = await Promise.all([
+    intentStatements.findByProjectId(projectId, {
       status: typeof status === 'string' ? status : undefined,
-      featureArea: typeof featureArea === 'string' ? featureArea : undefined,
+      archived: false,
     }),
-    intentFeatures.findByProjectId(req.params.id),
+    productMap.getMapByProject(projectId),
+    statementJobs.findLinksForProject(projectId),
   ]);
-  res.json(groupByArea(rows.map(toStatement), features));
+  const statements = rows.map(toStatement);
+  res.json(groupByJob(statements, mapFull, links));
 }));
 
 // POST /:statementId/confirm -> status=confirmed + freeze satisfaction baseline
@@ -77,15 +81,7 @@ router.post('/:statementId/confirm', requireUser, writeLimit, asyncHandler(async
   const existing = await intentStatements.findById(req.params.statementId, req.params.id);
   if (!existing) throw AppError.notFound('Statement not found');
 
-  // Freeze the baseline: hash the current linked-file contents so Phase 6 can
-  // detect drift. A freshly confirmed statement is satisfied by definition.
-  const codeHash = await computeBaselineHash(req.params.id, existing.links);
-  const updated = await intentStatements.update(req.params.statementId, req.params.id, {
-    status: 'confirmed',
-    code_hash: codeHash,
-    satisfied: true,
-    last_checked_at: new Date().toISOString(),
-  });
+  const updated = await confirmStatementDirect(req.params.id, req.params.statementId);
   if (!updated) throw AppError.notFound('Statement not found');
   res.json({ statement: toStatement(updated) });
 }));
@@ -162,11 +158,20 @@ router.post('/:statementId/restore', requireUser, writeLimit, asyncHandler(async
 // GET /spec -> generated markdown living spec from confirmed statements
 router.get('/spec', readLimit, asyncHandler(async (req, res) => {
   await loadProjectAndAuthorize(req);
-  const [confirmed, features] = await Promise.all([
-    intentStatements.findConfirmedByProjectId(req.params.id),
-    intentFeatures.findByProjectId(req.params.id),
+  const projectId = req.params.id;
+  const [confirmed, mapFull, links] = await Promise.all([
+    intentStatements.findConfirmedByProjectId(projectId),
+    productMap.getMapByProject(projectId),
+    statementJobs.findLinksForProject(projectId),
   ]);
-  res.json({ markdown: buildLivingSpec(confirmed, features) });
+  res.json({ markdown: buildLivingSpec(confirmed, mapFull, links) });
+}));
+
+// GET /findings -> broken guarantees (candidate + confirmed), findings-first UX
+router.get('/findings', readLimit, asyncHandler(async (req, res) => {
+  await loadProjectAndAuthorize(req);
+  const rows = await intentStatements.findByProjectId(req.params.id, { archived: false });
+  res.json({ findings: synthesizeFindings(rows) });
 }));
 
 // Null-safe match of a stored link by its current (file_path, symbol) identity.

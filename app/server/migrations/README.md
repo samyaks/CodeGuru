@@ -62,3 +62,11 @@ Postgres, not ANSI SQL.
   feature carries a summary + inline persona/job (denormalized; regenerated per
   analysis) and joins to statements via `label = group_label`. `job_id` links to
   a product-map job (`map_jobs.id`) when one was reused, else null.
+  NOTE: retired by `023` — `intent_features` is dropped and `features.js` removed.
+- `023_job_invariants.sql` — jobs become the confirmation unit and
+  `intent_statements` become invariants beneath them. Adds `scope` (job|global),
+  `confirmed_via` (direct|job), `confidence`, and `archived` to
+  `intent_statements`; a `statement_jobs` many-to-many (invariant <-> `map_jobs`);
+  drops `intent_features`; and archives the existing wrong-altitude statements
+  (kept as history). Fresh invariants are generated under confirmed jobs by
+  `services/intent/generate-invariants.js` + `global-guarantees.js`.
