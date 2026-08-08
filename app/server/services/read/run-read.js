@@ -13,6 +13,7 @@ const {
   deployments,
   productMap,
   intentStatements,
+  statementJobs,
   suggestions,
   projectReads,
   readClaims,
@@ -20,10 +21,10 @@ const {
 
 const TOP_INVARIANTS = 10;
 
-// synthesize-read.js and next-thing.js are required lazily INSIDE the
-// functions below (not at module top-level) so this module — and everything
-// that requires it (routes, takeoff pipeline) — still loads while those
-// files are being built in a parallel workstream.
+// synthesize-read.js, next-thing.js, code-slice.js and pick-core-job.js are
+// required lazily INSIDE the functions below (not at module top-level) so
+// this module — and everything that requires it (routes, takeoff pipeline) —
+// still loads while those files are being built in a parallel workstream.
 function loadSynthesizeRead() {
   return require('./synthesize-read').synthesizeRead;
 }
@@ -32,8 +33,20 @@ function loadDeriveNextThing() {
   return require('./next-thing').deriveNextThing;
 }
 
+function loadBuildCodeSlice() {
+  return require('./code-slice').buildCodeSlice;
+}
+
+function loadPickCoreJob() {
+  return require('./pick-core-job').pickCoreJob;
+}
+
 // Everything both synthesis stages read from the DB, fetched once.
-async function loadReadInputs(projectId) {
+//
+// withCodeSlice: the source slice only feeds claim synthesis, so
+// rederiveNext (which reuses these inputs purely for next-thing derivation)
+// leaves it off and skips that load entirely.
+async function loadReadInputs(projectId, { codebaseModel = null, withCodeSlice = false } = {}) {
   const project = await deployments.findById(projectId);
   if (!project) throw new Error(`project ${projectId} not found`);
 
@@ -45,12 +58,26 @@ async function loadReadInputs(projectId) {
   }
 
   // Top job-scoped invariants by confidence — the strongest grounded signals
-  // about what the app actually does.
+  // about what the app actually does. Raw statement rows carry no job ids
+  // (associations live in statement_jobs), so we attach `job_ids` here —
+  // pick-core-job.js prefers explicit ids over its title-matching fallback.
   let invariants = [];
   try {
     const rows = await intentStatements.findByProjectId(projectId, { archived: false });
+    let jobIdsByStatement = new Map();
+    try {
+      const links = await statementJobs.findLinksForProject(projectId);
+      jobIdsByStatement = links.reduce((acc, l) => {
+        if (!acc.has(l.statement_id)) acc.set(l.statement_id, []);
+        acc.get(l.statement_id).push(l.job_id);
+        return acc;
+      }, new Map());
+    } catch (err) {
+      console.error(`[read] statement-job link load for ${projectId} failed (falling back to title matching): ${err.message}`);
+    }
     invariants = rows
       .filter((r) => r.scope === 'job')
+      .map((r) => ({ ...r, job_ids: jobIdsByStatement.get(r.id) || [] }))
       .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
       .slice(0, TOP_INVARIANTS);
   } catch (err) {
@@ -62,6 +89,38 @@ async function loadReadInputs(projectId) {
     securityFindings = await suggestions.findV2SecurityGapsByProjectId(projectId);
   } catch (err) {
     console.error(`[read] security findings load for ${projectId} failed (continuing without them): ${err.message}`);
+  }
+
+  // Human-settled claims — synthesis treats them as ground truth (and
+  // upsertDraft refuses to overwrite them regardless).
+  let settledClaims = [];
+  try {
+    const claimRows = await readClaims.findByProjectId(projectId);
+    settledClaims = claimRows
+      .filter((r) => r.status === 'settled')
+      .map((r) => ({ slot: r.slot, text: r.text }));
+  } catch (err) {
+    console.error(`[read] settled claim load for ${projectId} failed (continuing without them): ${err.message}`);
+  }
+
+  // Deterministic core-job pick for the core_job claim.
+  let coreJobCandidate = null;
+  try {
+    const pickCoreJob = loadPickCoreJob();
+    coreJobCandidate = pickCoreJob({ map, invariants }) || null;
+  } catch (err) {
+    console.error(`[read] core-job pick for ${projectId} failed (continuing without it): ${err.message}`);
+  }
+
+  // Source-code slice that grounds the synthesis prompt in real files.
+  let codeSlice = null;
+  if (withCodeSlice) {
+    try {
+      const buildCodeSlice = loadBuildCodeSlice();
+      codeSlice = await buildCodeSlice(projectId, { codebaseModel });
+    } catch (err) {
+      console.error(`[read] code slice for ${projectId} failed (continuing without it): ${err.message}`);
+    }
   }
 
   const analysisData = project.analysis_data || {};
@@ -81,6 +140,9 @@ async function loadReadInputs(projectId) {
     },
     gaps: Array.isArray(analysisData.gaps) ? analysisData.gaps : [],
     securityFindings,
+    codeSlice,
+    settledClaims,
+    coreJobCandidate,
   };
 }
 
@@ -100,14 +162,14 @@ function toSettledClaims(claimRows) {
  * -> derive next thing -> persist. Non-fatal at every step.
  *
  * @param {string} projectId - deployments.id
- * @param {object} codebaseModel - analyzer output (unused today; the read is
- *   built from persisted analysis state so regenerate works without a fresh
- *   analysis, but the pipeline passes it for future in-memory shortcuts)
+ * @param {object} codebaseModel - analyzer output, handed to buildCodeSlice
+ *   as an in-memory shortcut; the slice falls back to persisted analysis
+ *   state when it's absent (regenerate without a fresh analysis)
  */
-async function runRead(projectId, codebaseModel) { // eslint-disable-line no-unused-vars
+async function runRead(projectId, codebaseModel) {
   let inputs;
   try {
-    inputs = await loadReadInputs(projectId);
+    inputs = await loadReadInputs(projectId, { codebaseModel, withCodeSlice: true });
   } catch (err) {
     console.error(`[read] input load for ${projectId} failed (aborting read): ${err.message}`);
     return { ran: false };

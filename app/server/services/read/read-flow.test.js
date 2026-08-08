@@ -123,7 +123,7 @@ test('full read flow: synthesis -> correction -> conditioned next-thing', async 
   assert.strictEqual(objective.evidence[0].filePath, 'src/Habit.js');
   assert.ok(objective.confidence >= UNCERTAIN_THRESHOLD);
   assert.strictEqual(coreJob.evidence.length, 2);
-  assert.strictEqual(coreJob.confidence, 0.85);
+  assert.strictEqual(coreJob.confidence, 0.9);
 
   // The audience claim is the yellow-wash one: persona-only inference,
   // under the threshold, carrying the structured alternative.

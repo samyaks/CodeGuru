@@ -1366,6 +1366,46 @@ const analyses = {
 
 // ── Analysis Files ────────────────────────────────────────────────
 
+/**
+ * Builds one UPDATE ... FROM (VALUES ...) statement for a chunk of tier
+ * updates (see analysisFiles.bulkUpdateTiers for the row contract).
+ * Pure function — exported for unit testing.
+ */
+function buildBulkTierUpdateChunk(analysisId, chunk) {
+  const values = [];
+  const tuples = chunk.map((u, idx) => {
+    const base = idx * 8;
+    values.push(
+      u.path,
+      u.tier ?? null,
+      u.content ?? null,
+      u.skeleton ?? null,
+      u.content_tokens ?? null,
+      u.skeleton_tokens ?? null,
+      u.fetched_at ?? null,
+      u.skip_reason ?? null
+    );
+    return `($${base + 1}::text, $${base + 2}::text, $${base + 3}::text, $${base + 4}::text, `
+      + `$${base + 5}::int, $${base + 6}::int, $${base + 7}::timestamptz, $${base + 8}::text)`;
+  });
+  values.push(analysisId);
+  const analysisIdParam = `$${values.length}`;
+  const sql =
+    `UPDATE analysis_files af
+        SET tier            = COALESCE(t.tier,            af.tier),
+            content         = COALESCE(t.content,         af.content),
+            skeleton        = COALESCE(t.skeleton,        af.skeleton),
+            content_tokens  = COALESCE(t.content_tokens,  af.content_tokens),
+            skeleton_tokens = COALESCE(t.skeleton_tokens, af.skeleton_tokens),
+            fetched_at      = COALESCE(t.fetched_at,      af.fetched_at),
+            skip_reason     = COALESCE(t.skip_reason,     af.skip_reason)
+       FROM (VALUES ${tuples.join(', ')})
+         AS t(path, tier, content, skeleton, content_tokens, skeleton_tokens, fetched_at, skip_reason)
+      WHERE af.analysis_id = ${analysisIdParam}
+        AND af.path = t.path`;
+  return { sql, values };
+}
+
 const analysisFiles = {
   async upsert(row) {
     const id = crypto.randomUUID();
@@ -1486,6 +1526,31 @@ const analysisFiles = {
     const out = {};
     for (const r of rows) out[r.path] = r.skeleton;
     return out;
+  },
+
+  /**
+   * Batched version of updateTier for the analyzer ingestion loop.
+   *
+   * Contract: every update row must have a uniform shape —
+   *   { path, tier, content, skeleton, content_tokens, skeleton_tokens,
+   *     fetched_at, skip_reason }
+   * with unused fields set to null (not undefined). Null fields are
+   * COALESCEd against the existing column value, i.e. a null NEVER clears
+   * a previously-set column. The two callers (analyzer.js ingestion loops)
+   * control the shape: freshly-inserted tree rows have NULL in all of these
+   * columns, so COALESCE semantics match updateTier's behavior there.
+   *
+   * One UPDATE ... FROM (VALUES ...) round trip per chunk of 500 rows.
+   */
+  async bulkUpdateTiers(analysisId, updates) {
+    if (!updates || updates.length === 0) return;
+    const BATCH = 500;
+    await withTransaction(async (client) => {
+      for (let i = 0; i < updates.length; i += BATCH) {
+        const { sql, values } = buildBulkTierUpdateChunk(analysisId, updates.slice(i, i + BATCH));
+        await client.query(sql, values);
+      }
+    });
   },
 
   async updateTier(analysisId, filePath, fields) {
@@ -1659,7 +1724,52 @@ const analysisLlmCalls = {
 
 // ── Analysis Events ───────────────────────────────────────────────
 
+/**
+ * Builds one multi-row INSERT for a chunk of analysis_events rows.
+ * Generates id/created_at per row. Pure apart from uuid/timestamp
+ * generation — exported for unit testing.
+ */
+function buildEventsInsertChunk(chunk) {
+  const values = [];
+  const placeholders = chunk.map((e, idx) => {
+    const base = idx * 9;
+    values.push(
+      crypto.randomUUID(),
+      e.analysis_id,
+      e.event_type,
+      e.source ?? null,
+      e.path ?? null,
+      e.bytes ?? null,
+      e.tokens ?? null,
+      e.metadata == null ? null : toJsonb(e.metadata),
+      new Date().toISOString()
+    );
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`;
+  });
+  const sql =
+    `INSERT INTO analysis_events
+      (id, analysis_id, event_type, source, path, bytes, tokens, metadata, created_at)
+      VALUES ${placeholders.join(', ')}`;
+  return { sql, values };
+}
+
 const analysisEvents = {
+  /**
+   * Multi-row INSERT following the bulkInsertTreeRows pattern. Each row
+   * has the same shape as `create` (analysis_id, event_type, source?, path?,
+   * bytes?, tokens?, metadata?); ids and created_at are generated here.
+   */
+  async createBatch(rows) {
+    if (!rows || rows.length === 0) return;
+    const BATCH = 500;
+    await withTransaction(async (client) => {
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const { sql, values } = buildEventsInsertChunk(rows.slice(i, i + BATCH));
+        await client.query(sql, values);
+      }
+    });
+  },
+
   async create(event) {
     const id = crypto.randomUUID();
     const created_at = new Date().toISOString();
@@ -2490,4 +2600,6 @@ module.exports = {
   shippedItems, webhookEvents, securityShares,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
+  // Pure query builders exported for unit tests only.
+  buildBulkTierUpdateChunk, buildEventsInsertChunk,
 };

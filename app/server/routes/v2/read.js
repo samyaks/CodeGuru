@@ -140,7 +140,20 @@ router.post('/unlock', requireUser, writeLimit, asyncHandler(async (req, res) =>
 // the fresh read. Settled claims survive regeneration by design.
 router.post('/regenerate', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
-  await runRead(project.id, {});
+
+  // Required lazily: ensure-invariants pulls in the intent generation stack,
+  // which only this handler needs. Old projects analyzed before the intent
+  // pipeline have no invariants — generate them (best-effort, never throws)
+  // so the regenerated read is grounded.
+  const { ensureInvariants } = require('../../services/read/ensure-invariants');
+  const ensured = await ensureInvariants(project.id);
+  if (ensured.generated) {
+    console.log(`[read] generated ${ensured.count} invariants on demand for ${project.id} before regenerate`);
+  }
+
+  // Thread the rehydrated codebaseModel through when ensure-invariants
+  // already built one; runRead treats it as optional.
+  await runRead(project.id, ensured.model || {});
   res.json(await buildReadPayload(project));
 }));
 

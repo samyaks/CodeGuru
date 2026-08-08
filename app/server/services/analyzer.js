@@ -330,6 +330,13 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
       )
     );
 
+    // Accumulate per-file writes for this fetch batch, then flush them in
+    // three round trips (bulkUpdateTiers / incrementIngested / createBatch)
+    // instead of three per file.
+    const tierUpdates = [];
+    const events = [];
+    const ingested = { files: 0, bytes: 0, tokens: 0 };
+
     for (let j = 0; j < results.length; j++) {
       const r = results[j];
       const originalFile = batch[j];
@@ -346,22 +353,20 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
             const skeletonTokens = estimateTokens(skeleton);
             const bytes = r.size || r.content.length;
 
-            await safeDb(() => analysisFiles.updateTier(analysisId, r.path, {
+            tierUpdates.push({
+              path: r.path,
               tier,
               content: tier === 'full' ? r.content : null,
               skeleton,
               content_tokens: contentTokens,
               skeleton_tokens: skeletonTokens,
               fetched_at: new Date().toISOString(),
-            }), `analysisFiles.updateTier ${r.path}`);
-
-            await safeDb(() => analyses.incrementIngested(analysisId, {
-              files: 1,
-              bytes,
-              tokens: contentTokens,
-            }), 'analyses.incrementIngested');
-
-            await safeDb(() => analysisEvents.create({
+              skip_reason: null,
+            });
+            ingested.files += 1;
+            ingested.bytes += bytes;
+            ingested.tokens += contentTokens;
+            events.push({
               analysis_id: analysisId,
               event_type: 'content.fetched',
               source: 'github.contents',
@@ -369,21 +374,40 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
               bytes,
               tokens: contentTokens,
               metadata: { tier },
-            }), 'analysisEvents.create content.fetched');
+            });
           }
         }
       } else if (analysisId) {
         const p = (r && r.path) || originalFile.path;
-        await safeDb(() => analysisFiles.updateTier(analysisId, p, {
+        tierUpdates.push({
+          path: p,
+          tier: null,
+          content: null,
+          skeleton: null,
+          content_tokens: null,
+          skeleton_tokens: null,
+          fetched_at: null,
           skip_reason: 'fetch_failed',
-        }), `analysisFiles.updateTier skip ${p}`);
-        await safeDb(() => analysisEvents.create({
+        });
+        events.push({
           analysis_id: analysisId,
           event_type: 'content.skipped',
           source: 'github.contents',
           path: p,
           metadata: { reason: 'fetch_failed' },
-        }), 'analysisEvents.create content.skipped');
+        });
+      }
+    }
+
+    if (analysisId) {
+      if (tierUpdates.length > 0) {
+        await safeDb(() => analysisFiles.bulkUpdateTiers(analysisId, tierUpdates), 'analysisFiles.bulkUpdateTiers');
+      }
+      if (ingested.files > 0) {
+        await safeDb(() => analyses.incrementIngested(analysisId, ingested), 'analyses.incrementIngested');
+      }
+      if (events.length > 0) {
+        await safeDb(() => analysisEvents.createBatch(events), 'analysisEvents.createBatch');
       }
     }
 
@@ -744,6 +768,30 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
   const toRead = sorted.slice(0, MAX_FILES_TO_READ);
 
   const fileContents = {};
+
+  // Accumulate per-file writes and flush every FLUSH_EVERY files (plus a
+  // final flush) — three round trips per flush instead of three per file.
+  const FLUSH_EVERY = 25;
+  const pendingTiers = [];
+  const pendingEvents = [];
+  let pendingIngested = { files: 0, bytes: 0, tokens: 0 };
+
+  async function flushIngestion() {
+    if (pendingTiers.length > 0) {
+      const tiers = pendingTiers.splice(0);
+      await safeDb(() => analysisFiles.bulkUpdateTiers(analysisId, tiers), 'analysisFiles.bulkUpdateTiers');
+    }
+    if (pendingIngested.files > 0) {
+      const counters = pendingIngested;
+      pendingIngested = { files: 0, bytes: 0, tokens: 0 };
+      await safeDb(() => analyses.incrementIngested(analysisId, counters), 'analyses.incrementIngested');
+    }
+    if (pendingEvents.length > 0) {
+      const events = pendingEvents.splice(0);
+      await safeDb(() => analysisEvents.createBatch(events), 'analysisEvents.createBatch');
+    }
+  }
+
   for (let i = 0; i < toRead.length; i++) {
     const f = toRead[i];
     const content = contentMap.get(f.path);
@@ -759,22 +807,20 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
           const skeleton = extractSkeleton(content, 4000, { path: f.path });
           const skeletonTokens = estimateTokens(skeleton);
 
-          await safeDb(() => analysisFiles.updateTier(analysisId, f.path, {
+          pendingTiers.push({
+            path: f.path,
             tier,
             content: tier === 'full' ? content : null,
             skeleton,
             content_tokens: contentTokens,
             skeleton_tokens: skeletonTokens,
             fetched_at: new Date().toISOString(),
-          }), `analysisFiles.updateTier ${f.path}`);
-
-          await safeDb(() => analyses.incrementIngested(analysisId, {
-            files: 1,
-            bytes: content.length,
-            tokens: contentTokens,
-          }), 'analyses.incrementIngested');
-
-          await safeDb(() => analysisEvents.create({
+            skip_reason: null,
+          });
+          pendingIngested.files += 1;
+          pendingIngested.bytes += content.length;
+          pendingIngested.tokens += contentTokens;
+          pendingEvents.push({
             analysis_id: analysisId,
             event_type: 'content.fetched',
             source: 'internal.upload',
@@ -782,21 +828,36 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
             bytes: content.length,
             tokens: contentTokens,
             metadata: { tier },
-          }), 'analysisEvents.create content.fetched');
+          });
         }
       }
     } else if (analysisId) {
-      await safeDb(() => analysisFiles.updateTier(analysisId, f.path, {
+      pendingTiers.push({
+        path: f.path,
+        tier: null,
+        content: null,
+        skeleton: null,
+        content_tokens: null,
+        skeleton_tokens: null,
+        fetched_at: null,
         skip_reason: 'fetch_failed',
-      }), `analysisFiles.updateTier skip ${f.path}`);
-      await safeDb(() => analysisEvents.create({
+      });
+      pendingEvents.push({
         analysis_id: analysisId,
         event_type: 'content.skipped',
         source: 'internal.upload',
         path: f.path,
         metadata: { reason: 'fetch_failed' },
-      }), 'analysisEvents.create content.skipped');
+      });
     }
+
+    if (analysisId && (i + 1) % FLUSH_EVERY === 0) {
+      await flushIngestion();
+    }
+  }
+
+  if (analysisId) {
+    await flushIngestion();
   }
 
   if (analysisId) {

@@ -1,10 +1,10 @@
 /**
  * Grounding-based confidence for Read claims (not LLM self-score).
  *
- * Mirrors the philosophy of intent/confidence.js: a claim is only as
- * trustworthy as the real code surfaces behind it. Evidence entries that
- * carry file paths we can verify against invariant links or map entities
- * count as "grounded"; everything else is inference.
+ * Evidence entries are verified against the REAL analyzed file list
+ * (buildCodeSlice().knownPaths) plus invariant links; a claim is only as
+ * trustworthy as the verified code surfaces behind it. Pure module — no DB,
+ * no LLM.
  *
  * Below UNCERTAIN_THRESHOLD the UI shows the yellow wash and offers the
  * structured alternative ("who's this really for?").
@@ -12,62 +12,80 @@
 
 const UNCERTAIN_THRESHOLD = 0.6;
 
+function normalizePath(p) {
+  if (typeof p !== 'string') return null;
+  const trimmed = p.trim().replace(/^\.\//, '');
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
- * Collect every file path we can independently verify: invariant links
- * and product-map entities. Used to decide whether an evidence entry is
- * truly file-grounded rather than a path the model made up.
+ * Exact match, or suffix leniency for basename-style citations: either side
+ * ending with '/' + the other counts. A bare basename that matches multiple
+ * known paths still verifies (any match is enough).
  */
-function knownFilePaths({ map, invariants }) {
-  const known = new Set();
-  for (const inv of Array.isArray(invariants) ? invariants : []) {
-    for (const link of Array.isArray(inv && inv.links) ? inv.links : []) {
-      const fp = link && (link.file_path || link.filePath);
-      if (fp) known.add(fp);
-    }
+function pathMatches(filePath, knownList) {
+  for (const known of knownList) {
+    if (known === filePath) return true;
+    if (known.endsWith('/' + filePath)) return true;
+    if (filePath.endsWith('/' + known)) return true;
   }
-  for (const ent of Array.isArray(map && map.entities) ? map.entities : []) {
-    const fp = ent && (ent.file_path || ent.filePath);
-    if (fp) known.add(fp);
-  }
-  return known;
-}
-
-function isGrounded(entry, known) {
-  if (!entry) return false;
-  const fp = entry.filePath || entry.file_path;
-  if (!fp || typeof fp !== 'string') return false;
-  // If we have verifiable sources, the path must come from them; if we have
-  // none at all (thin map, no invariants) a concrete path is the best we get.
-  return known.size === 0 ? true : known.has(fp);
+  return false;
 }
 
 /**
- * Score a single Read claim. Pure and deterministic.
+ * Mark each evidence entry verified/unverified against real analyzed paths.
  *
- * @param {object} opts
- * @param {'objective'|'audience'|'core_job'} opts.slot
- * @param {Array<{filePath: string|null, symbol: string|null, note: string}>} opts.evidence
- * @param {object|null} opts.map - product map (entities may carry file_path)
- * @param {Array} opts.invariants - intent statements with links [{file_path, symbol}]
+ * @param {Array<{filePath: string|null, symbol: string|null, note: string}>} evidence
+ * @param {object} ctx
+ * @param {string[]} ctx.knownPaths - from buildCodeSlice().knownPaths
+ * @param {Array} [ctx.invariantLinks] - [{ filePath, symbol }] from invariant
+ *   links (also count as known; file_path key accepted too)
+ * @returns {Array} same entries, each gaining `verified: boolean`
+ */
+function verifyEvidence(evidence, ctx) {
+  const entries = Array.isArray(evidence) ? evidence : [];
+  const { knownPaths, invariantLinks } = ctx || {};
+
+  const knownSet = new Set();
+  for (const p of Array.isArray(knownPaths) ? knownPaths : []) {
+    const norm = normalizePath(p);
+    if (norm) knownSet.add(norm);
+  }
+  for (const link of Array.isArray(invariantLinks) ? invariantLinks : []) {
+    const norm = normalizePath(link && (link.filePath || link.file_path));
+    if (norm) knownSet.add(norm);
+  }
+  const knownList = [...knownSet];
+
+  return entries.map((entry) => {
+    const fp = normalizePath(entry && (entry.filePath || entry.file_path));
+    const verified = fp != null && pathMatches(fp, knownList);
+    return { ...entry, verified };
+  });
+}
+
+/**
+ * Pure deterministic confidence from verified evidence.
+ *
+ * @param {{ slot: 'objective'|'audience'|'core_job', evidence: Array<{verified?: boolean, filePath?: string|null}> }} opts
  * @returns {number} 0..1
  */
-function scoreClaimConfidence({ slot, evidence, map, invariants }) {
+function scoreClaimConfidence({ slot, evidence }) {
   const entries = Array.isArray(evidence) ? evidence : [];
-  const known = knownFilePaths({ map, invariants });
-  const grounded = entries.filter((e) => isGrounded(e, known)).length;
+  const verified = entries.filter((e) => e && e.verified === true).length;
 
-  if (grounded >= 2) return 0.85;
-  if (grounded === 1) return 0.7;
+  if (verified >= 2) return 0.9;
+  if (verified === 1) return 0.72;
 
-  // The "yellow highlighter" zone: an audience claim inferred from persona
-  // names alone. Code rarely proves who it's for — absence isn't proof.
+  // The "yellow highlighter" zone: an audience claim with only unverified
+  // evidence. Code rarely proves who it's for — absence isn't proof.
   if (slot === 'audience' && entries.length > 0) return 0.4;
 
   return 0.3;
 }
 
 module.exports = {
+  verifyEvidence,
   scoreClaimConfidence,
-  knownFilePaths,
   UNCERTAIN_THRESHOLD,
 };

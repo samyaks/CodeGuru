@@ -8,9 +8,16 @@
  *   core_job  — the one thing it can't get wrong (the most load-bearing
  *               invariant read from the code)
  *
+ * The prompt is code-grounded: alongside the product map and invariants it
+ * carries real source excerpts (inputs.codeSlice, budgeted upstream by
+ * code-slice.js), any human-settled claims (ground truth the other claims
+ * must stay coherent with), and — when pick-core-job found one — the exact
+ * invariant the core_job claim must phrase.
+ *
  * Confidence is NOT the model's self-score: after parsing we resolve the
- * model's evidence hints against real data (invariant links, map entities,
- * personas) and score each claim with read-confidence.js.
+ * model's evidence hints against real data (source-slice paths, invariant
+ * links, map entities), verify every cited path via read-confidence's
+ * verifyEvidence, and score each claim with the verified evidence only.
  *
  * Pure service: no DB, no Express. The orchestrator (run-read.js) persists.
  */
@@ -18,17 +25,18 @@
 const { CLAUDE_MODEL, anthropic, truncate } = require('../../lib/constants');
 const { createMessageTracked, extractText } = require('../../lib/anthropic-tracked');
 const { stripJsonFence } = require('../map-extractor');
-const { scoreClaimConfidence } = require('./read-confidence');
+const { verifyEvidence, scoreClaimConfidence } = require('./read-confidence');
 
 const SLOTS = ['objective', 'audience', 'core_job'];
 const MAX_INVARIANTS = 8;
 const MAX_EVIDENCE = 3;
 const FEATURES_CAP = 1500;
 const DESCRIPTION_CAP = 400;
+const MAX_TOKENS = 2000; // source-grounded evidence hints run longer
 
 const SYSTEM_PROMPT = `You are the editor of "the read" — a short, plain-prose account of what an app is, drafted from its code and set in type for its builder to correct.
 
-You will be given what we actually know about a repo: its domain, personas and their jobs (with priorities), guarantees extracted from the code (invariants, each tied to real files), a features summary, and the repo description.
+You will be given what we actually know about a repo: its domain, personas and their jobs (with priorities), guarantees extracted from the code (invariants, each tied to real files), source code excerpts from the repo's most load-bearing files, a features summary, and the repo description.
 
 Draft exactly THREE claims. Each is a lowercase-leading phrase that must fit this sentence template:
   "<Name> {objective}. It's for {audience} — and the one thing it can't get wrong is {core_job}."
@@ -36,6 +44,11 @@ Draft exactly THREE claims. Each is a lowercase-leading phrase that must fit thi
 - objective: what it does, in one warm plain phrase (e.g. "helps people build lasting habits through fast daily check-ins")
 - audience: who it's really for (e.g. "someone improving on their own"). Code rarely proves this — so ALSO offer two alternative worlds the builder can choose between, and say what each implies for the build.
 - core_job: the single most load-bearing guarantee from the provided invariants, phrased as the thing it can't get wrong (e.g. "letting them log a habit in under ten seconds")
+
+Grounding rules:
+- evidenceHints MUST cite file paths that appear in the provided source code excerpts or invariant links ONLY — never invent a path. For each claim, cite the 1-3 files that most directly support it. (Persona/job names from the inputs are also acceptable hints for the audience claim.)
+- If a "Settled claims" section appears, the builder has personally corrected those claims. Treat them as ground truth and keep the other claims consistent with them. Still return all three claims.
+- If a "Core job (already decided)" section appears, the core_job claim MUST be a plain-language phrasing of that specific guarantee — not a free choice among the invariants.
 
 Voice: an editor writing for a non-engineer. No jargon, no marketing copy. Say only what the inputs support.
 
@@ -101,6 +114,40 @@ function formatMap(map) {
   ].join('\n');
 }
 
+// The slice arrives already budgeted by code-slice.js — embed it as given.
+function formatCodeSlice(codeSlice) {
+  const files = codeSlice && Array.isArray(codeSlice.files) ? codeSlice.files : [];
+  const usable = files.filter((f) => f && f.path && typeof f.text === 'string' && f.text);
+  if (usable.length === 0) return null;
+  return usable.map((f) => `--- ${f.path} (${f.kind || 'full'}) ---\n${f.text}`).join('\n\n');
+}
+
+function formatSettledClaims(settledClaims) {
+  const list = Array.isArray(settledClaims)
+    ? settledClaims.filter((c) => c && c.slot && c.text)
+    : [];
+  if (list.length === 0) return null;
+  return list.map((c) => `- ${c.slot}: "${c.text}"`).join('\n');
+}
+
+function formatCoreJobDirective(candidate) {
+  const inv = candidate && candidate.invariant;
+  if (!inv || !inv.text) return null;
+  const links = (Array.isArray(inv.links) ? inv.links : [])
+    .map((l) => {
+      const fp = l && (l.file_path || l.filePath);
+      return fp ? `${fp}${l.symbol ? `:${l.symbol}` : ''}` : null;
+    })
+    .filter(Boolean)
+    .join(', ');
+  const lines = [`"${inv.text}"`];
+  if (links) lines.push(`Linked files: ${links}`);
+  if (candidate.job && candidate.job.title) {
+    lines.push(`Serves the job: ${candidate.job.title}${candidate.personaName ? ` (for ${candidate.personaName})` : ''}`);
+  }
+  return lines.join('\n');
+}
+
 function buildUserContent(inputs, invariants) {
   const parts = [
     formatMap(inputs.map),
@@ -108,6 +155,26 @@ function buildUserContent(inputs, invariants) {
     'Guarantees read from the code (invariants):',
     formatInvariants(invariants),
   ];
+  const sourceBlock = formatCodeSlice(inputs.codeSlice);
+  if (sourceBlock) {
+    parts.push('', 'Source code excerpts (real files from this repo — cite these paths in evidenceHints):', sourceBlock);
+  }
+  const settledBlock = formatSettledClaims(inputs.settledClaims);
+  if (settledBlock) {
+    parts.push(
+      '',
+      'Settled claims — the builder has personally settled these; treat them as ground truth and keep the other claims consistent with them:',
+      settledBlock
+    );
+  }
+  const coreJobBlock = formatCoreJobDirective(inputs.coreJobCandidate);
+  if (coreJobBlock) {
+    parts.push(
+      '',
+      'Core job (already decided) — the core_job claim must be a plain-language phrasing of THIS specific guarantee, not a free choice:',
+      coreJobBlock
+    );
+  }
   if (inputs.featuresSummary) {
     parts.push('', 'Features summary:', truncate(inputs.featuresSummary, FEATURES_CAP));
   }
@@ -211,39 +278,107 @@ function hintMatchesLink(hint, link) {
   return fp.includes(h) || h.includes(base) || (sym && (sym === h || h.includes(sym)));
 }
 
-function groundedNote(link, { sure }) {
-  const where = `${baseName(link.filePath)}${link.symbol ? ` (${link.symbol})` : ''}`;
+function hintMatchesPath(hint, filePath) {
+  const h = hint.toLowerCase();
+  const fp = filePath.toLowerCase();
+  const base = baseName(filePath).toLowerCase();
+  return fp.includes(h) || h.includes(base);
+}
+
+function slicePathsOf(codeSlice) {
+  return codeSlice && Array.isArray(codeSlice.knownPaths)
+    ? codeSlice.knownPaths.filter((p) => typeof p === 'string' && p)
+    : [];
+}
+
+function entityPathsOf(map) {
+  const out = [];
+  for (const ent of Array.isArray(map && map.entities) ? map.entities : []) {
+    const fp = ent && (ent.file_path || ent.filePath);
+    if (fp) out.push(fp);
+  }
+  return out;
+}
+
+function groundedNote(entry, { sure }) {
+  const where = `${baseName(entry.filePath)}${entry.symbol ? ` (${entry.symbol})` : ''}`;
   return sure
     ? `Read plainly from ${where} — we're sure of this one.`
     : `Read from ${where}.`;
 }
 
-function evidenceFromLinks(links, { sure }) {
-  return links.slice(0, MAX_EVIDENCE).map((l) => ({
-    filePath: l.filePath,
-    symbol: l.symbol,
-    note: groundedNote(l, { sure }),
-  }));
+// Flag entries via read-confidence's verifier; tolerate a defensive miss.
+function withVerification(entries, verifyCtx) {
+  const flagged = verifyEvidence(entries, verifyCtx);
+  return Array.isArray(flagged) ? flagged : entries;
 }
 
-function resolveCodeEvidence(claim, allLinks, invariants) {
-  const matched = allLinks.filter((l) => claim.evidenceHints.some((h) => hintMatchesLink(h, l)));
-  if (matched.length > 0) {
-    return evidenceFromLinks(matched, { sure: matched.length >= 2 });
+// Only entries whose cited path actually verifies survive — a matched-but-
+// unverified path must not be presented as something we read from the code.
+function verifiedOnly(entries, verifyCtx) {
+  return withVerification(entries, verifyCtx).filter((e) => e && e.verified);
+}
+
+function finalizeGrounded(entries, { sure }) {
+  return entries.slice(0, MAX_EVIDENCE).map((e) => ({ ...e, note: groundedNote(e, { sure }) }));
+}
+
+/**
+ * Resolve a code-grounded claim's evidence: match the model's hints against
+ * the source-slice paths and invariant links, verify every cited path, and
+ * only fall back to honest "we're guessing" prose when nothing verifies.
+ */
+function resolveCodeEvidence(claim, ctx) {
+  const { allLinks, invariants, slicePaths, verifyCtx } = ctx;
+
+  const candidates = [];
+  const seenPaths = new Set();
+  const seenKeys = new Set();
+  const add = (filePath, symbol) => {
+    const key = `${filePath}::${symbol || ''}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    seenPaths.add(filePath);
+    candidates.push({ filePath, symbol: symbol || null });
+  };
+
+  // Invariant links first (they carry symbols), then bare slice paths.
+  for (const link of allLinks) {
+    if (claim.evidenceHints.some((h) => hintMatchesLink(h, link))) add(link.filePath, link.symbol);
   }
+  for (const p of slicePaths) {
+    if (seenPaths.has(p)) continue;
+    if (claim.evidenceHints.some((h) => hintMatchesPath(h, p))) add(p, null);
+  }
+
+  const matched = verifiedOnly(candidates, verifyCtx);
+  if (matched.length > 0) {
+    return finalizeGrounded(matched, { sure: matched.length >= 2 });
+  }
+
   // Fallback: the most load-bearing invariant's own links (invariants arrive
-  // sorted by confidence, so the first with links wins).
+  // sorted by confidence, so the first with links wins) — still verified.
   const anchor = invariants.find((inv) => Array.isArray(inv.links) && inv.links.length > 0);
   if (anchor) {
-    return evidenceFromLinks(collectInvariantLinks([anchor]), { sure: false });
+    const anchorEntries = verifiedOnly(
+      collectInvariantLinks([anchor]).map((l) => ({ filePath: l.filePath, symbol: l.symbol })),
+      verifyCtx
+    );
+    if (anchorEntries.length > 0) {
+      return finalizeGrounded(anchorEntries, { sure: false });
+    }
   }
-  return [
-    {
-      filePath: null,
-      symbol: null,
-      note: 'Drafted from the shape of the code — no single file pins this down. Worth your eyes.',
-    },
-  ];
+
+  return withVerification(
+    [
+      {
+        filePath: null,
+        symbol: null,
+        note: 'Drafted from the shape of the code — no single file pins this down. Worth your eyes.',
+      },
+    ],
+    verifyCtx
+  );
 }
 
 function resolveAudienceEvidence(claim, map) {
@@ -295,7 +430,12 @@ function resolveAudienceEvidence(claim, map) {
  * Draft the three claims of "the read" from analysis outputs.
  *
  * @param {object} inputs - { projectId, map, invariants, featuresSummary,
- *                            repoDescription, fileCount, stack }
+ *                            repoDescription, fileCount, stack,
+ *                            codeSlice, settledClaims, coreJobCandidate }
+ *   codeSlice        - buildCodeSlice output ({ files, knownPaths, ... });
+ *                      null or source:'empty' degrades to map-only prompting
+ *   settledClaims    - [{ slot, text }] human-settled claims (may be empty)
+ *   coreJobCandidate - pickCoreJob output or null
  * @param {object} [opts] - { client } optional Anthropic client override
  * @returns {Promise<{claims: Array}>} exactly three claims
  *          (slots: objective, audience, core_job)
@@ -316,7 +456,7 @@ async function synthesizeRead(inputs, opts = {}) {
       phase: 'read.synthesize',
       params: {
         model: CLAUDE_MODEL,
-        max_tokens: 1600,
+        max_tokens: MAX_TOKENS,
         system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userContent }],
       },
@@ -326,23 +466,26 @@ async function synthesizeRead(inputs, opts = {}) {
   }
 
   const bySlot = parseReadClaims(extractText(response));
+
   const allLinks = collectInvariantLinks(invariants);
+  const slicePaths = slicePathsOf(inputs.codeSlice);
+  const verifyCtx = {
+    // Slice paths plus map-entity paths: both come from the analyzer, so an
+    // audience claim citing an entity's file still verifies as real.
+    knownPaths: [...new Set([...slicePaths, ...entityPathsOf(inputs.map)])],
+    invariantLinks: allLinks.map((l) => ({ filePath: l.filePath, symbol: l.symbol })),
+  };
 
   const claims = SLOTS.map((slot) => {
     const raw = bySlot[slot];
     const evidence =
       slot === 'audience'
-        ? resolveAudienceEvidence(raw, inputs.map)
-        : resolveCodeEvidence(raw, allLinks, invariants);
+        ? withVerification(resolveAudienceEvidence(raw, inputs.map), verifyCtx)
+        : resolveCodeEvidence(raw, { allLinks, invariants, slicePaths, verifyCtx });
     return {
       slot,
       text: raw.text,
-      confidence: scoreClaimConfidence({
-        slot,
-        evidence,
-        map: inputs.map,
-        invariants: invariants,
-      }),
+      confidence: scoreClaimConfidence({ slot, evidence }),
       evidence,
       alternative: raw.alternative,
     };
@@ -358,5 +501,6 @@ module.exports = {
   resolveCodeEvidence,
   resolveAudienceEvidence,
   topInvariants,
+  buildUserContent,
   SYSTEM_PROMPT,
 };

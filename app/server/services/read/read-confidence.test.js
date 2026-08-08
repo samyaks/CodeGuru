@@ -1,113 +1,185 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { scoreClaimConfidence, knownFilePaths, UNCERTAIN_THRESHOLD } = require('./read-confidence');
+const { verifyEvidence, scoreClaimConfidence, UNCERTAIN_THRESHOLD } = require('./read-confidence');
 
-const INVARIANTS = [
-  {
-    text: 'A check-in is logged in under ten seconds',
-    kind: 'behavior',
-    confidence: 0.9,
-    satisfied: true,
-    links: [
-      { file_path: 'src/Habit.js', symbol: 'logCheckin' },
-      { file_path: 'src/streak.js', symbol: 'updateStreak' },
-    ],
-  },
+const KNOWN_PATHS = [
+  'src/Habit.js',
+  'src/streak.js',
+  'src/components/QuickLog.tsx',
+  'app/server/streak.js',
 ];
 
-const MAP = {
-  domain: 'Habit tracking',
-  personas: [{ id: 'persona:0', name: 'Solo improver', emoji: '🌱', priority: 'high' }],
-  jobs: [{ id: 'job:0', persona_id: 'persona:0', title: 'Log a habit fast', priority: 'high' }],
-  entities: [{ id: 'e1', type: 'page', label: 'QuickLog', file_path: 'src/QuickLog.tsx' }],
-  edges: [],
-};
+// ── verifyEvidence ────────────────────────────────────────────────
 
-test('two file-grounded evidence entries score high (~0.85)', () => {
+test('exact path match verifies', () => {
+  const out = verifyEvidence(
+    [{ filePath: 'src/Habit.js', symbol: 'logCheckin', note: 'Read plainly.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].verified, true);
+  // original fields survive
+  assert.strictEqual(out[0].symbol, 'logCheckin');
+  assert.strictEqual(out[0].note, 'Read plainly.');
+});
+
+test('basename-style citation verifies via suffix match (knownPath ends with /filePath)', () => {
+  const out = verifyEvidence(
+    [{ filePath: 'QuickLog.tsx', symbol: null, note: 'Cited by basename.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, true);
+});
+
+test('a longer citation whose suffix is a known path verifies (filePath ends with /knownPath)', () => {
+  const out = verifyEvidence(
+    [{ filePath: 'repo-root/src/Habit.js', symbol: null, note: 'Over-qualified path.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, true);
+});
+
+test('a bare basename matching MULTIPLE known paths still verifies', () => {
+  // streak.js matches both src/streak.js and app/server/streak.js
+  const out = verifyEvidence(
+    [{ filePath: 'streak.js', symbol: null, note: 'Ambiguous but real.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, true);
+});
+
+test('partial-basename overlap does NOT verify (no substring matching)', () => {
+  // "abit.js" is a substring of Habit.js but not a path-boundary suffix
+  const out = verifyEvidence(
+    [{ filePath: 'abit.js', symbol: null, note: 'Substring trap.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, false);
+});
+
+test('made-up paths are unverified', () => {
+  const out = verifyEvidence(
+    [{ filePath: 'src/DoesNotExist.js', symbol: null, note: 'Hallucinated.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, false);
+});
+
+test('filePath=null is never verified', () => {
+  const out = verifyEvidence(
+    [{ filePath: null, symbol: null, note: 'Pure inference.' }],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(out[0].verified, false);
+});
+
+test('empty knownPaths verifies nothing — concrete paths alone are no longer trusted', () => {
+  const out = verifyEvidence(
+    [{ filePath: 'app/index.js', symbol: null, note: 'Sounds plausible.' }],
+    { knownPaths: [] }
+  );
+  assert.strictEqual(out[0].verified, false);
+});
+
+test('invariant link paths count as known (both filePath and file_path keys)', () => {
+  const out = verifyEvidence(
+    [
+      { filePath: 'src/auth.js', symbol: 'login', note: 'From invariant link.' },
+      { filePath: 'src/billing.js', symbol: null, note: 'Snake-case link key.' },
+    ],
+    {
+      knownPaths: [],
+      invariantLinks: [
+        { filePath: 'src/auth.js', symbol: 'login' },
+        { file_path: 'src/billing.js', symbol: 'charge' },
+      ],
+    }
+  );
+  assert.strictEqual(out[0].verified, true);
+  assert.strictEqual(out[1].verified, true);
+});
+
+test('leading ./ is normalized on both sides', () => {
+  const out = verifyEvidence(
+    [{ filePath: './src/Habit.js', symbol: null, note: 'Relative style.' }],
+    { knownPaths: ['./src/Habit.js'] }
+  );
+  assert.strictEqual(out[0].verified, true);
+});
+
+test('non-array evidence and missing ctx fields are handled', () => {
+  assert.deepStrictEqual(verifyEvidence(null, { knownPaths: KNOWN_PATHS }), []);
+  const out = verifyEvidence([{ filePath: 'src/Habit.js', symbol: null, note: 'n' }], {});
+  assert.strictEqual(out[0].verified, false);
+});
+
+// ── scoreClaimConfidence ──────────────────────────────────────────
+
+test('two verified entries score 0.9', () => {
   const score = scoreClaimConfidence({
     slot: 'core_job',
     evidence: [
-      { filePath: 'src/Habit.js', symbol: 'logCheckin', note: 'Read plainly from Habit.js.' },
-      { filePath: 'src/streak.js', symbol: 'updateStreak', note: 'And from streak.js.' },
+      { filePath: 'src/Habit.js', verified: true },
+      { filePath: 'src/streak.js', verified: true },
     ],
-    map: MAP,
-    invariants: INVARIANTS,
   });
-  assert.strictEqual(score, 0.85);
+  assert.strictEqual(score, 0.9);
   assert.ok(score >= UNCERTAIN_THRESHOLD);
 });
 
-test('one file-grounded evidence entry scores ~0.7', () => {
+test('exactly one verified entry scores 0.72', () => {
   const score = scoreClaimConfidence({
     slot: 'objective',
-    evidence: [{ filePath: 'src/Habit.js', symbol: null, note: 'Read from Habit.js.' }],
-    map: MAP,
-    invariants: INVARIANTS,
+    evidence: [
+      { filePath: 'src/Habit.js', verified: true },
+      { filePath: 'src/Fake.js', verified: false },
+    ],
   });
-  assert.strictEqual(score, 0.7);
+  assert.strictEqual(score, 0.72);
   assert.ok(score >= UNCERTAIN_THRESHOLD);
 });
 
-test('map-entity file paths count as grounding too', () => {
+test('audience claim with entries but zero verified lands in the yellow zone (0.4)', () => {
   const score = scoreClaimConfidence({
     slot: 'audience',
-    evidence: [{ filePath: 'src/QuickLog.tsx', symbol: null, note: 'The page the persona lives in.' }],
-    map: MAP,
-    invariants: [],
-  });
-  assert.strictEqual(score, 0.7);
-});
-
-test('audience claim with only inferred (file-less) evidence lands in the yellow zone (0.4)', () => {
-  const score = scoreClaimConfidence({
-    slot: 'audience',
-    evidence: [
-      { filePath: null, symbol: null, note: "Nothing in the data model shares between users — but absence isn't proof." },
-    ],
-    map: MAP,
-    invariants: INVARIANTS,
+    evidence: [{ filePath: null, verified: false, note: "Absence isn't proof." }],
   });
   assert.strictEqual(score, 0.4);
   assert.ok(score < UNCERTAIN_THRESHOLD);
 });
 
-test('a made-up file path that matches no known source is not grounding', () => {
-  const score = scoreClaimConfidence({
-    slot: 'audience',
-    evidence: [{ filePath: 'src/DoesNotExist.js', symbol: null, note: 'Hallucinated.' }],
-    map: MAP,
-    invariants: INVARIANTS,
-  });
-  assert.strictEqual(score, 0.4);
-});
-
-test('nothing grounded at all scores 0.3', () => {
+test('non-audience claim with zero verified scores 0.3', () => {
   const score = scoreClaimConfidence({
     slot: 'objective',
-    evidence: [],
-    map: null,
-    invariants: [],
+    evidence: [{ filePath: 'src/Fake.js', verified: false }],
   });
   assert.strictEqual(score, 0.3);
 });
 
-test('with no verifiable sources at all, a concrete path still counts', () => {
-  const score = scoreClaimConfidence({
-    slot: 'objective',
-    evidence: [{ filePath: 'app/index.js', symbol: null, note: 'Best available anchor.' }],
-    map: null,
-    invariants: [],
-  });
-  assert.strictEqual(score, 0.7);
+test('audience claim with NO entries at all scores 0.3, not 0.4', () => {
+  const score = scoreClaimConfidence({ slot: 'audience', evidence: [] });
+  assert.strictEqual(score, 0.3);
 });
 
-test('knownFilePaths merges invariant links and map entities', () => {
-  const known = knownFilePaths({ map: MAP, invariants: INVARIANTS });
-  assert.ok(known.has('src/Habit.js'));
-  assert.ok(known.has('src/streak.js'));
-  assert.ok(known.has('src/QuickLog.tsx'));
-  assert.strictEqual(known.size, 3);
+test('entries without a verified flag are not counted as verified', () => {
+  const score = scoreClaimConfidence({
+    slot: 'core_job',
+    evidence: [{ filePath: 'src/Habit.js' }, { filePath: 'src/streak.js' }],
+  });
+  assert.strictEqual(score, 0.3);
+});
+
+test('verifyEvidence output feeds scoreClaimConfidence end to end', () => {
+  const evidence = verifyEvidence(
+    [
+      { filePath: 'src/Habit.js', symbol: null, note: 'real' },
+      { filePath: 'streak.js', symbol: null, note: 'basename' },
+      { filePath: 'src/Nope.js', symbol: null, note: 'fake' },
+    ],
+    { knownPaths: KNOWN_PATHS }
+  );
+  assert.strictEqual(scoreClaimConfidence({ slot: 'core_job', evidence }), 0.9);
 });
 
 test('UNCERTAIN_THRESHOLD is 0.6', () => {
