@@ -70,3 +70,9 @@ Postgres, not ANSI SQL.
   drops `intent_features`; and archives the existing wrong-altitude statements
   (kept as history). Fresh invariants are generated under confirmed jobs by
   `services/intent/generate-invariants.js` + `global-guarantees.js`.
+- `024_project_reads.sql` — "The Read" surface. `project_reads` (one row per
+  project: derived next-thing-to-build + Pro-stub `read_unlocked` flag gating
+  the builder prompt) and `read_claims` (the three slotted claims —
+  objective / audience / core_job — with confidence, JSONB evidence, and an
+  optional alternative question). `UNIQUE (project_id, slot)` makes re-drafting
+  an upsert; settled (human-corrected) claims survive re-analysis.

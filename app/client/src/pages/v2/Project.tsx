@@ -215,6 +215,12 @@ export default function ProjectV2() {
               {project.repo || project.repo_url}
             </h2>
             <div className="flex items-center gap-6 text-sm">
+              <Link
+                to={`/read/${id}`}
+                className="text-xs text-stone-500 hover:text-stone-900 underline underline-offset-2"
+              >
+                The read →
+              </Link>
               {readiness !== null ? (
                 <div className="flex items-center gap-3">
                   <span className="text-stone-500">Readiness</span>

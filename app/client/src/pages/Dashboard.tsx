@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  BookOpen,
   FolderGit2,
   FileText,
   Loader2,
@@ -390,13 +391,20 @@ function ProjectCard({ project }: { project: Project }) {
           </span>
         </div>
       </Link>
-      <div className="px-5 py-2.5 border-t border-stone-200">
+      <div className="px-5 py-2.5 border-t border-stone-200 flex items-center gap-4">
         <Link
           to={`/projects/${project.id}#map`}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
         >
           <Map className="w-3 h-3" />
           Product map &rarr;
+        </Link>
+        <Link
+          to={`/read/${project.id}`}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
+        >
+          <BookOpen className="w-3 h-3" />
+          Read &rarr;
         </Link>
       </div>
     </div>

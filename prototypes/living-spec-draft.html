@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Takeoff — the read</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F5F3EC;          /* cool-warm manuscript paper */
+    --paper-2:#EFECE2;
+    --ink:#211E19;            /* warm near-black */
+    --ink-soft:#6B655A;       /* margin ink */
+    --ink-faint:#9A9184;
+    --rule:#DAD6C9;
+    --rule-soft:#E4E0D5;
+    --mark:#A32F26;           /* editor's red pen */
+    --mark-soft:#C86A5F;
+    --wash:#F6E7A8;           /* highlighter, uncertain phrases */
+    --wash-deep:#EFD97E;
+    --settled:#33302A;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Newsreader',Georgia,serif;
+    font-optical-sizing:auto;
+    -webkit-font-smoothing:antialiased;
+    line-height:1.6;
+    min-height:100vh;
+  }
+  .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+  /* masthead */
+  .masthead{max-width:940px;margin:0 auto;padding:26px 40px 0;display:flex;align-items:baseline;justify-content:space-between}
+  .mh-left{display:flex;align-items:baseline;gap:14px}
+  .wordmark{font-family:'IBM Plex Mono';font-weight:500;letter-spacing:.34em;font-size:12px;text-transform:uppercase;color:var(--ink)}
+  .dateline{font-style:italic;font-size:14px;color:var(--ink-soft)}
+  .dateline .mono{font-style:normal;font-size:12.5px;color:var(--ink)}
+  .mh-right{font-size:12.5px;color:var(--ink-faint);font-style:italic}
+
+  .sheet{max-width:940px;margin:0 auto;padding:0 40px}
+  .toprule{border:0;border-top:1px solid var(--ink);margin:14px 0 0}
+  .topthin{border:0;border-top:1px solid var(--rule);margin:3px 0 0}
+
+  /* the read: two-column, text + marginalia */
+  .read{display:grid;grid-template-columns:1fr 232px;gap:46px;padding:52px 0 30px}
+  .col-text{max-width:600px}
+  .kicker{font-family:'IBM Plex Mono';font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--mark);margin:0 0 22px}
+  .intent{font-size:27px;line-height:1.5;font-weight:400;letter-spacing:-.005em;margin:0}
+  .intent .name{font-weight:600}
+
+  /* phrase treatments */
+  .fn{font-size:.62em;vertical-align:.55em;color:var(--mark);font-family:'IBM Plex Mono';font-weight:500;margin-left:1px;letter-spacing:0}
+  .settledmark{ text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:5px;text-decoration-thickness:1px}
+  .editable{
+    cursor:pointer;position:relative;
+    background:linear-gradient(var(--wash),var(--wash));
+    background-size:100% 42%;background-repeat:no-repeat;background-position:0 82%;
+    border-bottom:1.5px dotted var(--mark-soft);
+    transition:background-size .2s,background-color .2s;
+    padding:0 1px;
+  }
+  .editable:hover{background-size:100% 100%}
+  .editable:focus-visible{outline:2px solid var(--mark);outline-offset:2px;border-radius:2px}
+  .editable.settled{background:none;border-bottom:none}
+  .editable.settled.underlined{text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:5px;text-decoration-thickness:1px}
+
+  /* confident-but-still-editable claims: quiet dotted underline, pencil on hover */
+  .etext{cursor:pointer;position:relative;border-bottom:1px dotted var(--ink-faint);transition:border-color .18s,background .18s;padding:0 1px}
+  .etext:hover{border-bottom-color:var(--mark);background:rgba(163,47,38,.055)}
+  .etext:focus-visible{outline:2px solid var(--mark);outline-offset:2px;border-radius:2px}
+  .etext.editing{border-bottom:1px solid var(--mark);background:#FFFDF8;cursor:text;outline:none}
+  .etext.settled{border-bottom:1px solid var(--rule)}
+  .etext::after,.editable::after{content:"\270E";font-size:.62em;color:var(--mark);opacity:0;margin-left:3px;vertical-align:.28em;transition:opacity .18s}
+  .etext:hover::after,.etext:focus-visible::after,.editable:hover::after,.editable:focus-visible::after{opacity:.65}
+  .etext.editing::after{opacity:0}
+
+  /* marginalia */
+  .col-notes{padding-top:4px}
+  .note{display:flex;gap:9px;font-size:13px;line-height:1.5;color:var(--ink-soft);margin-bottom:20px;font-style:italic}
+  .note .num{font-family:'IBM Plex Mono';font-style:normal;font-size:11px;color:var(--mark);flex:none;padding-top:2px;font-weight:500}
+  .note .src{font-family:'IBM Plex Mono';font-style:normal;font-size:11.5px;color:var(--ink);background:var(--paper-2);border:1px solid var(--rule);border-radius:4px;padding:1px 5px;white-space:nowrap}
+  .note em{color:var(--mark);font-style:italic}
+  .note.transient{transition:opacity .3s}
+
+  /* inline editor */
+  .editorpop{
+    display:none;margin:20px 0 6px;padding:20px 22px;
+    background:var(--paper-2);border:1px solid var(--rule);border-left:3px solid var(--mark);border-radius:4px;
+  }
+  .editorpop.open{display:block}
+  .editorpop .q{font-size:15px;font-style:italic;color:var(--ink-soft);margin:0 0 15px}
+  .opts{display:flex;flex-direction:column;gap:9px}
+  .opt{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border:1px solid var(--rule);border-radius:4px;cursor:pointer;background:var(--paper);transition:border-color .16s,background .16s}
+  .opt:hover{border-color:var(--mark-soft)}
+  .opt.sel{border-color:var(--mark);background:#fff}
+  .opt .tick{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--ink-faint);margin-top:5px;flex:none;position:relative}
+  .opt.sel .tick{border-color:var(--mark)}
+  .opt.sel .tick::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--mark)}
+  .opt .ot strong{display:block;font-weight:600;font-size:15px;margin-bottom:1px}
+  .opt .ot span{font-size:13.5px;color:var(--ink-soft);font-style:italic}
+  .editorpop .save{margin-top:16px;background:none;border:0;border-bottom:1.5px solid var(--mark);color:var(--mark);font-family:'Newsreader';font-style:italic;font-size:15px;padding:2px 0;cursor:pointer}
+  .editorpop .save:hover{color:var(--ink);border-color:var(--ink)}
+  .editorpop .save:focus-visible{outline:2px solid var(--mark);outline-offset:3px}
+
+  /* next-to-build */
+  .midrule{display:flex;align-items:center;gap:16px;margin:44px 0 30px;color:var(--ink-faint)}
+  .midrule::before,.midrule::after{content:"";height:1px;background:var(--rule);flex:1}
+  .midrule span{font-family:'IBM Plex Mono';font-size:10.5px;letter-spacing:.24em;text-transform:uppercase}
+
+  .next{max-width:640px}
+  .next .lead{font-style:italic;color:var(--ink-soft);font-size:15px;margin:0 0 6px}
+  .next h2{font-size:25px;font-weight:600;letter-spacing:-.01em;margin:0 0 12px;transition:opacity .3s}
+  .next .why{font-size:17px;line-height:1.55;color:var(--ink);margin:0 0 26px;max-width:600px;transition:opacity .3s}
+  .next .why b{font-weight:600}
+  .flash{font-family:'IBM Plex Mono';font-size:11px;color:var(--mark);letter-spacing:.06em;opacity:0;transition:opacity .3s;margin-left:10px}
+  .flash.show{opacity:1}
+
+  /* the prompt = "the instructions to hand your builder" */
+  .prompt-frame{max-width:640px;border:1px solid var(--rule);border-radius:5px;background:var(--paper-2);overflow:hidden}
+  .pf-head{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--rule)}
+  .pf-head .t{font-style:italic;font-size:14px;color:var(--ink-soft)}
+  .pf-head .tag{font-family:'IBM Plex Mono';font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mark)}
+  .pf-body{position:relative}
+  .prompt{margin:0;padding:16px 18px;font-family:'IBM Plex Mono';font-size:12px;line-height:1.7;color:#3B372F;white-space:pre-wrap;transition:filter .3s}
+  .prompt .k{color:var(--mark)}
+  .prompt.gated{filter:blur(4.5px);user-select:none}
+  .gate{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;padding:18px;background:rgba(239,236,226,.6)}
+  .pf-body.gated .gate{display:flex}
+  .gate .g1{font-size:16px;font-style:italic}
+  .gate .g2{font-size:13px;color:var(--ink-soft);max-width:260px;font-style:italic}
+  .pf-foot{display:flex;gap:20px;padding:12px 18px;border-top:1px solid var(--rule)}
+  .link{background:none;border:0;border-bottom:1.5px solid var(--mark);color:var(--mark);font-family:'Newsreader';font-style:italic;font-size:15px;padding:1px 0;cursor:pointer}
+  .link:hover{color:var(--ink);border-color:var(--ink)}
+  .link:focus-visible{outline:2px solid var(--mark);outline-offset:3px}
+  .link.quiet{color:var(--ink-soft);border-color:var(--rule)}
+  .link.quiet:hover{color:var(--ink);border-color:var(--ink)}
+
+  .footer{max-width:940px;margin:0 auto;padding:40px 40px 70px}
+  .footer .fr{border:0;border-top:1px solid var(--rule);margin:0 0 16px}
+  .footer p{font-style:italic;color:var(--ink-faint);font-size:13.5px;margin:0;max-width:560px}
+
+  @media (max-width:860px){
+    .read{grid-template-columns:1fr;gap:0}
+    .col-notes{margin-top:34px;border-top:1px solid var(--rule);padding-top:24px}
+    .intent{font-size:23px}
+    .masthead,.sheet,.footer{padding-left:24px;padding-right:24px}
+    .mh-right{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+  <div class="masthead">
+    <div class="mh-left">
+      <span class="wordmark">Takeoff</span>
+      <span class="dateline">a read of <span class="mono">samyaks/loop</span></span>
+    </div>
+    <div class="mh-right">47 files · drafted just now</div>
+  </div>
+  <div class="sheet"><hr class="toprule"><hr class="topthin"></div>
+
+  <div class="sheet">
+    <div class="read">
+
+      <!-- THE DRAFT -->
+      <div class="col-text">
+        <p class="kicker">Drafted from your code — click any line to correct it. Yellow is where we're unsure.</p>
+
+        <p class="intent">
+          <span class="name">Loop</span> <span class="etext" tabindex="0" role="button" aria-label="Edit the objective">helps people build lasting habits through fast daily check-ins</span>.<span class="fn">1</span>
+          It's for <span class="editable" id="phrase" tabindex="0" role="button" aria-label="Edit who it's for">someone improving on their own</span><span class="fn" id="fn2">2</span>—
+          and the one thing it can't get wrong is <span class="etext" tabindex="0" role="button" aria-label="Edit the core job">letting them log a habit in under ten seconds</span>.<span class="fn">3</span>
+        </p>
+
+        <!-- inline editor -->
+        <div class="editorpop" id="pop">
+          <p class="q">Who's Loop really for? This is the part we're least sure of — and it decides what has to be true before you launch.</p>
+          <div class="opts">
+            <label class="opt sel" data-opt="solo">
+              <span class="tick"></span>
+              <span class="ot"><strong>Someone on their own</strong><span>Their habits are private to them. No one else sees.</span></span>
+            </label>
+            <label class="opt" data-opt="shared">
+              <span class="tick"></span>
+              <span class="ot"><strong>People keeping each other honest</strong><span>Partners see each other's streaks. Data crosses between users.</span></span>
+            </label>
+          </div>
+          <button class="save" id="save">Save the correction →</button>
+        </div>
+      </div>
+
+      <!-- MARGINALIA -->
+      <div class="col-notes">
+        <div class="note">
+          <span class="num">1.</span>
+          <span>Read plainly from <span class="src">Habit.js</span> <span class="src">streak.js</span>. We're sure of this one.</span>
+        </div>
+        <div class="note transient" id="note2">
+          <span class="num">2.</span>
+          <span><em>We're guessing.</em> Nothing in the data model shares between users — but absence isn't proof. Worth your eyes.</span>
+        </div>
+        <div class="note">
+          <span class="num">3.</span>
+          <span>Read from <span class="src">POST /checkins</span> and <span class="src">QuickLog.tsx</span>. Sure of this too.</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="midrule"><span>So the next thing to build</span></div>
+
+    <div class="next">
+      <p class="lead">Given that read, one thing stands between Loop and its first real reader<span class="flash" id="flash">— rewritten from your edit</span></p>
+      <h2 id="nextTitle">A way to tell its people apart.</h2>
+      <p class="why" id="nextWhy">Loop has no sign-in. Every check-in is readable by anyone who asks the API — there's no notion of <b>whose</b> habit it is. Before a single real person can trust it with their mornings, Loop needs to know its users apart.</p>
+
+      <div class="prompt-frame">
+        <div class="pf-head">
+          <span class="t">The instructions to hand your builder</span>
+          <span class="tag" id="tag">🔒 Pro</span>
+        </div>
+        <div class="pf-body gated" id="pfBody">
+          <pre class="prompt gated" id="prompt"><span class="k">Add Supabase Auth</span> to Loop, using the existing supabase client in lib/db.ts.
+1. Add email magic-link sign-in; put every /checkins route behind a session.
+2. Add a user_id on check_ins → auth.users, and backfill from the current userId.
+3. Turn on row-level security so a person can read and write <span class="k">only their own</span> check-ins.</pre>
+          <div class="gate">
+            <div class="g1">Free tells you <em>what</em> to build.</div>
+            <div class="g2">Pro hands you the exact words for your builder, written for your stack.</div>
+          </div>
+        </div>
+        <div class="pf-foot">
+          <button class="link" id="unlock">Unlock with Pro</button>
+          <button class="link quiet" id="copy">Copy it</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <hr class="fr">
+    <p>Nothing here was typed by you from scratch — it was read from the repo and set in type. Your job is only to correct it. Each correction is kept, and the next read starts from what you've already settled.</p>
+  </div>
+
+<script>
+(function(){
+  // --- free-text editable claims (the confident ones) ---
+  document.querySelectorAll('.etext').forEach(function(el){
+    function begin(){
+      if(el.classList.contains('editing')) return;
+      el.dataset.orig = el.textContent;
+      el.classList.add('editing');
+      el.setAttribute('contenteditable','true');
+      el.focus();
+      var r=document.createRange(); r.selectNodeContents(el);
+      var s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    }
+    function commit(){
+      el.removeAttribute('contenteditable');
+      el.classList.remove('editing');
+      if(el.textContent.trim()===''){ el.textContent = el.dataset.orig || ''; }
+      if((el.textContent.trim()) !== ((el.dataset.orig||'').trim())){ el.classList.add('settled'); }
+    }
+    el.addEventListener('click', begin);
+    el.addEventListener('keydown', function(e){
+      if(!el.classList.contains('editing') && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); begin(); return; }
+      if(el.classList.contains('editing') && e.key==='Enter'){ e.preventDefault(); el.blur(); }
+      if(el.classList.contains('editing') && e.key==='Escape'){ el.textContent = el.dataset.orig||''; el.blur(); }
+    });
+    el.addEventListener('blur', commit);
+  });
+
+  var phrase = document.getElementById('phrase');
+  var pop    = document.getElementById('pop');
+  var save   = document.getElementById('save');
+  var fn2     = document.getElementById('fn2');
+  var note2   = document.getElementById('note2');
+  var nextTitle = document.getElementById('nextTitle');
+  var nextWhy   = document.getElementById('nextWhy');
+  var prompt    = document.getElementById('prompt');
+  var flash     = document.getElementById('flash');
+
+  function openPop(){ pop.classList.add('open'); pop.scrollIntoView({behavior:'smooth',block:'nearest'}); }
+  phrase.addEventListener('click', openPop);
+  phrase.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){e.preventDefault();openPop();} });
+
+  pop.querySelectorAll('.opt').forEach(function(o){
+    o.addEventListener('click', function(){
+      pop.querySelectorAll('.opt').forEach(function(x){x.classList.remove('sel')});
+      o.classList.add('sel');
+    });
+  });
+
+  var DATA = {
+    solo:{
+      phrase:'someone improving on their own',
+      note:'<em>Settled by you.</em> Habits stay private to each person.',
+      title:'A way to tell its people apart.',
+      why:'Loop has no sign-in. Every check-in is readable by anyone who asks the API — there\'s no notion of <b>whose</b> habit it is. Before a single real person can trust it with their mornings, Loop needs to know its users apart.',
+      prompt:'<span class="k">Add Supabase Auth</span> to Loop, using the existing supabase client in lib/db.ts.\n1. Add email magic-link sign-in; put every /checkins route behind a session.\n2. Add a user_id on check_ins → auth.users, and backfill from the current userId.\n3. Turn on row-level security so a person can read and write <span class="k">only their own</span> check-ins.'
+    },
+    shared:{
+      phrase:'people keeping each other honest',
+      note:'<em>You told us: shared.</em> Two people read the same streaks — so who-sees-whom now matters.',
+      title:'A way to tell its people apart — and who may see whom.',
+      why:'You just said partners <b>share streaks</b>, so this isn\'t only "add a login." Two people read the same rows, which means Loop needs identity <b>and</b> a rule for who\'s allowed to see whose habits — or it will hand everyone\'s mornings to everyone.',
+      prompt:'<span class="k">Add Supabase Auth + partner sharing</span> to Loop, using the supabase client in lib/db.ts.\n1. Add magic-link sign-in; put /checkins behind a session.\n2. Add a partnerships table (user_a, user_b, status).\n3. Row-level security: a person reads their own check-ins <span class="k">or</span> a confirmed partner\'s — nothing else.\n4. Add an invite + accept flow at POST /partners/invite.'
+    }
+  };
+
+  save.addEventListener('click', function(){
+    var sel = pop.querySelector('.opt.sel').getAttribute('data-opt');
+    var d = DATA[sel];
+
+    // rewrite the phrase, settle it
+    phrase.textContent = d.phrase;
+    phrase.classList.add('settled');
+    if(sel==='shared') phrase.classList.add('underlined'); else phrase.classList.add('underlined');
+    note2.querySelector('span:last-child').innerHTML = d.note;
+    pop.classList.remove('open');
+
+    // fade → rewrite guidance → fade back
+    [nextTitle,nextWhy,prompt].forEach(function(el){el.style.opacity='0'});
+    setTimeout(function(){
+      nextTitle.textContent = d.title;
+      nextWhy.innerHTML = d.why;
+      prompt.innerHTML = d.prompt;
+      [nextTitle,nextWhy,prompt].forEach(function(el){el.style.opacity='1'});
+      flash.classList.add('show');
+      setTimeout(function(){flash.classList.remove('show')}, 2200);
+    },300);
+  });
+
+  // gate
+  var pfBody=document.getElementById('pfBody'), tag=document.getElementById('tag'),
+      unlock=document.getElementById('unlock'), copy=document.getElementById('copy');
+  function open(){ pfBody.classList.remove('gated'); prompt.classList.remove('gated'); tag.textContent='✓ Unlocked'; tag.style.color='var(--ink-soft)'; unlock.style.display='none'; }
+  unlock.addEventListener('click', open);
+  copy.addEventListener('click', function(){
+    if(pfBody.classList.contains('gated')) open();
+    copy.textContent='Copied ✓';
+    setTimeout(function(){copy.textContent='Copy it'},1400);
+  });
+})();
+</script>
+</body>
+</html>

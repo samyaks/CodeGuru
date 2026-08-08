@@ -11,6 +11,7 @@ import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 import StyleGuideV2 from './pages/v2/StyleGuide';
+import ReadPage from './pages/read/ReadPage';
 import ProjectV2 from './pages/v2/Project';
 import SecurityReportV2 from './pages/v2/SecurityReport';
 import MarketingLayout from './layouts/MarketingLayout';
@@ -67,6 +68,8 @@ export default function App() {
             <Route path="/projects/:id/map" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/map/onboard" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
+            {/* The Read — GET is public; corrections/unlock handle auth themselves */}
+            <Route path="/read/:id" element={<ReadPage />} />
 
             {/* Takeoff flow */}
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />

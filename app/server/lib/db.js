@@ -2325,6 +2325,161 @@ const statementJobs = {
   },
 };
 
+// ── Project reads ("The Read") ────────────────────────────────────
+//
+// One row per project: the derived "next thing to build" (title / why /
+// builder prompt / category) plus the Pro-stub `read_unlocked` flag that
+// gates the prompt. The row is machine-derived and re-derivable, so the
+// upsert freely overwrites it — human decisions live on read_claims.
+// See migration 024_project_reads.sql.
+
+const projectReads = {
+  // Insert or overwrite the project's read row. Re-derivation is cheap and
+  // machine-owned, so conflicts always take the fresh values.
+  async upsertForProject(projectId, { nextTitle, nextWhy, nextPrompt, nextCategory, draftedAt } = {}) {
+    const { rows } = await getDb().query(
+      `INSERT INTO project_reads
+        (id, project_id, next_title, next_why, next_prompt, next_category, drafted_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (project_id) DO UPDATE SET
+          next_title    = EXCLUDED.next_title,
+          next_why      = EXCLUDED.next_why,
+          next_prompt   = EXCLUDED.next_prompt,
+          next_category = EXCLUDED.next_category,
+          drafted_at    = EXCLUDED.drafted_at,
+          updated_at    = now()
+        RETURNING *`,
+      [
+        crypto.randomUUID(),
+        projectId,
+        nextTitle ?? null,
+        nextWhy ?? null,
+        nextPrompt ?? null,
+        nextCategory ?? null,
+        draftedAt ?? new Date().toISOString(),
+      ]
+    );
+    return rows[0];
+  },
+
+  async findByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_reads WHERE project_id = $1',
+      [projectId]
+    );
+    return rows[0] || null;
+  },
+
+  async setUnlocked(projectId, unlocked) {
+    const { rows } = await getDb().query(
+      `UPDATE project_reads SET read_unlocked = $1, updated_at = now()
+        WHERE project_id = $2
+        RETURNING *`,
+      [!!unlocked, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  // Refresh only the derived next-thing (claim-correction re-derivation);
+  // preserves drafted_at and the unlock flag.
+  async updateNext(projectId, { nextTitle, nextWhy, nextPrompt, nextCategory } = {}) {
+    const { rows } = await getDb().query(
+      `UPDATE project_reads SET
+          next_title    = $1,
+          next_why      = $2,
+          next_prompt   = $3,
+          next_category = $4,
+          updated_at    = now()
+        WHERE project_id = $5
+        RETURNING *`,
+      [nextTitle ?? null, nextWhy ?? null, nextPrompt ?? null, nextCategory ?? null, projectId]
+    );
+    return rows[0] || null;
+  },
+};
+
+// ── Read claims ("The Read" — the three slotted claims) ───────────
+//
+// Exactly three per project (objective / audience / core_job), identified by
+// UNIQUE (project_id, slot). Drafted claims are machine output and get
+// replaced wholesale on re-analysis; a settled claim is a human correction
+// and is NEVER touched by the pipeline (the upsert's WHERE clause skips it).
+// See migration 024_project_reads.sql.
+
+const READ_SLOT_ORDER = `CASE slot
+  WHEN 'objective' THEN 0
+  WHEN 'audience'  THEN 1
+  WHEN 'core_job'  THEN 2
+  ELSE 3 END`;
+
+const readClaims = {
+  async findByProjectId(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM read_claims WHERE project_id = $1
+        ORDER BY ${READ_SLOT_ORDER}`,
+      [projectId]
+    );
+    return rows;
+  },
+
+  async findById(id, projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM read_claims WHERE id = $1 AND project_id = $2',
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+
+  // Insert or replace the drafted claim for (project_id, slot). Settled rows
+  // are human decisions and are left completely untouched — the DO UPDATE's
+  // WHERE clause makes the upsert a no-op for them (returns null).
+  async upsertDraft(projectId, claim) {
+    const { rows } = await getDb().query(
+      `INSERT INTO read_claims
+        (id, project_id, slot, text, confidence, status, source, evidence, alternative)
+        VALUES ($1, $2, $3, $4, $5, 'drafted', 'inferred', $6, $7)
+        ON CONFLICT (project_id, slot) DO UPDATE SET
+          text        = EXCLUDED.text,
+          confidence  = EXCLUDED.confidence,
+          evidence    = EXCLUDED.evidence,
+          alternative = EXCLUDED.alternative,
+          status      = 'drafted',
+          source      = 'inferred',
+          settled_at  = NULL,
+          updated_at  = now()
+        WHERE read_claims.status <> 'settled'
+        RETURNING *`,
+      [
+        crypto.randomUUID(),
+        projectId,
+        claim.slot,
+        claim.text,
+        claim.confidence ?? null,
+        toJsonb(claim.evidence ?? []),
+        claim.alternative == null ? null : toJsonb(claim.alternative),
+      ]
+    );
+    return rows[0] || null;
+  },
+
+  // Human correction: set the text and promote the claim off the inferred
+  // track. Settled claims survive every future re-analysis.
+  async settle(id, projectId, { text }) {
+    const { rows } = await getDb().query(
+      `UPDATE read_claims SET
+          text       = $1,
+          status     = 'settled',
+          source     = 'human',
+          settled_at = now(),
+          updated_at = now()
+        WHERE id = $2 AND project_id = $3
+        RETURNING *`,
+      [text, id, projectId]
+    );
+    return rows[0] || null;
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -2334,4 +2489,5 @@ module.exports = {
   productMap,
   shippedItems, webhookEvents, securityShares,
   intentStatements, claims, statementJobs,
+  projectReads, readClaims,
 };
