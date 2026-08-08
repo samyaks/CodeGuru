@@ -382,7 +382,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
           <>
             {showAdminActions ? (
               <Link
-                to={`/projects/${params.id}#gaps`}
+                to={`/read/${params.id}#gaps`}
                 className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
               >
                 ← Back to project
@@ -489,7 +489,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               <MetadataLabel>Top {Math.min(5, filteredTopRisks.length)} risks</MetadataLabel>
               {showAdminActions ? (
                 <Link
-                  to={`/projects/${params.id}#gaps`}
+                  to={`/read/${params.id}#gaps`}
                   className="text-xs text-stone-500 hover:text-stone-900"
                 >
                   Triage in Gaps tab →
@@ -505,7 +505,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                      in the Gaps tab — GapsSection scrolls + rings it
                      so the user doesn't have to scan the list. */
                   fixHref={showAdminActions && data.projectId
-                    ? `/projects/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
+                    ? `/read/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
                     : null}
                 />
               ))}
@@ -554,7 +554,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                             key={g.id}
                             gap={g}
                             fixHref={showAdminActions && data.projectId
-                              ? `/projects/${data.projectId}?focus=${encodeURIComponent(g.id)}#gaps`
+                              ? `/read/${data.projectId}?focus=${encodeURIComponent(g.id)}#gaps`
                               : null}
                           />
                         ))}

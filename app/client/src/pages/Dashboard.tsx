@@ -339,7 +339,7 @@ function ProjectCard({ project }: { project: Project }) {
   return (
     <div className="group bg-white border border-stone-200 rounded-lg overflow-hidden transition-all hover:border-stone-400 hover:shadow-sm">
       <Link
-        to={`/projects/${project.id}`}
+        to={`/read/${project.id}`}
         className="block px-5 pt-5 pb-4"
       >
         <div className="flex items-start justify-between gap-2 mb-4">
@@ -393,18 +393,18 @@ function ProjectCard({ project }: { project: Project }) {
       </Link>
       <div className="px-5 py-2.5 border-t border-stone-200 flex items-center gap-4">
         <Link
-          to={`/projects/${project.id}#map`}
+          to={`/read/${project.id}#map`}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
         >
           <Map className="w-3 h-3" />
           Product map &rarr;
         </Link>
         <Link
-          to={`/read/${project.id}`}
+          to={`/read/${project.id}#gaps`}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
         >
           <BookOpen className="w-3 h-3" />
-          Read &rarr;
+          Gaps &rarr;
         </Link>
       </div>
     </div>

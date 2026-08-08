@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
 import RequireAuth from './components/RequireAuth';
@@ -12,7 +12,6 @@ import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 import StyleGuideV2 from './pages/v2/StyleGuide';
 import ReadPage from './pages/read/ReadPage';
-import ProjectV2 from './pages/v2/Project';
 import SecurityReportV2 from './pages/v2/SecurityReport';
 import MarketingLayout from './layouts/MarketingLayout';
 import Features from './pages/marketing/Features';
@@ -23,15 +22,17 @@ import Demo from './pages/marketing/Demo';
 import GapsIndex from './pages/marketing/GapsIndex';
 import GapExplainerPage from './pages/marketing/GapExplainerPage';
 
-function NavigateToProject() {
+// Canonical project surface is The Read; preserve any #tab deep link.
+function NavigateToRead() {
   const { id } = useParams();
-  return <Navigate to={`/projects/${id}`} replace />;
+  const { hash } = useLocation();
+  return <Navigate to={`/read/${id}${hash}`} replace />;
 }
 
-// Old v1 ProductMap routes are killed in Phase 5; redirect to the project Map tab.
+// Old v1 ProductMap routes are killed in Phase 5; redirect to the Map tab.
 function NavigateToV2Map() {
   const { id } = useParams();
-  return <Navigate to={`/projects/${id}#map`} replace />;
+  return <Navigate to={`/read/${id}#map`} replace />;
 }
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -62,9 +63,9 @@ export default function App() {
             {/* Public story (no auth required) */}
             <Route path="/story/:slug" element={<ShareableStory />} />
 
-            {/* Projects — reads are public for user_id:null projects, writes need auth */}
-            <Route path="/projects/:id" element={<ProjectV2 />} />
-            {/* Phase 5: v1 ProductMap wizard is replaced by the v2 Map tab. */}
+            {/* Projects — The Read is the default surface; other sections are tabs. */}
+            <Route path="/projects/:id" element={<NavigateToRead />} />
+            {/* Phase 5: v1 ProductMap wizard is replaced by the Map tab. */}
             <Route path="/projects/:id/map" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/map/onboard" element={<NavigateToV2Map />} />
             <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
@@ -73,13 +74,13 @@ export default function App() {
 
             {/* Takeoff flow */}
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />
-            <Route path="/takeoff/:id/report" element={<NavigateToProject />} />
-            <Route path="/takeoff/:id/suggestions" element={<NavigateToProject />} />
+            <Route path="/takeoff/:id/report" element={<NavigateToRead />} />
+            <Route path="/takeoff/:id/suggestions" element={<NavigateToRead />} />
 
             {/* v2 (Takeoff) — additive routes, do not affect v1 */}
             <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
-            {/* Legacy /v2/projects/:id URL — canonical is /projects/:id. */}
-            <Route path="/v2/projects/:id" element={<NavigateToProject />} />
+            {/* Legacy /v2/projects/:id URL — canonical is /read/:id. */}
+            <Route path="/v2/projects/:id" element={<NavigateToRead />} />
             <Route path="/v2/projects/:id/security" element={<SecurityReportV2 mode="owner" />} />
             {/* Public, no-auth share view. Mounted as a top-level path
                 so it can never be accidentally gated by auth wrappers. */}

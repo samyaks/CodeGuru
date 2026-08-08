@@ -129,7 +129,7 @@ export default function DemoPreview() {
           <div className="flex items-center gap-3">
             {DEMO_PROJECT_ID ? (
               <Link
-                to={`/projects/${DEMO_PROJECT_ID}`}
+                to={`/read/${DEMO_PROJECT_ID}`}
                 className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-700 hover:text-stone-900 transition-colors"
               >
                 View full live report

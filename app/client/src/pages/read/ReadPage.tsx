@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
 import {
   fetchRead, correctClaim, unlockRead,
   type ReadPayload, type ReadClaim, type ReadClaimSlot, type ClaimCorrection,
 } from '../../services/readApi';
 import { ApiError } from '../../lib/api-error';
+import GapsSection from '../v2/GapsSection';
+import ShippedSection from '../v2/ShippedSection';
+import MapSection from '../v2/MapSection';
+import ContextSection from '../v2/ContextSection';
+import SettingsSection from '../v2/SettingsSection';
 import ClaimPhrase from './ClaimPhrase';
 import EditorPop from './EditorPop';
 import Marginalia from './Marginalia';
 import PromptFrame from './PromptFrame';
 import './read.css';
 
-// "The Read" — the manuscript page. Visual source of truth:
+// "The Read" — the manuscript page, now also the project shell. Other
+// workspace sections (gaps / map / context / shipped / settings) live as
+// tabs here. Visual source of truth for the read tab:
 // prototypes/living-spec-draft.html. GET is public; corrections/unlock
 // surface a gentle sign-in note on 401 instead of a wall.
 
@@ -20,7 +27,25 @@ const SLOT_ORDER: ReadClaimSlot[] = ['objective', 'audience', 'core_job'];
 const POLL_INTERVAL_MS = 5000;
 const POLL_MAX_ATTEMPTS = 36; // ~3 minutes of "still drafting" polling
 
+const TABS = ['read', 'gaps', 'map', 'context', 'shipped', 'settings'] as const;
+type TabId = (typeof TABS)[number];
+
+const TAB_DEFS: Array<{ id: TabId; label: string }> = [
+  { id: 'read', label: 'Read' },
+  { id: 'gaps', label: 'Gaps' },
+  { id: 'map', label: 'Map' },
+  { id: 'context', label: 'Context' },
+  { id: 'shipped', label: 'Shipped' },
+  { id: 'settings', label: 'Settings' },
+];
+
 type Phase = 'loading' | 'drafting' | 'error' | 'ready';
+
+function readHashTab(): TabId {
+  if (typeof window === 'undefined') return 'read';
+  const raw = window.location.hash.replace(/^#/, '').toLowerCase();
+  return (TABS as readonly string[]).includes(raw) ? (raw as TabId) : 'read';
+}
 
 function timeAgo(iso: string | null): string {
   if (!iso) return 'just now';
@@ -44,6 +69,7 @@ function prefersReducedMotion(): boolean {
 
 export default function ReadPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [read, setRead] = useState<ReadPayload | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
@@ -52,6 +78,7 @@ export default function ReadPage() {
   const [pollTick, setPollTick] = useState(0);
   // Best-effort: names the masthead dateline and the sentence subject.
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>(readHashTab);
 
   const [openPopClaimId, setOpenPopClaimId] = useState<string | null>(null);
   const [savingClaimId, setSavingClaimId] = useState<string | null>(null);
@@ -66,6 +93,24 @@ export default function ReadPage() {
   useEffect(() => () => { timersRef.current.forEach(clearTimeout); }, []);
   const later = useCallback((fn: () => void, ms: number) => {
     timersRef.current.push(setTimeout(fn, ms));
+  }, []);
+
+  const setTab = useCallback((next: TabId) => {
+    if (next === 'read') {
+      // Default tab — keep the URL clean.
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    } else {
+      window.location.hash = next;
+    }
+    setActiveTab(next);
+  }, []);
+
+  useEffect(() => {
+    function onHashChange() { setActiveTab(readHashTab()); }
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -98,10 +143,16 @@ export default function ReadPage() {
     void load();
     let cancelled = false;
     fetchProjectDetail(id)
-      .then((p) => { if (!cancelled) setProject(p); })
+      .then((p) => {
+        if (cancelled) return;
+        setProject(p);
+        if (p.status === 'analyzing' || p.status === 'pending') {
+          navigate(`/takeoff/${id}`, { replace: true });
+        }
+      })
       .catch(() => { /* best-effort — the page still reads fine unnamed */ });
     return () => { cancelled = true; };
-  }, [id, load]);
+  }, [id, load, navigate]);
 
   // Drafting poll: every ~5s, up to a few minutes, then go quiet and
   // leave a manual "check again" link.
@@ -222,6 +273,115 @@ export default function ReadPage() {
   const coreJob = claimBySlot('core_job');
   const hasNext = !!read && (read.next.title !== null || read.next.why !== null);
 
+  const readBody = (
+    <>
+      {phase === 'loading' ? (
+        <div className="read-state">
+          <p className="st-lead">Fetching the read…</p>
+        </div>
+      ) : phase === 'error' ? (
+        <div className="read-state">
+          <p className="st-lead">The read couldn't be fetched.</p>
+          <p className="st-sub">{error}</p>
+          <button type="button" className="link" onClick={manualRefresh}>Try again</button>
+        </div>
+      ) : phase === 'drafting' ? (
+        <div className="read-state">
+          {pollExpired ? (
+            <>
+              <p className="st-lead">The read is taking longer than it should.</p>
+              <p className="st-sub">
+                The draft wasn't ready after a few minutes of checking. It may still
+                be on its way — or the analysis may not have finished.
+              </p>
+              <button type="button" className="link" onClick={manualRefresh}>Check again</button>
+            </>
+          ) : (
+            <>
+              <p className="st-lead">The read is still being drafted…</p>
+              <p className="st-sub">
+                The repo is being read and set in type. This page checks again every
+                few seconds — the draft will appear on its own.
+              </p>
+            </>
+          )}
+        </div>
+      ) : read ? (
+        <>
+          <div className="read">
+            <div className="col-text">
+              <p className="kicker">
+                Drafted from your code — click any line to correct it. Yellow is where we're unsure.
+              </p>
+
+              <p className="intent">
+                <span className="name">{appName}</span>
+                {objective ? (
+                  <>
+                    {' '}{renderClaim(objective)}.<span className="fn">{footnoteOf(objective)}</span>
+                  </>
+                ) : null}
+                {audience ? (
+                  <>
+                    {' '}It's for {renderClaim(audience)}<span className="fn">{footnoteOf(audience)}</span>—
+                  </>
+                ) : null}
+                {coreJob ? (
+                  <>
+                    {' '}and the one thing it can't get wrong is {renderClaim(coreJob)}.
+                    <span className="fn">{footnoteOf(coreJob)}</span>
+                  </>
+                ) : null}
+              </p>
+
+              {popClaim?.alternative ? (
+                <EditorPop
+                  key={popClaim.id}
+                  alternative={popClaim.alternative}
+                  saving={savingClaimId === popClaim.id}
+                  onSave={(optionId) => void handleCorrection(popClaim.id, { optionId })}
+                />
+              ) : null}
+
+              {claimNotice ? <p className="gentle-note">{claimNotice}</p> : null}
+            </div>
+
+            <Marginalia claims={orderedClaims} />
+          </div>
+
+          <div className="midrule"><span>So the next thing to build</span></div>
+
+          <div className="next">
+            <p className="lead">
+              Given that read, one thing stands between {appName} and its first real reader
+              <span className={flashShown ? 'flash show' : 'flash'}>— rewritten from your edit</span>
+            </p>
+            {hasNext ? (
+              <>
+                <h2 style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.title}</h2>
+                <p className="why" style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.why}</p>
+                {read.nextStale ? (
+                  <p className="stale-note">
+                    — the next step hasn't caught up to this correction yet.
+                  </p>
+                ) : null}
+                <PromptFrame
+                  next={read.next}
+                  faded={nextFaded}
+                  unlocking={unlocking}
+                  onUnlock={() => void handleUnlock()}
+                />
+              </>
+            ) : (
+              <p className="st-sub">The next thing hasn't been derived yet — correct a claim, or check back shortly.</p>
+            )}
+            {promptNotice ? <p className="gentle-note">{promptNotice}</p> : null}
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="read-page">
       <div className="masthead">
@@ -231,7 +391,7 @@ export default function ReadPage() {
             a read of <span className="mono">{repoLabel ?? 'this project'}</span>
           </span>
         </div>
-        {phase === 'ready' && read ? (
+        {phase === 'ready' && read && activeTab === 'read' ? (
           <div className="mh-right">
             {read.fileCount !== null ? `${read.fileCount} files · ` : ''}
             drafted {timeAgo(read.draftedAt)}
@@ -241,113 +401,42 @@ export default function ReadPage() {
       <div className="sheet"><hr className="toprule" /><hr className="topthin" /></div>
 
       <div className="sheet">
-        {phase === 'loading' ? (
-          <div className="read-state">
-            <p className="st-lead">Fetching the read…</p>
+        <nav className="read-tabs" role="tablist" aria-label="Project sections">
+          {TAB_DEFS.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                id={`tab-${tab.id}`}
+                tabIndex={isActive ? 0 : -1}
+                className={isActive ? 'rtab active' : 'rtab'}
+                onClick={() => setTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <div className="sheet" role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
+        {activeTab === 'read' ? (
+          readBody
+        ) : id ? (
+          <div className="read-panel v2-font-sans">
+            {activeTab === 'gaps' ? <GapsSection projectId={id} /> : null}
+            {activeTab === 'map' ? <MapSection projectId={id} /> : null}
+            {activeTab === 'context' ? <ContextSection projectId={id} /> : null}
+            {activeTab === 'shipped' ? <ShippedSection projectId={id} /> : null}
+            {activeTab === 'settings' ? <SettingsSection projectId={id} /> : null}
           </div>
-        ) : phase === 'error' ? (
-          <div className="read-state">
-            <p className="st-lead">The read couldn't be fetched.</p>
-            <p className="st-sub">{error}</p>
-            <button type="button" className="link" onClick={manualRefresh}>Try again</button>
-          </div>
-        ) : phase === 'drafting' ? (
-          <div className="read-state">
-            {pollExpired ? (
-              <>
-                <p className="st-lead">The read is taking longer than it should.</p>
-                <p className="st-sub">
-                  The draft wasn't ready after a few minutes of checking. It may still
-                  be on its way — or the analysis may not have finished.
-                </p>
-                <button type="button" className="link" onClick={manualRefresh}>Check again</button>
-              </>
-            ) : (
-              <>
-                <p className="st-lead">The read is still being drafted…</p>
-                <p className="st-sub">
-                  The repo is being read and set in type. This page checks again every
-                  few seconds — the draft will appear on its own.
-                </p>
-              </>
-            )}
-          </div>
-        ) : read ? (
-          <>
-            <div className="read">
-              <div className="col-text">
-                <p className="kicker">
-                  Drafted from your code — click any line to correct it. Yellow is where we're unsure.
-                </p>
-
-                <p className="intent">
-                  <span className="name">{appName}</span>
-                  {objective ? (
-                    <>
-                      {' '}{renderClaim(objective)}.<span className="fn">{footnoteOf(objective)}</span>
-                    </>
-                  ) : null}
-                  {audience ? (
-                    <>
-                      {' '}It's for {renderClaim(audience)}<span className="fn">{footnoteOf(audience)}</span>—
-                    </>
-                  ) : null}
-                  {coreJob ? (
-                    <>
-                      {' '}and the one thing it can't get wrong is {renderClaim(coreJob)}.
-                      <span className="fn">{footnoteOf(coreJob)}</span>
-                    </>
-                  ) : null}
-                </p>
-
-                {popClaim?.alternative ? (
-                  <EditorPop
-                    key={popClaim.id}
-                    alternative={popClaim.alternative}
-                    saving={savingClaimId === popClaim.id}
-                    onSave={(optionId) => void handleCorrection(popClaim.id, { optionId })}
-                  />
-                ) : null}
-
-                {claimNotice ? <p className="gentle-note">{claimNotice}</p> : null}
-              </div>
-
-              <Marginalia claims={orderedClaims} />
-            </div>
-
-            <div className="midrule"><span>So the next thing to build</span></div>
-
-            <div className="next">
-              <p className="lead">
-                Given that read, one thing stands between {appName} and its first real reader
-                <span className={flashShown ? 'flash show' : 'flash'}>— rewritten from your edit</span>
-              </p>
-              {hasNext ? (
-                <>
-                  <h2 style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.title}</h2>
-                  <p className="why" style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.why}</p>
-                  {read.nextStale ? (
-                    <p className="stale-note">
-                      — the next step hasn't caught up to this correction yet.
-                    </p>
-                  ) : null}
-                  <PromptFrame
-                    next={read.next}
-                    faded={nextFaded}
-                    unlocking={unlocking}
-                    onUnlock={() => void handleUnlock()}
-                  />
-                </>
-              ) : (
-                <p className="st-sub">The next thing hasn't been derived yet — correct a claim, or check back shortly.</p>
-              )}
-              {promptNotice ? <p className="gentle-note">{promptNotice}</p> : null}
-            </div>
-          </>
         ) : null}
       </div>
 
-      {phase === 'ready' ? (
+      {phase === 'ready' && activeTab === 'read' ? (
         <div className="footer">
           <hr className="fr" />
           <p>

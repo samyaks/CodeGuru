@@ -753,7 +753,7 @@ export default function BuildStory({ projectId: propProjectId, onCounts }: Build
   if (isStandalone) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header variant="workspace" backTo={`/projects/${projectId}`} title="Build Story" />
+        <Header variant="workspace" backTo={`/read/${projectId}#context`} title="Build Story" />
         <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-8">
           {content}
         </main>

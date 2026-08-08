@@ -50,7 +50,7 @@ export default function AnalysisProgress() {
   // "we're done waiting" — `ready` is the happy path; `skipped` means
   // an existing map was reused (or no description signal); `failed`
   // means Claude/persistence errored. In all three cases the user
-  // can proceed to the project — the Map tab will either be populated
+  // can proceed to the Read — the Map tab will either be populated
   // or fall back to its existing empty-state CTA.
   const productMapEvent = useMemo(
     () => messages.find((m) =>
@@ -67,7 +67,7 @@ export default function AnalysisProgress() {
     // Both gates met → navigate after a short beat so the "Analysis
     // complete" copy is visible briefly.
     if (productMapEvent) {
-      const timer = setTimeout(() => navigate(`/projects/${id}`), 800);
+      const timer = setTimeout(() => navigate(`/read/${id}`), 800);
       return () => clearTimeout(timer);
     }
 
@@ -75,7 +75,7 @@ export default function AnalysisProgress() {
     // loading screen for up to PRODUCT_MAP_WAIT_MS, then navigate
     // anyway. This is the fallback for SSE drops or a server-side
     // unhandled error that doesn't broadcast a terminal event.
-    const fallback = setTimeout(() => navigate(`/projects/${id}`), PRODUCT_MAP_WAIT_MS);
+    const fallback = setTimeout(() => navigate(`/read/${id}`), PRODUCT_MAP_WAIT_MS);
     return () => clearTimeout(fallback);
   }, [completed, productMapEvent, id, navigate]);
 

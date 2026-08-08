@@ -27,16 +27,45 @@
 .read-page .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 
 /* masthead */
-.read-page .masthead { max-width: 940px; margin: 0 auto; padding: 26px 40px 0; display: flex; align-items: baseline; justify-content: space-between; }
+.read-page .masthead { max-width: 1100px; margin: 0 auto; padding: 26px 40px 0; display: flex; align-items: baseline; justify-content: space-between; }
 .read-page .mh-left { display: flex; align-items: baseline; gap: 14px; }
 .read-page .wordmark { font-family: 'IBM Plex Mono'; font-weight: 500; letter-spacing: .34em; font-size: 12px; text-transform: uppercase; color: var(--ink); text-decoration: none; }
 .read-page .dateline { font-style: italic; font-size: 14px; color: var(--ink-soft); }
 .read-page .dateline .mono { font-style: normal; font-size: 12.5px; color: var(--ink); }
 .read-page .mh-right { font-size: 12.5px; color: var(--ink-faint); font-style: italic; }
 
-.read-page .sheet { max-width: 940px; margin: 0 auto; padding: 0 40px; }
+.read-page .sheet { max-width: 1100px; margin: 0 auto; padding: 0 40px; }
 .read-page .toprule { border: 0; border-top: 1px solid var(--ink); margin: 14px 0 0; }
 .read-page .topthin { border: 0; border-top: 1px solid var(--rule); margin: 3px 0 0; }
+
+/* project section tabs — manuscript voice, not dashboard pills */
+.read-page .read-tabs {
+  display: flex; flex-wrap: nowrap; gap: 4px;
+  margin: 18px 0 0; padding-bottom: 0;
+  border-bottom: 1px solid var(--rule);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.read-page .rtab {
+  appearance: none; background: none; border: 0;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 10px 14px 12px; cursor: pointer;
+  border-bottom: 1.5px solid transparent; margin-bottom: -1px;
+  white-space: nowrap; flex-shrink: 0;
+  transition: color .16s, border-color .16s;
+}
+.read-page .rtab:hover { color: var(--ink); }
+.read-page .rtab.active { color: var(--ink); border-bottom-color: var(--mark); }
+.read-page .rtab:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+
+/* workspace sections (gaps/map/…) keep their sans UI inside the paper shell */
+.read-page .read-panel {
+  padding: 28px 0 56px;
+  color: #1c1917;
+  /* re-enable app-like interaction affordances the manuscript page softens */
+  line-height: 1.5;
+}
+.read-page .read-panel a { text-decoration: none; }
 
 /* the read: two-column, text + marginalia */
 .read-page .read { display: grid; grid-template-columns: 1fr 232px; gap: 46px; padding: 52px 0 30px; }
@@ -135,7 +164,7 @@
 .read-page .link.quiet:hover { color: var(--ink); border-color: var(--ink); }
 .read-page .link:disabled { color: var(--ink-faint); border-color: var(--rule); cursor: default; }
 
-.read-page .footer { max-width: 940px; margin: 0 auto; padding: 40px 40px 70px; }
+.read-page .footer { max-width: 1100px; margin: 0 auto; padding: 40px 40px 70px; }
 .read-page .footer .fr { border: 0; border-top: 1px solid var(--rule); margin: 0 0 16px; }
 .read-page .footer p { font-style: italic; color: var(--ink-faint); font-size: 13.5px; margin: 0; max-width: 560px; }
 
@@ -153,6 +182,7 @@
   .read-page .intent { font-size: 23px; }
   .read-page .masthead, .read-page .sheet, .read-page .footer { padding-left: 24px; padding-right: 24px; }
   .read-page .mh-right { display: none; }
+  .read-page .rtab { padding-left: 10px; padding-right: 10px; letter-spacing: .1em; }
 }
 @media (prefers-reduced-motion: reduce) {
   .read-page *, .read-page *::before, .read-page *::after { animation: none !important; transition: none !important; }

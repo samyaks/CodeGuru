@@ -161,7 +161,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
             description="Connect a GitHub repo so Takeoff can match your commits to open gaps."
             action={
               <Link
-                to={`/projects/${projectId}#settings`}
+                to={`/read/${projectId}#settings`}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
               >
                 <Settings className="w-3 h-3" />
