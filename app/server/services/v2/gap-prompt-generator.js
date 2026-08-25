@@ -60,13 +60,14 @@ function buildUserMessageParts({ project, gap }) {
  * Generate a Cursor prompt for a gap. Returns the generated text. Caller is
  * responsible for caching back onto the suggestions row.
  */
-async function generateCursorPrompt({ project, gap, refineInstructions }) {
+async function generateCursorPrompt({ project, gap, refineInstructions, analysisId }) {
   const { projectPrefix, gapBody } = buildUserMessageParts({ project, gap });
   const dynamicBody = refineInstructions
     ? `${gapBody}\n\nUser refinement instructions (apply these before producing the prompt):\n${refineInstructions}`
     : gapBody;
 
   const response = await createMessageTracked({
+    analysisId: analysisId || project?.id || null,
     phase: refineInstructions ? 'v2.gap.refine' : 'v2.gap.prompt',
     targetPath: gap.id,
     params: {

@@ -28,6 +28,7 @@ const { asyncHandler } = require('../lib/async-handler');
 const { seedFromAnalysis } = require('../lib/auto-entries');
 const { checkProjectAccess } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
+const { buildTakeoffCostPlan } = require('../lib/cost-budget');
 
 const router = express.Router();
 
@@ -515,6 +516,29 @@ async function runPipeline(id, codebaseModel, userId, label) {
 
   console.log(JSON.stringify({ event: 'pipeline_complete', projectId: id, label, score: readiness.score, recommendation: readiness.recommendation, timestamp: new Date().toISOString() }));
 
+  // Soft COGS ceiling: project spend from file count, then degrade (never cut Read).
+  const ingestedFileCount =
+    Number(codebaseModel?.ingestedFileCount) ||
+    (Array.isArray(codebaseModel?.fileTree) ? codebaseModel.fileTree.length : 0) ||
+    Object.keys(codebaseModel?.fileContents || {}).length ||
+    0;
+  const costPlan = buildTakeoffCostPlan({ ingestedFileCount, jobCount: 12 });
+  console.log(JSON.stringify({
+    event: 'cost_plan',
+    projectId: id,
+    mode: costPlan.mode,
+    projectedUsd: costPlan.projectedUsd,
+    softCeilingUsd: costPlan.softCeilingUsd,
+    ingestedFileCount,
+    timestamp: new Date().toISOString(),
+  }));
+  broadcast(id, {
+    type: 'cost-plan',
+    mode: costPlan.mode,
+    projectedUsd: costPlan.projectedUsd,
+    softCeilingUsd: costPlan.softCeilingUsd,
+  });
+
   // Stage 3b: Product-map auto-extraction (async, non-blocking).
   // The v1 onboarding wizard was removed in the v2 migration, so without
   // this hook the v2 Map tab stays empty forever. We use featuresSummary
@@ -528,7 +552,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // still broadcasts `product-map-failed` so the frontend's wait
   // unblocks instead of relying solely on the 60s timeout fallback.
   setImmediate(() => {
-    autoCreateProductMap(id, codebaseModel, featuresSummary).catch((err) => {
+    autoCreateProductMap(id, codebaseModel, featuresSummary, { costPlan }).catch((err) => {
       console.error(`[takeoff] auto product-map for ${id} failed (non-fatal):`, err.message);
       try {
         broadcast(id, { type: 'product-map-failed', error: err.message });
@@ -541,6 +565,21 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // Stage 4: AI suggestions (async, non-blocking — pipeline is already 'ready')
   const tStage4 = startTimer('stage4_ai_suggestions', id);
   let aiSuggestionsCount = 0;
+  if (costPlan.skipAiSuggestions) {
+    broadcast(id, {
+      type: 'progress',
+      phase: 'ai-suggestions',
+      message: 'Skipping AI suggestions to stay under cost ceiling…',
+    });
+    console.log(JSON.stringify({
+      event: 'cost_degrade_skip_ai_suggestions',
+      projectId: id,
+      projectedUsd: costPlan.projectedUsd,
+      softCeilingUsd: costPlan.softCeilingUsd,
+      timestamp: new Date().toISOString(),
+    }));
+    tStage4.end({ ok: true, skipped: true, reason: 'soft_ceiling' });
+  } else {
   try {
     const aiSuggestions = await runAISuggestions({
       projectId: id,
@@ -551,6 +590,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
       fileTree: codebaseModel.fileTree,
       staticSuggestions: allStaticSuggestions,
       featuresSummary,
+      tokenBudget: costPlan.suggestionTokenBudget,
     });
     aiSuggestionsCount = aiSuggestions.length;
 
@@ -563,6 +603,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   } catch (err) {
     console.error(`AI suggestions for ${id} failed (non-fatal):`, err.message);
     tStage4.end({ ok: false, error: err.message });
+  }
   }
 
   // Stage 4b: Security detectors. Runs after AI suggestions so the
@@ -709,7 +750,9 @@ async function runPipeline(id, codebaseModel, userId, label) {
   broadcast(id, { type: 'progress', phase: 'context-files', message: 'Generating AI-ready context files...' });
   let contextFilesCount = 0;
   try {
-    const { contextFiles, completionPct } = await generateContextFiles(id, codebaseModel);
+    const { contextFiles, completionPct } = await generateContextFiles(id, codebaseModel, {
+      context: costPlan.context,
+    });
     contextFilesCount = contextFiles.length;
     try {
       await analyses.update(id, {
@@ -742,11 +785,16 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // Claude (it does, on cold maps).
   setImmediate(() => {
     const tStage5 = startTimer('stage5_link_gaps_to_jobs', id);
-    linkGapsToJobs(id).then((summary) => {
+    linkGapsToJobs(id, { useClaude: costPlan.useClaudeGapLink }).then((summary) => {
       if (summary.linked > 0 || summary.total > 0) {
         console.log(`[takeoff] gap-job linker for ${id}: ${JSON.stringify(summary)}`);
       }
-      tStage5.end({ ok: true, linked: summary.linked, total: summary.total });
+      tStage5.end({
+        ok: true,
+        linked: summary.linked,
+        total: summary.total,
+        useClaude: costPlan.useClaudeGapLink,
+      });
     }).catch((err) => {
       console.error(`[takeoff] gap-job linker for ${id} failed (non-fatal):`, err.message);
       tStage5.end({ ok: false, error: err.message });
@@ -757,7 +805,10 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // non-blocking after the pipeline so it never delays the user-facing
   // readiness/gaps result. No-op until Phase 3 lands (foundation hook).
   setImmediate(() => {
-    runIntentPipeline(id, codebaseModel).catch((err) => {
+    runIntentPipeline(id, codebaseModel, {
+      maxInvariantJobs: costPlan.maxInvariantJobs,
+      invariantModel: costPlan.invariantModel,
+    }).catch((err) => {
       console.error(`[takeoff] intent pipeline for ${id} failed (non-fatal):`, err.message);
     }).then(() => {
       // "The Read" conditions its claims on the freshest signals — the product
@@ -793,7 +844,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
 //   - 'product-map-failed'             on Claude / persistence error
 // The frontend treats ready/skipped/failed as "we're done waiting"
 // and proceeds with whatever data it has.
-async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
+async function autoCreateProductMap(projectId, codebaseModel, featuresSummary, { costPlan } = {}) {
   // Don't overwrite an existing map.
   try {
     const existing = await productMapSvc.getMapByProject(projectId);
@@ -825,7 +876,9 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
 
   let result;
   try {
-    result = await productMapSvc.createProductMap(projectId, null, description);
+    // analyses.id === deployments.id for Takeoff — pass real id so map LLM
+    // spend attributes to analysis_llm_calls (never fake map-extract ids).
+    result = await productMapSvc.createProductMap(projectId, projectId, description);
   } catch (err) {
     console.error(`[takeoff] auto product-map for ${projectId} failed (non-fatal):`, err.message);
     broadcast(projectId, { type: 'product-map-failed', error: err.message });
@@ -842,8 +895,9 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary) {
   // Map just landed — link any suggestions that the Stage-5 pass skipped
   // because the map didn't exist yet. Idempotent: rows already linked are
   // left alone (only `v2_job_links IS NULL` rows are touched).
+  const useClaude = !(costPlan && costPlan.useClaudeGapLink === false);
   setImmediate(() => {
-    linkGapsToJobs(projectId).then((summary) => {
+    linkGapsToJobs(projectId, { useClaude }).then((summary) => {
       if (summary.linked > 0) {
         console.log(`[takeoff] gap-job linker (post-map) for ${projectId}: ${JSON.stringify(summary)}`);
       }

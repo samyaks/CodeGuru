@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { analyses, deployments, productMap: mapDb, analysisFiles, getDb } = require('../lib/db');
+const { analyses, deployments, productMap: mapDb, analysisFiles, getDb, statementJobs } = require('../lib/db');
 const { checkProjectAccess, safeParseJson } = require('../lib/helpers');
 const { AppError } = require('../lib/app-error');
 
@@ -67,12 +67,13 @@ async function loadCodebaseModel(projectId, analysisId) {
     };
   }
 
-  if ((!model.fileContents || Object.keys(model.fileContents).length === 0) && analysisId) {
+  const contentId = analysisId || projectId;
+  if ((!model.fileContents || Object.keys(model.fileContents).length === 0) && contentId) {
     try {
-      model.fileContents = await analysisFiles.getContentsMap(analysisId);
+      model.fileContents = await analysisFiles.getContentsMap(contentId);
       model.fileContentsLazy = true;
     } catch (err) {
-      console.warn(`loadCodebaseModel: getContentsMap failed for ${analysisId}: ${err.message}`);
+      console.warn(`loadCodebaseModel: getContentsMap failed for ${contentId}: ${err.message}`);
       model.fileContents = {};
     }
   }
@@ -343,6 +344,19 @@ async function updateProductMap(mapId, action, payload, { req } = {}) {
     case 'confirmJob': {
       requireNonEmptyString(p, 'jobId', 'confirmJob');
       await mapDb.updateJob(p.jobId, { confirmed: true });
+      // Lazy overflow: first-scan caps invariants at 8 jobs; generate on
+      // confirm when this job was deferred (or never generated).
+      try {
+        const existing = await statementJobs.findStatementsForJob(p.jobId, {});
+        if (!Array.isArray(existing) || existing.length === 0) {
+          const model = await loadCodebaseModel(ctx.projectId, ctx.projectId);
+          await regenerateJobInvariants(ctx.projectId, p.jobId, model);
+        }
+      } catch (err) {
+        console.warn(
+          `[product-map] lazy invariant gen for job ${p.jobId} failed (non-fatal): ${err.message}`,
+        );
+      }
       await cascadeConfirmJob(ctx.projectId, p.jobId);
       break;
     }

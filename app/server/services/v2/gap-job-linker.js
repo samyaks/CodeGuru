@@ -219,6 +219,7 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
     let response;
     try {
       response = await createMessageTracked({
+        analysisId: projectId,
         phase: 'v2.gap.link',
         targetPath: `project-${projectId}`,
         params: {

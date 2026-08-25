@@ -68,7 +68,11 @@ async function processCommit({ project, commit, branch }) {
     // Run the verifier — falls back to 'pending' on any error.
     let verdict = { verification: 'pending', detail: 'Verifier deferred.' };
     try {
-      verdict = await verifyGap({ gap: matchedGap, commit: enrichedCommit });
+      verdict = await verifyGap({
+        gap: matchedGap,
+        commit: enrichedCommit,
+        options: { analysisId: projectId },
+      });
     } catch (err) {
       console.error(`[v2/shipped-runner] verifyGap threw for ${matchedGap.id}:`, err.message);
     }

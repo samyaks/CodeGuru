@@ -183,7 +183,7 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
 
     let prompt = null;
     try {
-      prompt = await generateCursorPrompt({ project, gap: target });
+      prompt = await generateCursorPrompt({ project, gap: target, analysisId: project.id });
     } catch (err) {
       throw upstreamPromptError(err, gapId, 'synthetic-prompt');
     }
@@ -198,7 +198,7 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
   if (!prompt) {
     try {
       const gapShape = toGap(row);
-      prompt = await generateCursorPrompt({ project, gap: gapShape });
+      prompt = await generateCursorPrompt({ project, gap: gapShape, analysisId: project.id });
       if (prompt) {
         await suggestions.setCursorPrompt(gapId, req.params.id, prompt);
       }
@@ -248,7 +248,7 @@ router.post('/:gapId/accept', requireUser, writeLimit, asyncHandler(async (req, 
   if (!cursorPrompt) {
     try {
       const gapShape = toGap(row);
-      cursorPrompt = await generateCursorPrompt({ project, gap: gapShape });
+      cursorPrompt = await generateCursorPrompt({ project, gap: gapShape, analysisId: project.id });
       if (cursorPrompt) {
         await suggestions.setCursorPrompt(req.params.gapId, req.params.id, cursorPrompt);
       }
@@ -296,6 +296,7 @@ router.post('/:gapId/refine', requireUser, REFINE_LIMIT, asyncHandler(async (req
       project,
       gap: gapShape,
       refineInstructions: instructions,
+      analysisId: project.id,
     });
   } catch (err) {
     console.error(`[v2/gaps] refine failed for ${req.params.gapId}:`, err.message);

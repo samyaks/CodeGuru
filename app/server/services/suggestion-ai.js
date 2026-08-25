@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { HAIKU_MODEL, anthropic, truncate } = require('../lib/constants');
+const { createMessageTracked, extractText } = require('../lib/anthropic-tracked');
 const { broadcast } = require('../lib/sse');
 const { selectFilesForPrompt } = require('./file-selector');
 
@@ -53,11 +54,11 @@ function extractNotBuiltSection(featuresSummary) {
   return truncate(section, 2000);
 }
 
-function buildKeyFilesSection(fileContents) {
+function buildKeyFilesSection(fileContents, tokenBudget = 12000) {
   const { files } = selectFilesForPrompt({
     fileContents: fileContents || {},
     purpose: 'ai_suggestions',
-    tokenBudget: 25000,
+    tokenBudget,
     maxFiles: 25,
     filterFn: (p) => !p.toLowerCase().includes('.env'),
   });
@@ -67,7 +68,7 @@ function buildKeyFilesSection(fileContents) {
     .join('\n\n');
 }
 
-function buildUserMessage({ stack, gaps, features, fileTree, fileContents, staticSuggestions, featuresSummary }) {
+function buildUserMessage({ stack, gaps, features, fileTree, fileContents, staticSuggestions, featuresSummary, tokenBudget }) {
   const s = stack || {};
   const sections = [
     `## Project
@@ -91,7 +92,7 @@ ${extractNotBuiltSection(featuresSummary)}`,
 ${(fileTree || []).slice(0, 100).join('\n')}`,
 
     `## Key source files
-${buildKeyFilesSection(fileContents || {})}`,
+${buildKeyFilesSection(fileContents || {}, tokenBudget)}`,
   ];
 
   return sections.join('\n\n');
@@ -150,23 +151,37 @@ function processSuggestions(raw, staticSuggestions) {
   return results;
 }
 
-async function runAISuggestions({ projectId, stack, gaps, features, fileContents, fileTree, staticSuggestions, featuresSummary }) {
+async function runAISuggestions({
+  projectId,
+  stack,
+  gaps,
+  features,
+  fileContents,
+  fileTree,
+  staticSuggestions,
+  featuresSummary,
+  tokenBudget = 12000,
+}) {
   broadcast(projectId, { type: 'progress', phase: 'ai-suggestions', message: 'AI is analyzing your codebase for deeper suggestions...' });
 
   try {
-    const userMessage = buildUserMessage({ stack, gaps, features, fileTree, fileContents, staticSuggestions, featuresSummary });
-
-    const response = await anthropic.messages.create({
-      model: HAIKU_MODEL,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+    const userMessage = buildUserMessage({
+      stack, gaps, features, fileTree, fileContents, staticSuggestions, featuresSummary, tokenBudget,
     });
 
-    const text = response.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('');
+    const response = await createMessageTracked({
+      client: anthropic,
+      analysisId: projectId,
+      phase: 'ai-suggestions',
+      params: {
+        model: HAIKU_MODEL,
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMessage }],
+      },
+    });
+
+    const text = extractText(response);
 
     const parsed = parseResponse(text);
     if (!parsed) {

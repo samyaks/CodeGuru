@@ -6,12 +6,13 @@
  * Each invariant includes an inline `satisfied` (holds/broken) verdict so the
  * UI can lead with findings without a second LLM pass.
  *
- * Runs speculatively at analysis time for ALL jobs (not only confirmed ones).
- * Confirmation is instant elsewhere (cascade-confirm.js).
+ * Runs at analysis time for up to FIRST_SCAN_INVARIANT_CAP jobs (overflow
+ * generates lazily on job confirm). Confirmation is instant elsewhere
+ * (cascade-confirm.js).
  */
 
 const crypto = require('crypto');
-const { CLAUDE_MODEL, HAIKU_MODEL, anthropic, truncate } = require('../../lib/constants');
+const { CLAUDE_MODEL, anthropic, truncate } = require('../../lib/constants');
 const { createMessageTracked, extractText } = require('../../lib/anthropic-tracked');
 const { stripJsonFence } = require('../map-extractor');
 const { intentStatements, statementJobs, productMap, analysisFiles } = require('../../lib/db');
@@ -117,7 +118,7 @@ function parseInvariants(rawText, validAnchors) {
   return out;
 }
 
-async function generateForJob(projectId, job, persona, map, contents) {
+async function generateForJob(projectId, job, persona, map, contents, opts = {}) {
   const allPaths = Object.keys(contents || {});
   const { files, needsEdges, usedFallback } = resolveJobFiles(job, map, allPaths);
   if (files.length === 0) {
@@ -144,12 +145,14 @@ async function generateForJob(projectId, job, persona, map, contents) {
     buildSourceBlock(files, contents),
   ].join('\n');
 
+  const model = opts.model || CLAUDE_MODEL;
+
   const response = await createMessageTracked({
     client: anthropic,
     analysisId: projectId,
     phase: 'intent.job-invariants',
     params: {
-      model: CLAUDE_MODEL,
+      model,
       max_tokens: 2500,
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userContent }],
@@ -256,10 +259,31 @@ async function runPool(items, limit, fn) {
 }
 
 /**
+ * Pick highest-weight / highest-priority jobs for the first-scan invariant cap.
+ * Overflow jobs generate lazily on confirm (product-map confirmJob).
+ */
+function selectJobsForFirstScan(jobs, maxJobs) {
+  const priorityRank = { high: 0, medium: 1, low: 2 };
+  const sorted = [...jobs].sort((a, b) => {
+    const wa = Number(a.weight) || 0;
+    const wb = Number(b.weight) || 0;
+    if (wb !== wa) return wb - wa;
+    const pa = priorityRank[a.priority] ?? 1;
+    const pb = priorityRank[b.priority] ?? 1;
+    if (pa !== pb) return pa - pb;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+  return sorted.slice(0, maxJobs);
+}
+
+/**
  * Generate invariants for jobs in a project (analysis-time).
  * @param {string} projectId
  * @param {object} codebaseModel
- * @param {{ jobIds?: string[] }} [opts] - limit to specific jobs (re-analysis)
+ * @param {{ jobIds?: string[], maxJobs?: number, model?: string }} [opts]
+ *   - jobIds: limit to specific jobs (re-analysis)
+ *   - maxJobs: first-scan cap (overflow is lazy on job confirm)
+ *   - model: override CLAUDE_MODEL (e.g. Haiku under soft ceiling)
  */
 async function runJobInvariantGeneration(projectId, codebaseModel, opts = {}) {
   const map = await productMap.getMapByProject(projectId);
@@ -283,6 +307,17 @@ async function runJobInvariantGeneration(projectId, codebaseModel, opts = {}) {
     jobs = jobs.filter((j) => allow.has(j.id));
   }
 
+  let deferredJobIds = [];
+  const maxJobs = Number.isFinite(opts.maxJobs) && opts.maxJobs > 0 ? Math.floor(opts.maxJobs) : null;
+  // Only apply the first-scan cap when we are not already filtering to an
+  // explicit jobIds list (re-analysis / single-job regenerate).
+  if (maxJobs && !(Array.isArray(opts.jobIds) && opts.jobIds.length > 0) && jobs.length > maxJobs) {
+    const selected = selectJobsForFirstScan(jobs, maxJobs);
+    const selectedIds = new Set(selected.map((j) => j.id));
+    deferredJobIds = jobs.filter((j) => !selectedIds.has(j.id)).map((j) => j.id);
+    jobs = selected;
+  }
+
   const mapForResolver = {
     entities: map.entities,
     edges: map.edges,
@@ -290,7 +325,9 @@ async function runJobInvariantGeneration(projectId, codebaseModel, opts = {}) {
 
   const results = await runPool(jobs, CONCURRENCY, async (job) => {
     const persona = personaById.get(job.persona_id);
-    const gen = await generateForJob(projectId, job, persona, mapForResolver, contents);
+    const gen = await generateForJob(projectId, job, persona, mapForResolver, contents, {
+      model: opts.model,
+    });
     if (!gen.rows || gen.rows.length === 0) return gen;
     const count = await persistJobInvariants(projectId, job.id, gen.rows);
     return { ...gen, persisted: count };
@@ -317,6 +354,7 @@ async function runJobInvariantGeneration(projectId, codebaseModel, opts = {}) {
     generated: total > 0,
     jobs: jobs.length,
     persisted: total,
+    deferredJobIds,
     results,
   };
 }
@@ -336,4 +374,5 @@ module.exports = {
   deleteCandidatesForJob,
   mergeKey,
   normalizeText,
+  selectJobsForFirstScan,
 };

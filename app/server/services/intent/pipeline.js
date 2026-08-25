@@ -10,6 +10,8 @@
 // Called non-blocking from takeoff's runPipeline tail — every stage is
 // individually non-fatal.
 
+const { CLAUDE_MODEL, HAIKU_MODEL } = require('../../lib/constants');
+const { FIRST_SCAN_INVARIANT_CAP } = require('../../lib/cost-budget');
 const { reconcileIntentOnReanalysis } = require('./reconcile-analysis');
 const { runJobInvariantGeneration } = require('./generate-invariants');
 const { runGlobalGuarantees } = require('./global-guarantees');
@@ -19,8 +21,9 @@ const { runSatisfactionRecheck } = require('./satisfaction');
 /**
  * @param {string} projectId - deployments.id
  * @param {object} codebaseModel - analyzer output with structureAnchors + fileContents
+ * @param {{ maxInvariantJobs?: number, invariantModel?: 'haiku'|null }} [opts]
  */
-async function runIntentPipeline(projectId, codebaseModel) {
+async function runIntentPipeline(projectId, codebaseModel, opts = {}) {
   let reconciliation = null;
   try {
     reconciliation = await reconcileIntentOnReanalysis(projectId, codebaseModel);
@@ -32,9 +35,29 @@ async function runIntentPipeline(projectId, codebaseModel) {
   const skipGen = reconciliation && reconciliation.unchanged;
   if (!skipGen) {
     try {
+      const model =
+        opts.invariantModel === 'haiku' ? HAIKU_MODEL : (opts.model || CLAUDE_MODEL);
+      const maxJobs = Number.isFinite(opts.maxInvariantJobs)
+        ? opts.maxInvariantJobs
+        : FIRST_SCAN_INVARIANT_CAP;
+      // When reconcile returns an explicit jobsToRegenerate list, honor it and
+      // do not re-apply the first-scan cap (partial re-analysis).
+      const jobIds = reconciliation && reconciliation.jobsToRegenerate;
       generation = await runJobInvariantGeneration(projectId, codebaseModel, {
-        jobIds: reconciliation && reconciliation.jobsToRegenerate,
+        jobIds,
+        maxJobs: Array.isArray(jobIds) && jobIds.length > 0 ? undefined : maxJobs,
+        model,
       });
+      if (generation && Array.isArray(generation.deferredJobIds) && generation.deferredJobIds.length > 0) {
+        console.log(JSON.stringify({
+          event: 'intent_invariants_capped',
+          projectId,
+          generatedJobs: generation.jobs,
+          deferredJobs: generation.deferredJobIds.length,
+          model,
+          timestamp: new Date().toISOString(),
+        }));
+      }
     } catch (err) {
       console.error(`[intent.pipeline] job invariant generation failed for ${projectId} (non-fatal): ${err.message}`);
     }
