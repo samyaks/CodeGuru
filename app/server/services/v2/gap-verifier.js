@@ -29,7 +29,7 @@ Rules:
 - Never invent file names. Only list partialItems that appear in either the
   affected files or the commit's changed files.`;
 
-async function classifyWithClaude({ gap, commit }) {
+async function classifyWithClaude({ gap, commit, analysisId }) {
   const userPayload = {
     gap: {
       title: gap.title,
@@ -44,6 +44,7 @@ async function classifyWithClaude({ gap, commit }) {
   };
 
   const response = await createMessageTracked({
+    analysisId: analysisId || null,
     phase: 'v2.gap.verify',
     targetPath: gap.id,
     params: {
@@ -125,7 +126,11 @@ async function verifyGap({ gap, commit, options = {} }) {
   }
 
   try {
-    return await classifyWithClaude({ gap, commit });
+    return await classifyWithClaude({
+      gap,
+      commit,
+      analysisId: options.analysisId || null,
+    });
   } catch (err) {
     console.error(`[v2/verifier] Claude classification failed for gap ${gap.id}: ${err.message}`);
     return { verification: 'pending', detail: 'Verifier unavailable; will retry later.' };

@@ -7,10 +7,9 @@ const { computeImportGraph } = require('./import-graph');
 
 const APP_CONTEXT_CACHE_CHARS = 1500;
 
-// Per-call output cap. Sized to accommodate ~app + 5 dirs + 5-7 gaps in a
-// single response (~20K target). Stream truncation triggers the missing-
-// section retry below.
-const COMBINED_MAX_TOKENS = 20000;
+// Per-call output cap. Sized for ~app + ≤6 dirs + gaps after the COGS shrink
+// (was 20K). Stream truncation still triggers the missing-section retry.
+const COMBINED_MAX_TOKENS = 12000;
 // Legacy per-section cap (kept for the multi-call fallback path).
 const LEGACY_MAX_TOKENS = 4096;
 
@@ -60,14 +59,15 @@ function renderFilesBlock(files) {
     .join('\n\n');
 }
 
-function buildCacheablePrefix(model, skeletons = {}) {
+function buildCacheablePrefix(model, skeletons = {}, opts = {}) {
   const fileTree = (model.fileTree || []).slice(0, 100).join('\n');
+  const tokenBudget = Number(opts.tokenBudget) > 0 ? Number(opts.tokenBudget) : 11000;
 
   const { files: selected } = selectFilesForPrompt({
     fileContents: model.fileContents || {},
     skeletons,
     purpose: 'context_generation',
-    tokenBudget: 18000,
+    tokenBudget,
     maxFiles: 30,
   });
 
@@ -111,8 +111,9 @@ function sectionKey(s) {
   return `${s.kind}:${s.key}`;
 }
 
-function buildSectionPlan(model, featureDirs, gaps, skeletons) {
+function buildSectionPlan(model, featureDirs, gaps, skeletons, opts = {}) {
   const plan = [];
+  const dirTokenBudget = Number(opts.dirTokenBudget) > 0 ? Number(opts.dirTokenBudget) : 2500;
 
   plan.push({
     kind: 'app',
@@ -132,7 +133,7 @@ function buildSectionPlan(model, featureDirs, gaps, skeletons) {
       skeletons,
       purpose: 'feature_dir',
       filterFn: (p) => p.startsWith(dir),
-      tokenBudget: 3000,
+      tokenBudget: dirTokenBudget,
       maxFiles: 8,
     });
     if (!dirFiles.length) continue;
@@ -279,6 +280,7 @@ async function runDelimitedCall({
   cachedFilesUsed,
   plan,
   send,
+  combinedMaxTokens = COMBINED_MAX_TOKENS,
 }) {
   const dynamicInstruction = buildDynamicInstructionBlock(plan);
   const finalReminder =
@@ -333,7 +335,7 @@ async function runDelimitedCall({
     filesUsed: [...allFilesUsed],
     params: {
       model: CLAUDE_MODEL,
-      max_tokens: COMBINED_MAX_TOKENS,
+      max_tokens: combinedMaxTokens,
       system: COMBINED_SYSTEM_PROMPT,
       messages: [{
         role: 'user',
@@ -353,9 +355,17 @@ async function runDelimitedCall({
 
 // ── Public entry point ──────────────────────────────────────────
 
-async function generateContextFiles(analysisId, codebaseModel) {
+async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
   const send = (data) => broadcast(analysisId, data);
   send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
+
+  const contextOpts = opts.context || {};
+  const tokenBudget = Number(contextOpts.tokenBudget) > 0 ? Number(contextOpts.tokenBudget) : 11000;
+  const featureDirMax = Number(contextOpts.featureDirMax) > 0 ? Number(contextOpts.featureDirMax) : FEATURE_DIR_MAX;
+  const combinedMaxTokens = Number(contextOpts.combinedMaxTokens) > 0
+    ? Number(contextOpts.combinedMaxTokens)
+    : COMBINED_MAX_TOKENS;
+  const dirTokenBudget = Number(contextOpts.dirTokenBudget) > 0 ? Number(contextOpts.dirTokenBudget) : 2500;
 
   let skeletons = {};
   try {
@@ -366,13 +376,13 @@ async function generateContextFiles(analysisId, codebaseModel) {
     console.warn(`[context-generator] getSkeletonsMap failed: ${err.message}`);
   }
 
-  const featureDirs = identifyFeatureDirs(codebaseModel, skeletons);
+  const featureDirs = identifyFeatureDirs(codebaseModel, skeletons, { featureDirMax });
   const gaps = identifyActionableGaps(codebaseModel);
 
   const { prefix: cacheablePrefix, filesUsed: cachedFilesUsed } =
-    buildCacheablePrefix(codebaseModel, skeletons);
+    buildCacheablePrefix(codebaseModel, skeletons, { tokenBudget });
 
-  const plan = buildSectionPlan(codebaseModel, featureDirs, gaps, skeletons);
+  const plan = buildSectionPlan(codebaseModel, featureDirs, gaps, skeletons, { dirTokenBudget });
 
   let sectionsByKey;
   try {
@@ -383,6 +393,7 @@ async function generateContextFiles(analysisId, codebaseModel) {
       cachedFilesUsed,
       plan,
       send,
+      combinedMaxTokens,
     });
   } catch (err) {
     console.error(`[context-generator] combined streaming call failed: ${err.message}`);
@@ -406,6 +417,7 @@ async function generateContextFiles(analysisId, codebaseModel) {
           cachedFilesUsed,
           plan: missing,
           send,
+          combinedMaxTokens,
         });
         for (const [k, v] of retried) sectionsByKey.set(k, v);
       } catch (err) {
@@ -671,17 +683,17 @@ function featureDirOf(p) {
   return parts[0];
 }
 
-// Max dirs to ship to Claude in a single delimited call. Stays well under the
-// 20K max_tokens cap so we don't trigger the retry path unnecessarily, and
-// keeps the prompt size manageable.
-const FEATURE_DIR_MAX = 10;
+// Max dirs to ship to Claude in a single delimited call. Stays under the
+// shrunk max_tokens cap so we don't trigger the retry path unnecessarily.
+const FEATURE_DIR_MAX = 6;
 // Minimum file count to qualify a dir. A 1-file dir is rarely worth a full
 // .context.md — it usually devolves to "this file does X".
 const FEATURE_DIR_MIN_FILES = 2;
 
-function identifyFeatureDirs(model, skeletons = {}) {
+function identifyFeatureDirs(model, skeletons = {}, opts = {}) {
   const fileContents = model.fileContents || {};
   const fileTree = Array.isArray(model.fileTree) ? model.fileTree : Object.keys(fileContents);
+  const featureDirMax = Number(opts.featureDirMax) > 0 ? Number(opts.featureDirMax) : FEATURE_DIR_MAX;
 
   // Recompute the import graph from the in-memory full-tier files. analyzer.js
   // already computed and persisted this once for ranking purposes, but
@@ -743,7 +755,7 @@ function identifyFeatureDirs(model, skeletons = {}) {
   }
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, FEATURE_DIR_MAX).map((s) => s.dir);
+  return scored.slice(0, featureDirMax).map((s) => s.dir);
 }
 
 function identifyActionableGaps(model) {

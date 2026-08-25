@@ -85,7 +85,7 @@ async function extractProductIntent(description, analysisId = null, codeContext 
 
   const response = await createMessageTracked({
     client: anthropic,
-    analysisId: analysisId || 'map-extract',
+    analysisId: analysisId || null,
     phase: 'extract-intent',
     params: {
       model: CLAUDE_MODEL,

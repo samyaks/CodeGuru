@@ -91,7 +91,7 @@ async function claudeLink(job, entities, codebaseModel, analysisId) {
 
   const response = await createMessageTracked({
     client: anthropic,
-    analysisId: analysisId || 'map-link',
+    analysisId: analysisId || null,
     phase: 'link-job',
     params: {
       model: CLAUDE_MODEL,
