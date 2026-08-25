@@ -31,6 +31,23 @@ function camelRollups(r) {
   };
 }
 
+// File-ticker payload for the takeoff progress screen. `paths` are the
+// files in this tick (a GitHub fetch batch, or a slice of an upload);
+// the client concatenates them into a scrolling list. Counts let the
+// UI show "12 of 150" without parsing the message string.
+function readingProgress({ paths, readCount, totalToRead, rollups, starting = false }) {
+  return {
+    phase: 'reading',
+    message: starting
+      ? `Reading ${totalToRead} key files...`
+      : `Read ${readCount}/${totalToRead} files...`,
+    paths: paths || [],
+    readCount: readCount ?? 0,
+    totalToRead,
+    ...camelRollups(rollups),
+  };
+}
+
 function decideTier(sizeBytes, rankIdx1Based) {
   if (sizeBytes > CAPTURE_MAX_FILE_BYTES) return 'chunked';
   if (rankIdx1Based <= CAPTURE_FULL_TIER_LIMIT) return 'full';
@@ -317,7 +334,12 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
   sorted.forEach((f, i) => rankByPath.set(f.path, i + 1));
 
   const toRead = sorted.slice(0, MAX_FILES_TO_READ);
-  send({ phase: 'reading', message: `Reading ${toRead.length} key files...` });
+  send(readingProgress({
+    paths: [],
+    readCount: 0,
+    totalToRead: toRead.length,
+    starting: true,
+  }));
 
   const fileContents = {};
   const batchSize = 5;
@@ -412,11 +434,12 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
     }
 
     const rollups = analysisId ? await safeDb(() => analyses.getRollups(analysisId), 'analyses.getRollups') : null;
-    send({
-      phase: 'reading',
-      message: `Read ${Math.min(i + batchSize, toRead.length)}/${toRead.length} files...`,
-      ...camelRollups(rollups),
-    });
+    send(readingProgress({
+      paths: batch.map((f) => f.path),
+      readCount: Math.min(i + batchSize, toRead.length),
+      totalToRead: toRead.length,
+      rollups,
+    }));
   }
 
   // P2.2: build the import graph from everything we just read. Persisted
@@ -699,7 +722,7 @@ function safeJson(str) {
 async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId = null) {
   const send = onProgress || (() => {});
 
-  send({ phase: 'analyzing', message: 'Analyzing uploaded files...' });
+  send({ phase: 'meta', message: 'Analyzing uploaded files...' });
 
   // Keep unfiltered list for deployment detection (matches analyzeRepo behavior)
   const unfilteredFiles = fileEntries.map(f => ({ path: f.path, type: 'blob' }));
@@ -766,8 +789,15 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
   });
 
   const toRead = sorted.slice(0, MAX_FILES_TO_READ);
+  send(readingProgress({
+    paths: [],
+    readCount: 0,
+    totalToRead: toRead.length,
+    starting: true,
+  }));
 
   const fileContents = {};
+  const pendingPaths = [];
 
   // Accumulate per-file writes and flush every FLUSH_EVERY files (plus a
   // final flush) — three round trips per flush instead of three per file.
@@ -854,6 +884,15 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
     if (analysisId && (i + 1) % FLUSH_EVERY === 0) {
       await flushIngestion();
     }
+
+    pendingPaths.push(f.path);
+    if (pendingPaths.length >= 5 || i === toRead.length - 1) {
+      send(readingProgress({
+        paths: pendingPaths.splice(0),
+        readCount: i + 1,
+        totalToRead: toRead.length,
+      }));
+    }
   }
 
   if (analysisId) {
@@ -862,11 +901,12 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
 
   if (analysisId) {
     const rollups = await safeDb(() => analyses.getRollups(analysisId), 'analyses.getRollups');
-    send({
-      phase: 'reading',
-      message: `Read ${Object.keys(fileContents).length}/${toRead.length} files...`,
-      ...camelRollups(rollups),
-    });
+    send(readingProgress({
+      paths: [],
+      readCount: Object.keys(fileContents).length,
+      totalToRead: toRead.length,
+      rollups,
+    }));
   }
 
   // P2.2: import graph — see note in analyzeRepo above.

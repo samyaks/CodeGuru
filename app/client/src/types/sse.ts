@@ -2,6 +2,10 @@ export interface SSEProgressMessage {
   type: 'progress';
   phase: string;
   message?: string;
+  /** File paths in this tick (reading phase). Concatenated by the ticker. */
+  paths?: string[];
+  readCount?: number;
+  totalToRead?: number;
   [key: string]: unknown;
 }
 
