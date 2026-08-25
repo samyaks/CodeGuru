@@ -87,11 +87,58 @@ function parseJobLinks(row) {
   return null;
 }
 
+function publicEvidence(row) {
+  const raw = Array.isArray(row.evidence) ? row.evidence : [];
+  return raw.slice(0, 8).map((e) => ({
+    file: e.file || null,
+    line: typeof e.line === 'number' ? e.line : null,
+    reason: e.reason || null,
+    snippet: typeof e.snippet === 'string' ? e.snippet.slice(0, 160) : null,
+  })).filter((e) => e.file);
+}
+
+const CANNED_PROMPT_PREFIXES = [
+  'Add Row Level Security to all Supabase tables',
+  'Move all hardcoded secrets and API keys',
+  'Add express-rate-limit to protect API endpoints',
+  'Add helmet to set security headers',
+  'Add zod for input validation',
+  'Add a global error handling middleware',
+  'Set up a basic test suite',
+  'Replace all hardcoded localhost URLs',
+  'Add environment variable validation at app startup',
+  'Add a /health endpoint',
+  'Add user authentication to this project',
+  'Set up a database for this project',
+  'Add database schema and migration files',
+  'Add deployment configuration to this project',
+  'Add a GitHub Actions CI workflow',
+  'Add role-based access control (RBAC)',
+  'Set up automated testing with vitest',
+  'Add global error handling to the Express app',
+  'Create a `.env.example` file',
+  'Scaffold a frontend for this project',
+  'Create an Express backend API',
+];
+
+/**
+ * Static rules used to persist canned Cursor tutorials that never
+ * mentioned the files they flagged. Hide those from the UI so Accept
+ * generates a grounded prompt from evidence instead.
+ */
+function isCannedCursorPrompt(row) {
+  const prompt = row.cursor_prompt;
+  if (!prompt || row.source !== 'static') return false;
+  const start = String(prompt).trimStart();
+  return CANNED_PROMPT_PREFIXES.some((p) => start.startsWith(p));
+}
+
 /** Convert a raw `suggestions` row into the v2 Gap shape consumed by the UI. */
 function toGap(row) {
   const category = categorize(row);
   const status = v2StatusFor(row);
   const filesCount = affectedFilesCount(row);
+  const evidence = publicEvidence(row);
   return {
     id: row.id,
     category: category === 'broken'
@@ -105,13 +152,14 @@ function toGap(row) {
     files: typeof filesCount === 'number' ? filesCount : undefined,
     affects: Array.isArray(row.affects) ? row.affects : undefined,
     required_for: Array.isArray(row.required_for) ? row.required_for : undefined,
-    prompt: row.cursor_prompt || null,
+    prompt: isCannedCursorPrompt(row) ? null : (row.cursor_prompt || null),
     status,
     verification: row.verification || null,
     rawCategory: category, // for grouping into broken/missing/infra buckets
     priority: row.priority,
     type: row.type,
     affectedFiles: Array.isArray(row.affected_files) ? row.affected_files : [],
+    evidence,
     rejectedReason: row.v2_rejected_reason || null,
     committedAt: row.v2_committed_at || null,
     // Persisted by `services/v2/gap-job-linker.js` (migration 013).
@@ -371,4 +419,5 @@ module.exports = {
   attachAffectedJobs,
   synthesizeMapGaps,
   parseJobLinks,
+  isCannedCursorPrompt,
 };

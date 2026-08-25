@@ -6,17 +6,39 @@ function makeId(type, category, title) {
   return crypto.createHash('sha256').update(type + category + title).digest('hex').slice(0, 16);
 }
 
-function makeSuggestion({ type, category, priority, title, description, evidence, effort, cursorPrompt, affectedFiles }) {
+function citeEvidence(evidence, max = 4) {
+  const items = [];
+  const seen = new Set();
+  for (const e of evidence || []) {
+    if (!e || !e.file) continue;
+    const loc = e.line ? `${e.file}:${e.line}` : e.file;
+    if (seen.has(loc)) continue;
+    seen.add(loc);
+    items.push(loc);
+  }
+  if (items.length === 0) return '';
+  const shown = items.slice(0, max);
+  const extra = items.length - shown.length;
+  return extra > 0 ? `${shown.join(', ')} (+${extra} more)` : shown.join(', ');
+}
+
+function makeSuggestion({ type, category, priority, title, description, evidence, effort, affectedFiles }) {
+  const cited = citeEvidence(evidence);
+  const groundedDescription = cited
+    ? `${String(description || '').replace(/\s+$/, '')} Seen in ${cited}.`
+    : description;
   return {
     id: makeId(type, category, title),
     type,
     category,
     priority,
     title,
-    description,
+    description: groundedDescription,
     evidence: evidence || [],
     effort: effort || 'medium',
-    cursor_prompt: cursorPrompt || '',
+    // Grounded Cursor prompts are generated on Accept from this
+    // evidence — never ship canned tutorials here.
+    cursor_prompt: null,
     affected_files: affectedFiles || [],
     source: 'static',
     status: 'open',
@@ -60,6 +82,26 @@ function isConfigOrTestFile(path) {
     || lower.includes('__tests__');
 }
 
+function isNonRuntimeFile(path) {
+  const lower = path.toLowerCase();
+  return isConfigOrTestFile(path)
+    || /\.(md|mdx|txt|yml|yaml|html|css|svg)$/.test(lower)
+    || lower.includes('.github/')
+    || lower.includes('/docs/')
+    || lower.startsWith('docs/')
+    || lower.endsWith('.example');
+}
+
+function isEnvBackedOrDevGated(line) {
+  const t = line.trim();
+  if (/process\.env\./.test(t)) return true;
+  if (/import\.meta\.env/.test(t)) return true;
+  if (/\bNODE_ENV\b/.test(t)) return true;
+  if (/\|\|\s*['"`]https?:\/\/(localhost|127\.0\.0\.1)/.test(t)) return true;
+  if (/\?\s*['"`]https?:\/\/(localhost|127\.0\.0\.1)/.test(t)) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Rule 1: no-rls — Supabase without Row Level Security
 // ---------------------------------------------------------------------------
@@ -90,8 +132,6 @@ function ruleNoRls({ stack, fileContents, deps }) {
       'Your Supabase project doesn\'t appear to have RLS enabled. Without RLS, any user with your anon key can read and write every row in every table. This is the #1 security issue in Supabase apps.',
     evidence,
     effort: 'medium',
-    cursorPrompt:
-      'Add Row Level Security to all Supabase tables. For each table in the schema, add `ALTER TABLE table_name ENABLE ROW LEVEL SECURITY;` and create appropriate policies. For example, add a policy that lets authenticated users only read/write their own rows: `CREATE POLICY "Users can manage own data" ON table_name FOR ALL USING (auth.uid() = user_id);`. Apply this to every table that holds user data.',
     affectedFiles: schemaFiles.length > 0 ? schemaFiles : ['package.json'],
   });
 }
@@ -141,8 +181,6 @@ function ruleEnvInCode({ fileContents }) {
       `Found ${evidence.length} potential secret(s) committed to source code. Anyone with access to this repo can see these keys. Move them to environment variables immediately and rotate the exposed keys.`,
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Move all hardcoded secrets and API keys to environment variables. 1) Create a .env file (and .env.example with placeholder values). 2) Replace each hardcoded secret with `process.env.VARIABLE_NAME`. 3) Make sure .env is in .gitignore. 4) Rotate all exposed keys since they\'re already in git history.',
     affectedFiles: [...affectedFiles],
   });
 }
@@ -175,8 +213,6 @@ function ruleNoRateLimit({ stack, fileContents, structure, deps }) {
       'Your Express app has no rate limiting. Without it, a single user or bot can spam your API with thousands of requests, causing outages or running up your cloud bill.',
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Add express-rate-limit to protect API endpoints from abuse. Install with `npm install express-rate-limit`, then add middleware to the main server file that limits each IP to 100 requests per 15 minutes on /api/* routes. Example:\n\nconst rateLimit = require(\'express-rate-limit\');\nconst limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });\napp.use(\'/api\', limiter);',
     affectedFiles: mainFile ? [mainFile, 'package.json'] : ['package.json'],
   });
 }
@@ -208,8 +244,6 @@ function ruleNoHelmet({ stack, fileContents, structure, deps }) {
       'Your Express app isn\'t using helmet, which sets important HTTP security headers (Content-Security-Policy, X-Frame-Options, etc.). Without these, your app is more vulnerable to XSS, clickjacking, and other common attacks.',
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Add helmet to set security headers on all responses. Install with `npm install helmet`, then add it as the first middleware in your Express app:\n\nconst helmet = require(\'helmet\');\napp.use(helmet());\n\nPlace this before any route definitions.',
     affectedFiles: mainFile ? [mainFile, 'package.json'] : ['package.json'],
   });
 }
@@ -217,150 +251,7 @@ function ruleNoHelmet({ stack, fileContents, structure, deps }) {
 // ---------------------------------------------------------------------------
 // Rule 5: no-input-validation — API routes without input validation
 // ---------------------------------------------------------------------------
-function buildInputValidationPrompt({ routeFiles, isTs, isEsm, hasMultipleRoutes }) {
-  const importLine = (isTs || isEsm)
-    ? "import { z } from 'zod';"
-    : "const { z } = require('zod');";
-  const ext = isTs ? 'ts' : 'js';
-  const fence = isTs ? 'ts' : 'js';
-
-  const shown = routeFiles.slice(0, 5);
-  const hidden = routeFiles.length - shown.length;
-  const routeListLines = shown.map((f) => `- \`${f}\``);
-  if (hidden > 0) routeListLines.push(`- (+${hidden} more)`);
-
-  const lines = [];
-  lines.push('Add zod for input validation across the API routes in this project. Install with `npm install zod`.');
-  lines.push('');
-  lines.push('Route files that need validation:');
-  lines.push(...routeListLines);
-  lines.push('');
-  lines.push('Validate every piece of user input on each route — `req.body` (POST/PUT/PATCH bodies), `req.query` (filters, search, pagination), and `req.params` (`:id` and other URL params). GET endpoints with query strings or path params need validation too, not just write endpoints.');
-
-  if (isTs) {
-    lines.push('');
-    lines.push('Because this project is TypeScript, derive request types from each schema with `z.infer<typeof Schema>` so handlers receive fully typed `req.body` / `req.query` / `req.params` instead of `any` — define each schema once and let the types follow from it.');
-  }
-
-  lines.push('');
-  lines.push('Error reporting: if this codebase already has an error helper (look for an `AppError` / `HttpError` / `ApiError`-style class, an `httpError(status, message)` factory, or a shared `errors`/`lib/errors`/`utils/errors` module), throw or `next(...)` through that helper so validation failures flow into the existing global error handler. Only fall back to `res.status(400).json({ error: \'ValidationError\', issues: result.error.flatten() })` if no such helper exists. Do not invent a new error class if one already lives in the repo.');
-  lines.push('');
-
-  if (hasMultipleRoutes) {
-    lines.push(`There are ${routeFiles.length} route files, so don't sprinkle \`safeParse\` calls everywhere — add one reusable middleware (e.g. \`middleware/validate.${ext}\`) that takes a schemas object and validates all three request locations in one place:`);
-    lines.push('');
-    lines.push('```' + fence);
-    lines.push(importLine);
-    if (isTs) {
-      lines.push("import type { Request, Response, NextFunction } from 'express';");
-      lines.push("import type { ZodSchema } from 'zod';");
-      lines.push('');
-      lines.push('type Schemas = { body?: ZodSchema; query?: ZodSchema; params?: ZodSchema };');
-      lines.push('');
-      lines.push('export function validate(schemas: Schemas) {');
-      lines.push('  return (req: Request, res: Response, next: NextFunction) => {');
-    } else {
-      lines.push('');
-      lines.push('function validate(schemas) {');
-      lines.push('  return (req, res, next) => {');
-    }
-    lines.push("    for (const key of ['body', 'query', 'params']) {");
-    lines.push('      const schema = schemas[key];');
-    lines.push('      if (!schema) continue;');
-    lines.push('      const result = schema.safeParse(req[key]);');
-    lines.push('      if (!result.success) {');
-    lines.push("        return res.status(400).json({ error: 'ValidationError', location: key, issues: result.error.flatten() });");
-    lines.push('      }');
-    lines.push('      req[key] = result.data;');
-    lines.push('    }');
-    lines.push('    next();');
-    lines.push('  };');
-    lines.push('}');
-    if (!(isTs || isEsm)) lines.push('module.exports = { validate };');
-    lines.push('```');
-    lines.push('');
-    lines.push('Swap the `res.status(400).json(...)` line for the project\'s existing error helper if one exists (e.g. `return next(new AppError(400, \'ValidationError\', result.error.flatten()))`).');
-    lines.push('');
-    lines.push('Then wire it into each of the route files listed above. Example:');
-    lines.push('');
-    lines.push('```' + fence);
-    if (isTs || isEsm) {
-      lines.push("import { z } from 'zod';");
-      lines.push("import { validate } from '../middleware/validate';");
-    } else {
-      lines.push("const { z } = require('zod');");
-      lines.push("const { validate } = require('../middleware/validate');");
-    }
-    lines.push('');
-    lines.push('const createUserSchema = z.object({');
-    lines.push('  email: z.string().email(),');
-    lines.push('  name: z.string().min(1).max(100),');
-    lines.push('});');
-    lines.push('const userParamsSchema = z.object({ id: z.string().uuid() });');
-    lines.push('const listQuerySchema = z.object({');
-    lines.push('  q: z.string().optional(),');
-    lines.push('  page: z.coerce.number().int().min(1).default(1),');
-    lines.push('  limit: z.coerce.number().int().min(1).max(100).default(20),');
-    lines.push('});');
-    lines.push('');
-    lines.push("router.post('/users', validate({ body: createUserSchema }), createUser);");
-    lines.push("router.get('/users/:id', validate({ params: userParamsSchema }), getUser);");
-    lines.push("router.get('/users', validate({ query: listQuerySchema }), listUsers);");
-    if (isTs) {
-      lines.push('');
-      lines.push('type CreateUserBody = z.infer<typeof createUserSchema>;');
-      lines.push('type UserParams = z.infer<typeof userParamsSchema>;');
-      lines.push('type ListUserQuery = z.infer<typeof listQuerySchema>;');
-    }
-    lines.push('```');
-  } else {
-    lines.push('There is only one route file, so an inline `safeParse` per handler is fine. Pattern:');
-    lines.push('');
-    lines.push('```' + fence);
-    lines.push(importLine);
-    lines.push('');
-    lines.push('const createUserSchema = z.object({');
-    lines.push('  email: z.string().email(),');
-    lines.push('  name: z.string().min(1).max(100),');
-    lines.push('});');
-    lines.push('const userParamsSchema = z.object({ id: z.string().uuid() });');
-    lines.push('const listQuerySchema = z.object({');
-    lines.push('  q: z.string().optional(),');
-    lines.push('  page: z.coerce.number().int().min(1).default(1),');
-    lines.push('});');
-    lines.push('');
-    lines.push("router.post('/users', (req, res) => {");
-    lines.push('  const parsed = createUserSchema.safeParse(req.body);');
-    lines.push('  if (!parsed.success) {');
-    lines.push("    return res.status(400).json({ error: 'ValidationError', location: 'body', issues: parsed.error.flatten() });");
-    lines.push('  }');
-    lines.push('  // use parsed.data');
-    lines.push('});');
-    lines.push('');
-    lines.push("router.get('/users/:id', (req, res) => {");
-    lines.push('  const params = userParamsSchema.safeParse(req.params);');
-    lines.push('  if (!params.success) {');
-    lines.push("    return res.status(400).json({ error: 'ValidationError', location: 'params', issues: params.error.flatten() });");
-    lines.push('  }');
-    lines.push('  // use params.data.id');
-    lines.push('});');
-    if (isTs) {
-      lines.push('');
-      lines.push('type CreateUserBody = z.infer<typeof createUserSchema>;');
-      lines.push('type UserParams = z.infer<typeof userParamsSchema>;');
-    }
-    lines.push('```');
-    lines.push('');
-    lines.push('Swap each `res.status(400).json(...)` for the project\'s existing error helper if one exists, so validation errors flow through the same path as the rest of the app\'s errors.');
-  }
-
-  lines.push('');
-  lines.push('Tests: add at least one unit/integration test that sends invalid input (e.g. missing required field, wrong type, malformed `:id`) to a validated route and asserts the response is `400` with the expected error shape. Use whichever test runner the project already uses (vitest, jest, mocha, etc.); if there is none, add a small vitest + supertest test next to one of the updated route files.');
-
-  return lines.join('\n');
-}
-
-function ruleNoInputValidation({ stack, structure, fileContents, deps }) {
+function ruleNoInputValidation({ structure, deps }) {
   if (structure.routeFiles.length === 0) return null;
 
   const validationLibs = ['zod', 'joi', 'yup', 'class-validator', 'superstruct', 'valibot', 'ajv'];
@@ -369,18 +260,11 @@ function ruleNoInputValidation({ stack, structure, fileContents, deps }) {
   }
 
   const routeFiles = structure.routeFiles;
-  const languages = (stack && stack.languages) || [];
-  const isTs = languages.includes('TypeScript') || routeFiles.some((f) => /\.tsx?$/.test(f));
-  const pkg = safeJson(fileContents['package.json']) || {};
-  const isEsm = pkg.type === 'module';
-  const hasMultipleRoutes = routeFiles.length >= 2;
-
   const evidence = routeFiles.map((f) => ({
     file: f,
     reason: 'API route file with no input validation library in the project',
   }));
 
-  const cursorPrompt = buildInputValidationPrompt({ routeFiles, isTs, isEsm, hasMultipleRoutes });
 
   return makeSuggestion({
     type: 'fix',
@@ -391,7 +275,6 @@ function ruleNoInputValidation({ stack, structure, fileContents, deps }) {
       'Your project has API routes but no input validation library (like zod, joi, or yup). Without validation, bad or malicious input from req.body, req.query, or req.params can crash your app, corrupt data, or open security holes.',
     evidence,
     effort: 'medium',
-    cursorPrompt,
     affectedFiles: [...routeFiles, 'package.json'],
   });
 }
@@ -426,8 +309,6 @@ function ruleNoErrorHandler({ stack, gaps, fileContents, structure }) {
       'Your app doesn\'t have a global error handler. When an unhandled error occurs, users will see a raw stack trace or the app will crash. A global handler gives users a friendly error message and logs the real problem.',
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Add a global error handling middleware to the Express app. Place this AFTER all route definitions:\n\napp.use((err, req, res, next) => {\n  console.error(\'Unhandled error:\', err);\n  const status = err.status || 500;\n  res.status(status).json({\n    error: process.env.NODE_ENV === \'production\' ? \'Internal server error\' : err.message,\n  });\n});\n\nAlso add process-level handlers:\n\nprocess.on(\'unhandledRejection\', (err) => console.error(\'Unhandled rejection:\', err));\nprocess.on(\'uncaughtException\', (err) => { console.error(\'Uncaught exception:\', err); process.exit(1); });',
     affectedFiles: mainFile ? [mainFile] : [],
   });
 }
@@ -453,8 +334,6 @@ function ruleNoTests({ gaps, deps }) {
     description,
     evidence: [{ file: 'package.json', reason: installedTestLib ? `${installedTestLib} is in devDependencies but no test files exist` : 'No test framework or test files detected' }],
     effort: 'medium',
-    cursorPrompt:
-      'Set up a basic test suite. Install vitest (or jest) with `npm install -D vitest`, add a test script to package.json: `"test": "vitest run"`. Then create tests for the most critical paths:\n\n1. Create a `__tests__/` directory\n2. Add a smoke test for each API endpoint (does it return 200 for valid input, 400 for bad input?)\n3. Add a test for auth flow if authentication exists\n4. Add a test for the main data-creation flow\n\nStart with happy-path tests, then add edge cases.',
     affectedFiles: ['package.json'],
   });
 }
@@ -468,7 +347,7 @@ function ruleHardcodedLocalhost({ fileContents }) {
   const affectedFiles = new Set();
 
   for (const [path, content] of Object.entries(fileContents)) {
-    if (isConfigOrTestFile(path)) continue;
+    if (isNonRuntimeFile(path)) continue;
 
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
@@ -477,11 +356,15 @@ function ruleHardcodedLocalhost({ fileContents }) {
 
       const trimmed = line.trim();
       if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('*')) continue;
-      if (/process\.env\.NODE_ENV\s*[=!]==?\s*['"]dev/i.test(trimmed)) continue;
-      if (/if\s*\(.*dev/i.test(trimmed)) continue;
+      if (isEnvBackedOrDevGated(trimmed)) continue;
 
       const snippet = trimmed.slice(0, 120);
-      evidence.push({ file: path, line: i + 1, snippet, reason: 'Hardcoded localhost URL will break in production' });
+      evidence.push({
+        file: path,
+        line: i + 1,
+        snippet,
+        reason: 'Hardcoded localhost URL is not read from an environment variable',
+      });
       affectedFiles.add(path);
     }
   }
@@ -494,11 +377,9 @@ function ruleHardcodedLocalhost({ fileContents }) {
     priority: 'medium',
     title: 'Hardcoded localhost URLs found in source code',
     description:
-      `Found ${evidence.length} hardcoded localhost reference(s). These will break when you deploy — your production server isn't localhost. Use environment variables for all URLs.`,
+      `Found ${evidence.length} hardcoded localhost reference(s) that are not behind an environment variable. These will break when you deploy because production is not localhost.`,
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Replace all hardcoded localhost URLs with environment variables. 1) Add a variable like `API_URL` to your .env file (e.g. `API_URL=http://localhost:3000` for dev). 2) Replace every `http://localhost:XXXX` in source code with `process.env.API_URL` (or the appropriate env var). 3) Make sure .env.example documents all URL variables. This way the URL changes automatically between dev and production.',
     affectedFiles: [...affectedFiles],
   });
 }
@@ -544,8 +425,6 @@ function ruleNoEnvValidation({ fileContents, deps }) {
       'Your code reads from process.env in multiple files but never validates that required variables are set. If someone forgets to set a variable, the app will crash at runtime with a confusing error instead of failing fast at startup.',
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Add environment variable validation at app startup using envalid. Install with `npm install envalid`, then create a config file (e.g. `config/env.js`):\n\nconst { cleanEnv, str, port, url } = require(\'envalid\');\n\nconst env = cleanEnv(process.env, {\n  DATABASE_URL: url(),\n  PORT: port({ default: 3000 }),\n  NODE_ENV: str({ choices: [\'development\', \'production\', \'test\'] }),\n  // add all your env vars here\n});\n\nmodule.exports = env;\n\nThen import this config file instead of reading process.env directly. The app will fail immediately on startup if any required variable is missing.',
     affectedFiles: envUsageFiles,
   });
 }
@@ -575,8 +454,6 @@ function ruleNoHealthCheck({ stack, fileContents, structure }) {
       'Your app has no /health endpoint. Most hosting platforms (Railway, Fly.io, AWS, etc.) use health checks to know if your app is alive. Without one, deploys may fail or your app may be silently down without anyone knowing.',
     evidence,
     effort: 'quick',
-    cursorPrompt:
-      'Add a /health endpoint to the Express server. This should be a simple GET route that returns 200 when the app is running:\n\nrouter.get(\'/health\', (req, res) => {\n  res.json({ status: \'ok\', timestamp: new Date().toISOString() });\n});\n\nOptionally check database connectivity too:\n\nrouter.get(\'/health\', async (req, res) => {\n  try {\n    // add a quick DB ping if you have a database\n    res.json({ status: \'ok\', timestamp: new Date().toISOString() });\n  } catch (err) {\n    res.status(503).json({ status: \'error\', message: err.message });\n  }\n});\n\nMount this at the top of your routes, before any auth middleware.',
     affectedFiles: mainFile ? [mainFile] : [],
   });
 }
@@ -646,8 +523,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your app has no authentication. Without it, you can\'t identify users, protect personal data, or control who can do what. Auth is foundational — most features (saving preferences, user-specific data, admin tools) depend on knowing who the user is.',
       effort: 'large',
-      cursorPrompt:
-        'Add user authentication to this project. Recommended options depending on your stack:\n\n- **Supabase Auth** (if already using Supabase): `const { data, error } = await supabase.auth.signUp({ email, password })`. Add sign-up, login, logout, and a session check middleware.\n- **NextAuth.js** (if using Next.js): Install `next-auth`, create `pages/api/auth/[...nextauth].js`, configure at least one provider (Google, GitHub, or email).\n- **Clerk** (fastest to integrate): Install `@clerk/nextjs` or `@clerk/express`, wrap your app in `<ClerkProvider>`, and use `<SignIn />` / `<SignUp />` components.\n\nMake sure to protect API routes with an auth middleware that checks for a valid session before processing requests.',
     }));
   }
 
@@ -660,8 +535,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your app has no database. Without one, all data is lost when the server restarts, and you can\'t support multiple users or persist anything. A database is essential for any app that stores user data, content, or state.',
       effort: 'large',
-      cursorPrompt:
-        'Set up a database for this project. Recommended options:\n\n- **Supabase (Postgres)**: Create a project at supabase.com, copy the connection string into `.env`, and use `@supabase/supabase-js` to read/write data. Great if you also need auth and realtime.\n- **SQLite + Prisma** (simplest for small apps): `npm install prisma @prisma/client && npx prisma init --datasource-provider sqlite`. Define your models in `prisma/schema.prisma`, then run `npx prisma db push`.\n- **Postgres + Prisma** (production-ready): Same as above but with `--datasource-provider postgresql` and a hosted Postgres URL.\n\nCreate at least one table/model for your core data entity, add CRUD operations, and wire them to your API routes.',
     }));
   }
 
@@ -674,8 +547,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project uses a database but has no schema or migration files checked in. Without these, no one else can recreate your database — they\'d have to reverse-engineer it from the code. Schema files make your database reproducible and version-controlled.',
       effort: 'medium',
-      cursorPrompt:
-        'Add database schema and migration files to the project. If using Prisma, make sure `prisma/schema.prisma` is committed and run `npx prisma migrate dev --name init` to create migration files. If using raw SQL, create a `migrations/` folder with numbered SQL files (e.g. `001_create_users.sql`). If using Supabase, export your schema with `supabase db dump` and commit the SQL file. The goal is that anyone can run one command to set up an identical database.',
     }));
   }
 
@@ -688,8 +559,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has no deployment config. Without it, deploying means manual steps that are easy to mess up. A deploy config file gives you one-click deploys and ensures every environment is set up the same way.',
       effort: 'medium',
-      cursorPrompt:
-        'Add deployment configuration to this project. Choose the best option for your stack:\n\n- **Dockerfile** (works everywhere): Create a multi-stage `Dockerfile` that installs dependencies, builds the app, and runs it. Add a `.dockerignore` for `node_modules` and `.env`.\n- **railway.json** (Railway): Create `railway.json` with `{ "build": { "builder": "nixpacks" }, "deploy": { "startCommand": "npm start" } }`.\n- **vercel.json** (Vercel, for Next.js/frontend): Create `vercel.json` with build and route settings.\n\nAlso add a `start` script to `package.json` if missing, and document the deploy process in the README.',
     }));
   }
 
@@ -702,8 +571,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has deployment config but no CI/CD pipeline. Without automated checks, broken code can be deployed directly to production. A CI pipeline runs your tests and linting on every push, catching bugs before they go live.',
       effort: 'medium',
-      cursorPrompt:
-        'Add a GitHub Actions CI workflow. Create `.github/workflows/ci.yml`:\n\n```yaml\nname: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: 20 }\n      - run: npm ci\n      - run: npm run lint --if-present\n      - run: npm test --if-present\n```\n\nThis runs on every push and PR. Add more steps as needed (type checking, build verification, deploy to staging).',
     }));
   }
 
@@ -716,8 +583,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your app has no role or permission system. Without RBAC, every authenticated user has the same access level — there\'s no way to have admins, moderators, or restricted users. This becomes a security risk as soon as you need different permission levels.',
       effort: 'large',
-      cursorPrompt:
-        'Add role-based access control (RBAC) to the app. Steps:\n\n1. Add a `role` column to your users table (e.g. `admin`, `user`, `moderator`) with `user` as the default.\n2. Create an authorization middleware that checks the user\'s role:\n\n```js\nfunction requireRole(...roles) {\n  return (req, res, next) => {\n    if (!req.user) return res.status(401).json({ error: \'Not authenticated\' });\n    if (!roles.includes(req.user.role)) return res.status(403).json({ error: \'Insufficient permissions\' });\n    next();\n  };\n}\n```\n\n3. Protect admin routes: `router.delete(\'/users/:id\', requireRole(\'admin\'), deleteUser)`.\n4. On the frontend, conditionally render admin UI based on the user\'s role.',
     }));
   }
 
@@ -730,8 +595,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has no test files. Without tests, every code change is a gamble — you won\'t know if something broke until a user reports it. Even a handful of tests for critical flows dramatically reduces the risk of shipping bugs.',
       effort: 'medium',
-      cursorPrompt:
-        'Set up automated testing with vitest (fast, modern, works with ESM and CJS). Install: `npm install -D vitest`. Add to `package.json` scripts: `"test": "vitest run"`. Create your first tests:\n\n1. `tests/api.test.js` — smoke-test each API endpoint with supertest (`npm install -D supertest`)\n2. `tests/utils.test.js` — unit-test any pure utility functions\n3. Focus on the critical user flows first: can a user sign up, create data, and retrieve it?\n\nRun with `npm test` and add to CI.',
     }));
   }
 
@@ -744,8 +607,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your app has no centralized error handling. When something goes wrong, users see cryptic stack traces or the app crashes silently. A global error handler catches all unexpected errors, returns user-friendly messages, and logs the details for debugging.',
       effort: 'quick',
-      cursorPrompt:
-        'Add global error handling to the Express app. Place this after all route definitions:\n\n```js\napp.use((err, req, res, next) => {\n  console.error(err.stack);\n  res.status(err.status || 500).json({\n    error: process.env.NODE_ENV === \'production\' ? \'Something went wrong\' : err.message,\n  });\n});\n```\n\nAlso add process-level handlers at the top of your entry file:\n\n```js\nprocess.on(\'unhandledRejection\', (err) => console.error(\'Unhandled rejection:\', err));\nprocess.on(\'uncaughtException\', (err) => { console.error(\'Uncaught exception:\', err); process.exit(1); });\n```',
     }));
   }
 
@@ -758,8 +619,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has no .env.example file. Without it, new developers (or your future self) have to guess which environment variables are needed and what format they should be in. A .env.example documents every required variable with placeholder values.',
       effort: 'quick',
-      cursorPrompt:
-        'Create a `.env.example` file that documents all required environment variables. Look through the codebase for every `process.env.VARIABLE_NAME` reference, then list them all:\n\n```\n# Server\nPORT=3000\nNODE_ENV=development\n\n# Database\nDATABASE_URL=postgresql://user:password@localhost:5432/mydb\n\n# Auth (replace with real values)\nJWT_SECRET=your-secret-here\n\n# External APIs\nAPI_KEY=your-api-key-here\n```\n\nUse descriptive placeholder values so developers know the expected format. Add a note in README about copying this file to `.env`.',
     }));
   }
 
@@ -772,8 +631,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has no frontend. Without a UI, users have to interact with your app through raw API calls or the command line. A frontend makes your app accessible, usable, and ready to show to others.',
       effort: 'large',
-      cursorPrompt:
-        'Scaffold a frontend for this project. Recommended approach:\n\n1. Create a React app with Vite: `npm create vite@latest client -- --template react-ts && cd client && npm install`\n2. Install Tailwind CSS for styling: `npm install -D tailwindcss @tailwindcss/vite` and configure it.\n3. Set up a basic layout with a header, main content area, and navigation.\n4. Create pages for the core user flows (e.g. Home, Dashboard, Settings).\n5. Add an API service layer (`src/services/api.ts`) that calls your backend endpoints.\n6. Add a proxy in `vite.config.ts` to forward `/api` requests to your backend during development.\n\nStart with the most important user-facing page and iterate from there.',
     }));
   }
 
@@ -786,8 +643,6 @@ function runGapSuggestions({ gaps, readinessCategories, coveredGapKeys }) {
       description:
         'Your project has no backend server. Without one, there\'s nowhere to run business logic, process data securely, or connect to databases and external services. A backend API is the foundation for any app that needs to store data or perform server-side operations.',
       effort: 'large',
-      cursorPrompt:
-        'Create an Express backend API. Steps:\n\n1. Initialize: `mkdir server && cd server && npm init -y && npm install express cors dotenv`\n2. Create `server/index.js`:\n\n```js\nconst express = require(\'express\');\nconst cors = require(\'cors\');\nrequire(\'dotenv\').config();\n\nconst app = express();\napp.use(cors());\napp.use(express.json());\n\napp.get(\'/api/health\', (req, res) => res.json({ status: \'ok\' }));\n\nconst PORT = process.env.PORT || 3001;\napp.listen(PORT, () => console.log(`Server running on port ${PORT}`));\n```\n\n3. Add route files in `server/routes/` for each resource.\n4. Add error handling middleware.\n5. Add `"start": "node index.js"` and `"dev": "node --watch index.js"` scripts to package.json.',
     }));
   }
 

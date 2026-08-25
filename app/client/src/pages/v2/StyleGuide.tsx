@@ -45,8 +45,8 @@ const SAMPLE_GAPS: GapData[] = [
     required_for: ['Notifications', 'Password reset', 'Report delivery'],
   },
   // Phase 2 slice (a): the security lens. One sample per severity so
-  // we can eyeball the shield badge color + callout in StyleGuide
-  // without spinning up a real analysis run.
+  // we can eyeball the shield badge color in StyleGuide without
+  // spinning up a real analysis run.
   {
     id: 'sec1',
     category: 'broken',

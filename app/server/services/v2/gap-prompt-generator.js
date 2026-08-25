@@ -12,13 +12,17 @@ const SYSTEM_PROMPT = `You are an expert software engineer writing Cursor prompt
 You will be given:
 - The codebase summary (stack, key files, etc.)
 - A specific gap (broken thing, missing functionality, or missing infrastructure)
+- Cited evidence from the actual repo (file paths, line numbers, snippets) when available
 
 Output a Cursor prompt that another AI agent can execute. The prompt MUST:
-- Open with a one-line goal statement
-- Include a "Context:" section with the relevant project facts
-- Include a numbered "Requirements:" list with concrete steps
-- Include exact file paths and module names where relevant
+- Open with a one-line goal statement naming the real files to change
+- Include a "Context:" section with the relevant project facts AND the cited evidence
+- Include a numbered "Requirements:" list with concrete steps against those files
+- Include exact file paths from the evidence — never invent files, modules, or URLs
 - End with verification criteria the agent can self-check
+
+Do NOT write a generic tutorial (for example "add API_URL to .env") unless the evidence shows that work is actually missing.
+If the evidence looks already-handled (env-var fallback, test fixture, docs), say so in one sentence and do not invent work.
 
 Do NOT speak to the user. Speak to the AI agent that will implement the gap.
 Keep the prompt under ~60 lines, plain markdown, no code fences around the
@@ -37,6 +41,15 @@ function buildUserMessageParts({ project, gap }) {
     ? gap.affectedFiles.slice(0, 25).join('\n  - ')
     : '(unspecified)';
 
+  const evidenceLines = Array.isArray(gap.evidence) && gap.evidence.length
+    ? gap.evidence.slice(0, 8).map((e) => {
+        const loc = e.line ? `${e.file}:${e.line}` : e.file;
+        const reason = e.reason ? ` — ${e.reason}` : '';
+        const snippet = e.snippet ? `\n    ${String(e.snippet).replace(/\n/g, ' ').slice(0, 160)}` : '';
+        return `  - ${loc}${reason}${snippet}`;
+      }).join('\n')
+    : '  (none — generate only from the title, description, and stack; do not invent files)';
+
   const projectPrefix = [
     `Project: ${project?.repo || project?.repo_url || 'unnamed'}`,
     stackLines ? `Stack:\n${stackLines}` : null,
@@ -49,8 +62,10 @@ function buildUserMessageParts({ project, gap }) {
     `Effort estimate: ${gap.effort || 'unknown'}`,
     `Affected files (${Array.isArray(gap.affectedFiles) ? gap.affectedFiles.length : 0}):`,
     `  - ${files}`,
+    `Cited evidence:`,
+    evidenceLines,
     '',
-    'Write the Cursor prompt now.',
+    'Write the Cursor prompt now. Ground every step in the cited evidence.',
   ].join('\n');
 
   return { projectPrefix, gapBody };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   AlertOctagon, Briefcase, Check, CheckCircle, ChevronDown, ChevronUp,
-  Circle, Copy, ExternalLink, GitCommit, Server, Shield, Sparkles, Users, Wand2, Wrench, X,
+  Circle, Copy, ExternalLink, FileCode, GitCommit, Server, Shield, Sparkles, Users, Wand2, Wrench, X,
 } from 'lucide-react';
 import { Badge } from './Badge';
 
@@ -43,11 +43,19 @@ export interface GapData {
    *  prompt" affordance instead. `security` rows behave like `ai` for
    *  triage; the security lens is signaled by `isSecurity` instead. */
   source?: 'ai' | 'map' | 'security';
+  /** File:line citations from the detector. Shown so the card is about
+   *  this repo, not a generic template. */
+  evidence?: Array<{
+    file: string;
+    line?: number | null;
+    reason?: string | null;
+    snippet?: string | null;
+  }>;
   /** Security lens (Phase 1). Orthogonal to category — a gap can be
    *  Broken AND Security, or Missing-Infra AND Security. Backed by the
    *  v2 `suggestions.is_security` column. When true, the card renders a
-   *  Shield badge next to the category badge and an inline "why this
-   *  is a security risk" callout under the description. */
+   *  Shield badge next to the category badge. CWE is a compact link
+   *  beside it; the shareable Security report owns the full write-up. */
   isSecurity?: boolean;
   securitySeverity?: SecuritySeverity | null;
   /** CWE identifier such as 'CWE-89'. Renders as a link to MITRE in
@@ -134,14 +142,6 @@ export function GapCard({
   const securityMeta = gap.isSecurity && gap.securitySeverity
     ? SECURITY_SEVERITY_META[gap.securitySeverity]
     : null;
-  // The full "why this is a security risk" callout only renders for
-  // critical/high. For medium/low the Shield badge already carries
-  // the message (severity + CWE in `title`) and the verbose block
-  // becomes noise that pushes the actual gap content below the fold.
-  // Users on the Security tab can still see the full CWE link via
-  // the dedicated SecurityReport page.
-  const showSecurityCallout = !!securityMeta
-    && (gap.securitySeverity === 'critical' || gap.securitySeverity === 'high');
 
   // The Cursor prompt block defaults collapsed. A user with N accepted
   // gaps would otherwise see N long prompts stacked open by default —
@@ -181,6 +181,18 @@ export function GapCard({
               <Shield className="w-3 h-3" aria-hidden /> Security · {securityMeta.label}
             </span>
           ) : null}
+          {gap.cweId ? (
+            <a
+              href={cweUrl(gap.cweId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-mono text-stone-500 hover:text-stone-800 underline-offset-2 hover:underline"
+              title="View this CWE on MITRE"
+            >
+              {gap.cweId}
+              <ExternalLink className="w-2.5 h-2.5 inline-block ml-0.5 -mt-0.5" aria-hidden />
+            </a>
+          ) : null}
           {isSynthetic ? (
             <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-stone-500 bg-stone-100 border border-stone-200 rounded-full px-2 py-0.5">
               <Sparkles className="w-2.5 h-2.5" /> From Map
@@ -198,7 +210,7 @@ export function GapCard({
               <span className="text-xs text-stone-500">{gap.effort} effort</span>
             </>
           ) : null}
-          {typeof gap.files === 'number' ? (
+          {typeof gap.files === 'number' && !(Array.isArray(gap.evidence) && gap.evidence.length > 0) ? (
             <>
               <span className="text-xs text-stone-500">·</span>
               <span className="text-xs text-stone-500">{gap.files} files</span>
@@ -215,39 +227,21 @@ export function GapCard({
         <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
         <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
 
-        {showSecurityCallout ? (
-          <div className="mb-3 px-3 py-2 bg-red-50/50 border border-red-100 rounded-md">
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-700 mb-0.5">
-              <Shield className="w-3 h-3" aria-hidden />
-              Why this is a security risk
-            </div>
-            <div className="text-xs text-stone-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span>
-                Severity <span className="font-medium text-stone-700">{securityMeta.label}</span>
-              </span>
-              {gap.cweId ? (
-                <>
-                  <span aria-hidden className="text-stone-300">·</span>
-                  <a
-                    href={cweUrl(gap.cweId)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium text-red-700 hover:text-red-800 underline-offset-2 hover:underline"
-                  >
-                    {gap.cweId}
-                    <ExternalLink className="w-2.5 h-2.5 inline-block ml-0.5 -mt-0.5" aria-hidden />
-                  </a>
-                </>
-              ) : null}
-              {gap.securityDetector ? (
-                <>
-                  <span aria-hidden className="text-stone-300">·</span>
-                  <span>
-                    Detected by <span className="font-mono text-stone-700">{gap.securityDetector}</span>
-                  </span>
-                </>
-              ) : null}
-            </div>
+        {Array.isArray(gap.evidence) && gap.evidence.length > 0 ? (
+          <div className="mb-3 space-y-1">
+            {gap.evidence.slice(0, 5).map((e, i) => (
+              <div
+                key={`${e.file}:${e.line ?? ''}:${i}`}
+                title={e.reason ?? undefined}
+                className="flex items-start gap-1.5 text-[11px] font-mono text-stone-500"
+              >
+                <FileCode className="w-3 h-3 mt-0.5 flex-shrink-0 text-stone-400" aria-hidden />
+                <span className="text-stone-700">{e.file}{typeof e.line === 'number' ? `:${e.line}` : ''}</span>
+              </div>
+            ))}
+            {gap.evidence.length > 5 ? (
+              <p className="text-[11px] text-stone-400 pl-4">+{gap.evidence.length - 5} more</p>
+            ) : null}
           </div>
         ) : null}
 
@@ -286,13 +280,15 @@ export function GapCard({
           <div className="mt-4 pt-4 border-t border-stone-100 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs uppercase tracking-widest text-stone-500 font-semibold">Cursor prompt</p>
-              <button
-                type="button"
-                onClick={() => setExpanded((x) => !x)}
-                className="text-xs text-stone-600 hover:text-stone-900 flex items-center gap-1"
-              >
-                {expanded ? <>Hide <ChevronUp className="w-3 h-3" /></> : <>Show <ChevronDown className="w-3 h-3" /></>}
-              </button>
+              {gap.prompt ? (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((x) => !x)}
+                  className="text-xs text-stone-600 hover:text-stone-900 flex items-center gap-1"
+                >
+                  {expanded ? <>Hide <ChevronUp className="w-3 h-3" /></> : <>Show <ChevronDown className="w-3 h-3" /></>}
+                </button>
+              ) : null}
             </div>
 
             {expanded && gap.prompt ? (
@@ -302,13 +298,24 @@ export function GapCard({
             ) : null}
 
             <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => onCopyPrompt?.(gap.id)}
-                className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
-              >
-                {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
-              </button>
+              {gap.prompt ? (
+                <button
+                  type="button"
+                  onClick={() => onCopyPrompt?.(gap.id)}
+                  className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
+                >
+                  {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onGetPrompt?.(gap.id)}
+                  disabled={promptLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 text-white rounded-md text-sm font-medium transition-colors"
+                >
+                  <Sparkles className="w-4 h-4" /> {promptLoading ? 'Generating…' : 'Get Cursor prompt'}
+                </button>
+              )}
               {/* `Mark committed` keeps `ml-auto` so it right-aligns on
                   desktop. On narrow viewports the wrap from `flex-wrap`
                   drops it to the next line where ml-auto effectively
