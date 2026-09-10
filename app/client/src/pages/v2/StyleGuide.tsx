@@ -5,9 +5,10 @@ import {
 } from 'lucide-react';
 import {
   Card, MetadataLabel, Badge, TabBar, ProgressBar, EmptyState,
-  PersonaCard, GapCard, ShippedItem,
+  PersonaCard, ProjectCard, GapCard, ShippedItem,
 } from '../../components/v2';
 import type { GapData, ShippedItemData } from '../../components/v2';
+import type { DashboardProject } from '../../services/api';
 
 // Throwaway QA route. Renders every v2 component in its main states so we can
 // visually verify them. This file is deleted in Phase 6b.
@@ -103,6 +104,61 @@ const SAMPLE_GAPS: GapData[] = [
     source: 'security',
   },
 ];
+
+const SAMPLE_DASHBOARD_PROJECT: DashboardProject = {
+  id: 'sample',
+  repo_url: 'https://github.com/acme/decision-os',
+  owner: 'acme',
+  repo: 'decision-os',
+  status: 'ready',
+  readiness_score: 64,
+  recommendation: 'plan',
+  framework: 'React',
+  live_url: null,
+  deployed_at: null,
+  created_at: '2026-09-01T00:00:00Z',
+  updated_at: '2026-09-08T16:00:00Z',
+  suggestions_count: 6,
+  description: 'Decision reports for leadership',
+  app_summary: 'Helps engineering leaders turn messy Slack threads into a single decision they can share with the exec team.',
+  audience: 'Engineering managers who need exportable decision summaries.',
+  persona: {
+    id: 'p1',
+    name: 'Engineering Manager',
+    emoji: '📋',
+    description: 'Needs exportable decision summaries',
+    readiness: 74,
+  },
+  personas: [
+    { id: 'p1', name: 'Engineering Manager', emoji: '📋', description: 'Needs exportable decision summaries', readiness: 74 },
+    { id: 'p2', name: 'Tech Lead', emoji: '👷', description: 'Owns the implementation', readiness: 61 },
+  ],
+  missing: {
+    next: { title: 'Add login', why: 'Nobody can save work yet' },
+    items: [
+      { id: 'g1', title: 'No login yet', category: 'infra' },
+      { id: 'g2', title: 'Decision reports have no PDF export', category: 'missing' },
+      { id: 'g3', title: 'API routes skip input validation', category: 'broken' },
+    ],
+    count: 6,
+  },
+  last_commit: {
+    sha: 'a4f9c2d111111111',
+    shortSha: 'a4f9c2d',
+    title: 'fix: validate env vars at startup',
+    date: '2026-09-08T18:00:00Z',
+    author: 'sam',
+    source: 'github',
+  },
+};
+
+const SAMPLE_DASHBOARD_PROJECT_EMPTY: DashboardProject = {
+  ...SAMPLE_DASHBOARD_PROJECT,
+  id: 'sample-empty',
+  repo: 'decision-os-draft',
+  missing: { next: null, items: [], count: 0 },
+  last_commit: null,
+};
 
 const SAMPLE_SHIPPED: ShippedItemData[] = [
   {
@@ -219,6 +275,13 @@ export default function StyleGuide() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <PersonaCard persona={{ name: 'Tech Lead', icon: '👷', readiness: 78, jobs: 5 }} onEdit={() => {}} />
             <PersonaCard persona={{ name: 'Product Manager', icon: '📋', readiness: 93, jobs: 4 }} onEdit={() => {}} />
+          </div>
+        </Section>
+
+        <Section title="ProjectCard">
+          <div className="grid md:grid-cols-2 gap-5">
+            <ProjectCard project={SAMPLE_DASHBOARD_PROJECT} />
+            <ProjectCard project={SAMPLE_DASHBOARD_PROJECT_EMPTY} />
           </div>
         </Section>
 

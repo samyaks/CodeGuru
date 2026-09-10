@@ -237,6 +237,59 @@ export interface Project {
   updated_at: string | null;
 }
 
+export interface DashboardPersona {
+  id: string;
+  name: string;
+  emoji: string | null;
+  description: string | null;
+  readiness: number | null;
+}
+
+export interface DashboardMissingItem {
+  id: string;
+  title: string;
+  category: 'broken' | 'missing' | 'infra';
+}
+
+export interface DashboardLastCommit {
+  sha: string;
+  shortSha: string;
+  title: string | null;
+  date: string | null;
+  author: string | null;
+  source: 'github' | 'stored' | 'shipped';
+}
+
+/** Lean card payload from GET /api/projects. */
+export interface DashboardProject {
+  id: string;
+  repo_url: string;
+  owner: string;
+  repo: string;
+  branch?: string;
+  status: string;
+  readiness_score: number | null;
+  recommendation: 'deploy' | 'plan' | null;
+  framework: string | null;
+  live_url: string | null;
+  deployed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+  suggestions_count?: number;
+  description: string | null;
+  error?: string | null;
+  app_summary: string | null;
+  audience: string | null;
+  persona: DashboardPersona | null;
+  personas: DashboardPersona[];
+  missing: {
+    next: { title: string; why: string | null } | null;
+    items: DashboardMissingItem[];
+    count: number;
+  };
+  last_commit: DashboardLastCommit | null;
+}
+
 // Takeoff
 
 const SKIP_DIRS = new Set([
@@ -395,7 +448,7 @@ export interface ProjectWithEntries extends Project {
 
 // Projects
 
-export async function fetchProjects(): Promise<Project[]> {
+export async function fetchProjects(): Promise<DashboardProject[]> {
   const res = await authFetch(`${API_BASE}/projects`);
   if (!res.ok) return [];
   return res.json();

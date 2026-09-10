@@ -119,6 +119,42 @@ const productMap = {
     };
   },
 
+  async getCardPersonasByProjectIds(projectIds) {
+    if (!projectIds.length) return new Map();
+    const placeholders = projectIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows: maps } = await db().getDb().query(
+      `SELECT DISTINCT ON (project_id) id, project_id, scores
+         FROM product_maps
+        WHERE project_id IN (${placeholders})
+        ORDER BY project_id, created_at DESC`,
+      projectIds
+    );
+    if (!maps.length) return new Map();
+    const mapIds = maps.map((m) => m.id);
+    const mapPlaceholders = mapIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows: personas } = await db().getDb().query(
+      `SELECT id, map_id, name, description, emoji, sort_order
+         FROM map_personas
+        WHERE map_id IN (${mapPlaceholders})
+        ORDER BY sort_order ASC, name ASC`,
+      mapIds
+    );
+    const personasByMap = new Map();
+    for (const persona of personas) {
+      const list = personasByMap.get(persona.map_id) || [];
+      list.push(persona);
+      personasByMap.set(persona.map_id, list);
+    }
+    const out = new Map();
+    for (const map of maps) {
+      out.set(map.project_id, {
+        personas: personasByMap.get(map.id) || [],
+        scores: map.scores || {},
+      });
+    }
+    return out;
+  },
+
   async getMapByProject(projectId) {
     const { rows } = await db().getDb().query(
       `SELECT id FROM product_maps WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1`,
