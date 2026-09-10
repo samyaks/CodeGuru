@@ -7,19 +7,7 @@ const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../serv
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { checkProjectAccess } = require('../lib/helpers');
-
-const SUMMARY_FIELDS = [
-  'id', 'repo_url', 'owner', 'repo', 'status', 'readiness_score',
-  'recommendation', 'framework', 'live_url', 'deployed_at', 'created_at', 'updated_at',
-];
-
-function projectSummary(project) {
-  const out = {};
-  for (const key of SUMMARY_FIELDS) {
-    if (project[key] !== undefined) out[key] = project[key];
-  }
-  return out;
-}
+const { listDashboardCards } = require('../services/dashboard-cards');
 
 const router = express.Router();
 
@@ -40,8 +28,8 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
     return res.json([]);
   }
 
-  const projects = await deployments.findByUserId(req.user.id);
-  res.json(projects.map(projectSummary));
+  const projects = await listDashboardCards(req.user.id);
+  res.json(projects);
 }));
 
 router.get('/:id', readLimit, asyncHandler(async (req, res) => {

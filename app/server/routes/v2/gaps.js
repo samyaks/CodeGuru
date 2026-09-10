@@ -9,6 +9,7 @@ const {
   groupGaps,
   attachAffectedJobs,
   synthesizeMapGaps,
+  isCannedCursorPrompt,
 } = require('../../services/v2/gap-mapper');
 const { generateCursorPrompt } = require('../../services/v2/gap-prompt-generator');
 const { productMap: productMapDb } = require('../../lib/db-map');
@@ -190,11 +191,12 @@ router.post('/:gapId/prompt', requireUser, writeLimit, asyncHandler(async (req, 
     return res.json({ prompt });
   }
 
-  // AI gap path — regenerate and cache.
+  // AI / static / security gap path — generate and cache when missing
+  // or when the stored text is a canned tutorial from the old static rules.
   const row = await suggestions.findV2GapById(gapId, req.params.id);
   if (!row) throw AppError.notFound('Gap not found');
 
-  let prompt = row.cursor_prompt || null;
+  let prompt = isCannedCursorPrompt(row) ? null : (row.cursor_prompt || null);
   if (!prompt) {
     try {
       const gapShape = toGap(row);
@@ -244,7 +246,7 @@ router.post('/:gapId/accept', requireUser, writeLimit, asyncHandler(async (req, 
   const row = await suggestions.findV2GapById(req.params.gapId, req.params.id);
   if (!row) throw AppError.notFound('Gap not found');
 
-  let cursorPrompt = row.cursor_prompt;
+  let cursorPrompt = isCannedCursorPrompt(row) ? null : row.cursor_prompt;
   if (!cursorPrompt) {
     try {
       const gapShape = toGap(row);

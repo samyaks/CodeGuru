@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  BookOpen,
   FolderGit2,
   FileText,
   Loader2,
   ExternalLink,
-  Rocket,
   Plus,
-  Lightbulb,
-  Map,
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
@@ -18,9 +14,9 @@ import {
   fetchProjects,
   fetchAnalyses,
   fetchReviews,
-  type Project,
+  type DashboardProject,
 } from '../services/api';
-import { EmptyState, TabBar } from '../components/v2';
+import { EmptyState, ProjectCard, TabBar } from '../components/v2';
 
 interface Analysis {
   id: string;
@@ -44,30 +40,6 @@ interface Review {
 }
 
 type Tab = 'projects' | 'analyses' | 'reviews';
-
-// Status -> stone-palette pill class. Keeps the same semantic colors the
-// v1 Badge component encoded, but rendered inline so the Dashboard matches
-// the v2 detail-page aesthetic instead of pulling in the old `bg-brand` /
-// `text-rose` design tokens. Add a new status here when the API starts
-// returning it; unknown values fall back to the neutral stone pill.
-const STATUS_PILL: Record<string, string> = {
-  live: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  deployed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  ready: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  scored: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  deploying: 'bg-amber-50 text-amber-700 border-amber-200',
-  building: 'bg-amber-50 text-amber-700 border-amber-200',
-  analyzing: 'bg-amber-50 text-amber-700 border-amber-200',
-  pending: 'bg-amber-50 text-amber-700 border-amber-200',
-  failed: 'bg-red-50 text-red-700 border-red-200',
-  error: 'bg-red-50 text-red-700 border-red-200',
-  missing: 'bg-red-50 text-red-700 border-red-200',
-  partial: 'bg-stone-100 text-stone-700 border-stone-300',
-};
-
-function statusPillClass(status: string): string {
-  return STATUS_PILL[status] ?? 'bg-stone-100 text-stone-700 border-stone-300';
-}
 
 function PrimaryButton({
   to,
@@ -108,7 +80,7 @@ export default function Dashboard() {
   const [searchParams] = useSearchParams();
   const legacyMode = searchParams.get('legacy') === 'true';
 
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -231,7 +203,7 @@ export default function Dashboard() {
         )}
 
         {!loading && activeTab === 'projects' && !projectsError && projects.length > 0 && (
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-2 gap-5">
             {projects.map((p) => (
               <ProjectCard key={p.id} project={p} />
             ))}
@@ -327,86 +299,6 @@ export default function Dashboard() {
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-function ProjectCard({ project }: { project: Project }) {
-  const score = project.readiness_score;
-  const deployed = project.status === 'live' || project.status === 'deployed';
-  const displayDate = project.updated_at || project.created_at;
-
-  return (
-    <div className="group bg-white border border-stone-200 rounded-lg overflow-hidden transition-all hover:border-stone-400 hover:shadow-sm">
-      <Link
-        to={`/read/${project.id}`}
-        className="block px-5 pt-5 pb-4"
-      >
-        <div className="flex items-start justify-between gap-2 mb-4">
-          <p className="font-semibold text-stone-900 truncate">
-            {project.owner}/{project.repo}
-          </p>
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full border font-medium capitalize shrink-0 ${statusPillClass(project.status)}`}
-          >
-            {project.status}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
-          {score != null && (
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-full border-2 border-stone-900 bg-white flex items-center justify-center">
-                <span className="text-[11px] font-bold text-stone-900">{score}</span>
-              </div>
-              <span className="text-xs text-stone-500">Readiness</span>
-            </div>
-          )}
-          {project.framework && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
-              {project.framework}
-            </span>
-          )}
-          {project.suggestions_count != null && project.suggestions_count > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">
-              <Lightbulb className="w-3 h-3" />
-              {project.suggestions_count}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between text-xs">
-          {deployed && project.live_url ? (
-            <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
-              <Rocket className="w-3 h-3 -rotate-45" />
-              Live
-            </span>
-          ) : (
-            <span className="text-stone-400">
-              {displayDate ? new Date(displayDate).toLocaleDateString() : ''}
-            </span>
-          )}
-          <span className="text-stone-500 group-hover:text-stone-900 transition-colors">
-            View &rarr;
-          </span>
-        </div>
-      </Link>
-      <div className="px-5 py-2.5 border-t border-stone-200 flex items-center gap-4">
-        <Link
-          to={`/read/${project.id}#map`}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
-        >
-          <Map className="w-3 h-3" />
-          Product map &rarr;
-        </Link>
-        <Link
-          to={`/read/${project.id}#gaps`}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
-        >
-          <BookOpen className="w-3 h-3" />
-          Gaps &rarr;
-        </Link>
-      </div>
     </div>
   );
 }

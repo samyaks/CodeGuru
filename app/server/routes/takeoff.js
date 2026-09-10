@@ -29,6 +29,7 @@ const { seedFromAnalysis } = require('../lib/auto-entries');
 const { checkProjectAccess } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
 const { buildTakeoffCostPlan } = require('../lib/cost-budget');
+const { toCommitSnapshot } = require('../services/dashboard-cards');
 
 const router = express.Router();
 
@@ -343,6 +344,24 @@ async function runPipeline(id, codebaseModel, userId, label) {
 
   // Stage 1: Persist analysis data
   const tStage1 = startTimer('stage1_persist_analysis', id);
+  let lastCommit = null;
+  const repoUrl = codebaseModel.meta.repoUrl || '';
+  if (
+    codebaseModel.meta.owner
+    && codebaseModel.meta.repo
+    && !String(repoUrl).startsWith('local://')
+  ) {
+    try {
+      const commits = await github.fetchCommits(
+        codebaseModel.meta.owner,
+        codebaseModel.meta.repo,
+        { branch: codebaseModel.meta.defaultBranch || 'main', perPage: 1 }
+      );
+      lastCommit = toCommitSnapshot(commits && commits[0], 'github');
+    } catch (err) {
+      console.warn(`[pipeline] last commit fetch for ${id} failed:`, err.message);
+    }
+  }
   await deployments.update(id, {
     owner: codebaseModel.meta.owner,
     repo: codebaseModel.meta.repo,
@@ -357,6 +376,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
         language: codebaseModel.meta.language,
         stars: codebaseModel.meta.stars,
         forks: codebaseModel.meta.forks,
+        lastCommit,
       },
       structure: codebaseModel.structure,
       features: codebaseModel.features,

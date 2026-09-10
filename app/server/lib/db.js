@@ -975,6 +975,51 @@ const suggestions = {
   // These all read/write the suggestions table but use the v2_* columns added
   // by migration 010_v2_gap_fields.sql so v1 endpoints keep working.
 
+  async findOpenCardGapsByProjectIds(projectIds, { perProject = 3 } = {}) {
+    if (!projectIds.length) return { itemsByProject: new Map(), counts: new Map() };
+    const placeholders = projectIds.map((_, i) => `$${i + 1}`).join(', ');
+    const openWhere = `
+      project_id IN (${placeholders})
+      AND COALESCE(v2_status, 'untriaged') NOT IN ('shipped', 'rejected')
+      AND COALESCE(status, 'open') NOT IN ('done', 'dismissed')`;
+    const [ranked, counted] = await Promise.all([
+      getDb().query(
+        `SELECT * FROM (
+            SELECT s.*,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY s.project_id
+                     ORDER BY CASE s.priority
+                       WHEN 'critical' THEN 0
+                       WHEN 'high' THEN 1
+                       WHEN 'medium' THEN 2
+                       WHEN 'low' THEN 3
+                       ELSE 4
+                     END, s.created_at DESC
+                   ) AS rn
+              FROM suggestions s
+             WHERE ${openWhere}
+          ) ranked
+          WHERE ranked.rn <= $${projectIds.length + 1}`,
+        [...projectIds, perProject]
+      ),
+      getDb().query(
+        `SELECT project_id, COUNT(*)::int AS n
+           FROM suggestions
+          WHERE ${openWhere}
+          GROUP BY project_id`,
+        projectIds
+      ),
+    ]);
+    const itemsByProject = new Map();
+    for (const row of ranked.rows) {
+      const list = itemsByProject.get(row.project_id) || [];
+      list.push(row);
+      itemsByProject.set(row.project_id, list);
+    }
+    const counts = new Map(counted.rows.map((r) => [r.project_id, r.n]));
+    return { itemsByProject, counts };
+  },
+
   async findV2GapsByProjectId(projectId, { v2Status } = {}) {
     const params = [projectId];
     let where = 'project_id = $1';
@@ -1839,6 +1884,20 @@ const shippedItems = {
     return rows[0] || null;
   },
 
+  async findLatestByProjectIds(projectIds) {
+    if (!projectIds.length) return new Map();
+    const placeholders = projectIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows } = await getDb().query(
+      `SELECT DISTINCT ON (project_id)
+              project_id, commit_sha, commit_message, shipped_at
+         FROM shipped_items
+        WHERE project_id IN (${placeholders})
+        ORDER BY project_id, shipped_at DESC NULLS LAST`,
+      projectIds
+    );
+    return new Map(rows.map((r) => [r.project_id, r]));
+  },
+
   async listByProjectId(projectId) {
     const { rows } = await getDb().query(
       `SELECT * FROM shipped_items
@@ -2480,6 +2539,16 @@ const projectReads = {
     return rows[0] || null;
   },
 
+  async findByProjectIds(projectIds) {
+    if (!projectIds.length) return [];
+    const placeholders = projectIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_reads WHERE project_id IN (${placeholders})`,
+      projectIds
+    );
+    return rows;
+  },
+
   async setUnlocked(projectId, unlocked) {
     const { rows } = await getDb().query(
       `UPDATE project_reads SET read_unlocked = $1, updated_at = now()
@@ -2528,6 +2597,17 @@ const readClaims = {
       `SELECT * FROM read_claims WHERE project_id = $1
         ORDER BY ${READ_SLOT_ORDER}`,
       [projectId]
+    );
+    return rows;
+  },
+
+  async findByProjectIds(projectIds) {
+    if (!projectIds.length) return [];
+    const placeholders = projectIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows } = await getDb().query(
+      `SELECT * FROM read_claims WHERE project_id IN (${placeholders})
+        ORDER BY project_id, ${READ_SLOT_ORDER}`,
+      projectIds
     );
     return rows;
   },

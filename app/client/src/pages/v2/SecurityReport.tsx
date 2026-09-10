@@ -8,7 +8,7 @@ import {
   EmptyState, MetadataLabel, ShareSecurityModal, ReanalyzeModal,
 } from '../../components/v2';
 import Header from '../../components/Header';
-import type { GapCategory, SecuritySeverity } from '../../components/v2';
+import type { SecuritySeverity } from '../../components/v2';
 import { useAuth } from '../../hooks/useAuth';
 import { fetchProjectDetail } from '../../services/api';
 import {
@@ -86,25 +86,6 @@ function severityRank(s: SecuritySeverity | null | undefined): number {
   }
 }
 
-const CATEGORY_META: Record<GapCategory, {
-  label: string;
-  icon: typeof AlertOctagon;
-  pillBg: string;
-  pillText: string;
-  pillBorder: string;
-}> = {
-  broken:  { label: 'Broken',                  icon: AlertOctagon, pillBg: 'bg-red-50',    pillText: 'text-red-700',    pillBorder: 'border-red-200' },
-  missing: { label: 'Missing Functionality',   icon: Wrench,       pillBg: 'bg-amber-50',  pillText: 'text-amber-800',  pillBorder: 'border-amber-200' },
-  infra:   { label: 'Missing Infrastructure',  icon: Server,       pillBg: 'bg-stone-100', pillText: 'text-stone-700',  pillBorder: 'border-stone-300' },
-};
-
-const SEVERITY_PILL: Record<SecuritySeverity, { bg: string; text: string; border: string }> = {
-  critical: { bg: 'bg-red-100',    text: 'text-red-700',    border: 'border-red-200' },
-  high:     { bg: 'bg-red-50',     text: 'text-red-600',    border: 'border-red-100' },
-  medium:   { bg: 'bg-amber-50',   text: 'text-amber-700',  border: 'border-amber-200' },
-  low:      { bg: 'bg-stone-100',  text: 'text-stone-700',  border: 'border-stone-200' },
-};
-
 function severityToneClass(s: SecuritySeverity): string {
   switch (s) {
     case 'critical': return 'text-red-700';
@@ -112,11 +93,6 @@ function severityToneClass(s: SecuritySeverity): string {
     case 'medium':   return 'text-amber-700';
     case 'low':      return 'text-stone-500';
   }
-}
-
-function cweUrl(cwe: string): string {
-  const num = String(cwe).replace(/[^0-9]/g, '');
-  return num ? `https://cwe.mitre.org/data/definitions/${num}.html` : 'https://cwe.mitre.org/';
 }
 
 function categoryMeta(category: string) {
@@ -496,19 +472,18 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                 </Link>
               ) : null}
             </div>
-            <div className="space-y-3">
-              {filteredTopRisks.map((risk) => (
-                <TopRiskCard
-                  key={risk.id}
-                  gap={risk}
-                  /* `?focus=<id>#gaps` deep-links to the specific gap
-                     in the Gaps tab — GapsSection scrolls + rings it
-                     so the user doesn't have to scan the list. */
-                  fixHref={showAdminActions && data.projectId
-                    ? `/read/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
-                    : null}
-                />
-              ))}
+            <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
+              <ul className="divide-y divide-stone-100">
+                {filteredTopRisks.map((risk) => (
+                  <CompactRiskRow
+                    key={risk.id}
+                    gap={risk}
+                    fixHref={showAdminActions && data.projectId
+                      ? `/read/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
+                      : null}
+                  />
+                ))}
+              </ul>
             </div>
           </section>
         ) : null}
@@ -651,96 +626,6 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
         />
       ) : null}
     </div>
-  );
-}
-
-// ── TopRiskCard ────────────────────────────────────────────────────
-//
-// Read-only card for the "Top 5 risks" section. Mirrors the visual
-// language of GapCard's security shield + callout (Phase 2a) but
-// strips out triage controls — the report is a viewing surface.
-// `fixHref` adds a "Fix this gap →" deep link when set; in shared
-// mode it's null and the CTA is omitted.
-function TopRiskCard({ gap, fixHref }: { gap: V2Gap; fixHref: string | null }) {
-  const cat = (gap.category as GapCategory) || 'broken';
-  const cm = CATEGORY_META[cat];
-  const CatIcon = cm.icon;
-  const sev = gap.securitySeverity;
-  const sevPill = sev ? SEVERITY_PILL[sev] : null;
-  const filesCount = typeof gap.files === 'number' && gap.files > 0 ? gap.files : null;
-  return (
-    <article className={`bg-white border ${cm.pillBorder} rounded-lg p-5`}>
-      <div className="flex items-center gap-2 flex-wrap mb-3">
-        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold border rounded-full px-2 py-0.5 ${cm.pillBg} ${cm.pillText} ${cm.pillBorder}`}>
-          <CatIcon className="w-3 h-3" aria-hidden /> {cm.label}
-        </span>
-        {sev && sevPill ? (
-          <span
-            className={`inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 ${sevPill.bg} ${sevPill.text} ${sevPill.border}`}
-            aria-label={`Severity ${sev}`}
-          >
-            <Shield className="w-3 h-3" aria-hidden /> Security · {sev[0].toUpperCase() + sev.slice(1)}
-          </span>
-        ) : null}
-        {gap.effort ? (
-          <>
-            <span className="text-xs text-stone-500">·</span>
-            <span className="text-xs text-stone-500">{gap.effort} effort</span>
-          </>
-        ) : null}
-        {filesCount !== null ? (
-          <>
-            <span className="text-xs text-stone-500">·</span>
-            <span className="text-xs text-stone-500">{filesCount} file{filesCount === 1 ? '' : 's'}</span>
-          </>
-        ) : null}
-      </div>
-      <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
-      <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
-      {sev ? (
-        <div className="mb-3 px-3 py-2 bg-red-50/50 border border-red-100 rounded-md">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-700 mb-0.5">
-            <Shield className="w-3 h-3" aria-hidden />
-            Why this is a security risk
-          </div>
-          <div className="text-xs text-stone-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span>
-              Severity <span className={`font-medium ${severityToneClass(sev)}`}>{sev}</span>
-            </span>
-            {gap.cweId ? (
-              <>
-                <span aria-hidden className="text-stone-300">·</span>
-                <a
-                  href={cweUrl(gap.cweId)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-red-700 hover:text-red-800 underline-offset-2 hover:underline"
-                >
-                  {gap.cweId}
-                  <ExternalLink className="w-2.5 h-2.5 inline-block ml-0.5 -mt-0.5" aria-hidden />
-                </a>
-              </>
-            ) : null}
-            {gap.securityDetector ? (
-              <>
-                <span aria-hidden className="text-stone-300">·</span>
-                <span>
-                  Detected by <span className="font-mono text-stone-700">{gap.securityDetector}</span>
-                </span>
-              </>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      {fixHref ? (
-        <Link
-          to={fixHref}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-900 hover:text-stone-700"
-        >
-          Fix this gap <ArrowRight className="w-3.5 h-3.5" aria-hidden />
-        </Link>
-      ) : null}
-    </article>
   );
 }
 

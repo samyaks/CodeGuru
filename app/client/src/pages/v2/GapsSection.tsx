@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle, RefreshCw, Shield } from 'lucide-react';
 import { GapCard, EmptyState } from '../../components/v2';
 import type { GapStatus } from '../../components/v2';
@@ -220,11 +220,10 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     }
   }, [allGaps]);
 
-  // Lazy prompt fetch for synthetic map-derived gaps. We only call
-  // Claude when the user clicks "Get Cursor prompt" so projects with
-  // dozens of synthetic gaps don't burn tokens for prompts no one reads.
-  // The fetched prompt lives on the in-memory gap; it's regenerated on
-  // every reload (synthetic gaps don't persist in the DB).
+  // Lazy prompt fetch for gaps that have no grounded Cursor prompt yet
+  // (synthetic map gaps, security findings, and static rules whose
+  // canned tutorial was stripped). Claude is only called when the user
+  // asks, so we don't burn tokens for prompts no one reads.
   const onGetPrompt = useCallback(async (id: string) => {
     setPromptLoadingId(id);
     try {
@@ -299,12 +298,18 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
           filter row tight on clean projects.
         */}
         {counts.securityTotal > 0 ? (
-          <div className="ml-4 pl-4 border-l border-stone-200">
+          <div className="ml-4 pl-4 border-l border-stone-200 flex items-center gap-3">
             <SecurityChip
               active={securityOnly}
               count={counts.securityTotal}
               onClick={() => setSecurityOnly((on) => !on)}
             />
+            <Link
+              to={`/v2/projects/${projectId}/security`}
+              className="text-xs text-stone-500 hover:text-stone-900 underline underline-offset-2"
+            >
+              Full report →
+            </Link>
           </div>
         ) : null}
         {counts.inProgress > 0 ? (
