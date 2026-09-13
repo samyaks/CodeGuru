@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { GitCommit, Github, RefreshCw, Settings } from 'lucide-react';
-import { ShippedItem, EmptyState } from '../../components/v2';
+import { ShippedItem, EmptyState, RecentCommitCard } from '../../components/v2';
 import {
   fetchV2Shipped,
   reopenShipped,
@@ -103,6 +103,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
   if (!data) return null;
 
   const hasRepo = !!data.repo;
+  const recentCommits = Array.isArray(data.recentCommits) ? data.recentCommits : [];
   const isEmpty = data.items.length === 0;
 
   return (
@@ -143,11 +144,32 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
         ) : null}
       </div>
 
+      {recentCommits.length > 0 ? (
+        <section aria-labelledby="recent-updates-heading" className="space-y-3">
+          <div>
+            <h4
+              id="recent-updates-heading"
+              className="text-sm font-semibold text-stone-900 tracking-wide uppercase"
+            >
+              Recent updates
+            </h4>
+            <p className="text-xs text-stone-500 mt-1">
+              The latest {recentCommits.length === 1 ? 'commit' : `${recentCommits.length} commits`} on your connected branch, with a short summary of what changed.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-3">
+            {recentCommits.map((commit) => (
+              <RecentCommitCard key={commit.sha} commit={commit} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {isEmpty ? (
         hasRepo ? (
           <EmptyState
             icon={GitCommit}
-            title="Nothing shipped yet"
+            title="Nothing matched a gap yet"
             description="New commits matching an open gap will land here automatically. To pull in the last few commits from before today, click 'Sync recent commits' above."
           />
         ) : (
@@ -172,6 +194,14 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
         )
       ) : (
         <div className="space-y-3" aria-busy={busyId !== null}>
+          <div>
+            <h4 className="text-sm font-semibold text-stone-900 tracking-wide uppercase">
+              Gap-verified commits
+            </h4>
+            <p className="text-xs text-stone-500 mt-1">
+              Commits Takeoff matched to an open gap and checked against the codebase.
+            </p>
+          </div>
           {data.items.map((item) => (
             <ShippedItem key={item.id} item={item} onReopenAsGap={onReopen} />
           ))}
