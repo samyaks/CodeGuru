@@ -13,6 +13,7 @@ const projectRoutes = require('./routes/projects');
 const buildStoryRoutes = require('./routes/build-story');
 const publicStoryRoutes = require('./routes/public-story');
 const reviewRoutes = require('./routes/reviews');
+const githubAppRoutes = require('./routes/github-app');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
 const projectAnalyticsRoutes = require('./routes/project-analytics');
@@ -143,6 +144,7 @@ app.get('/auth/github/reconnect', reconnectRateLimit, (req, res) => {
 if (supabase) {
   app.use('/api/analyze', optionalAuth(supabase), analyzeRoutes);
   app.use('/api/takeoff', optionalAuth(supabase), takeoffRoutes);
+  app.use('/api/github-app', optionalAuth(supabase), githubAppRoutes);
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
   app.use('/api/projects', optionalAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
@@ -161,6 +163,7 @@ if (supabase) {
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
+  app.use('/api/github-app', githubAppRoutes);
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });

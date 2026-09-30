@@ -5,7 +5,7 @@ const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
-const github = require('../../services/github');
+const { clientForProject } = require('../../services/github-access');
 const { processCommit } = require('../../services/v2/shipped-runner');
 
 const router = express.Router({ mergeParams: true });
@@ -106,7 +106,7 @@ router.post('/backfill', requireUser, backfillLimit, asyncHandler(async (req, re
 
   let commits;
   try {
-    commits = await github.fetchCommits(project.owner, project.repo, { branch, perPage });
+    commits = await clientForProject(project).fetchCommits(project.owner, project.repo, { branch, perPage });
   } catch (err) {
     throw AppError.internal(`Could not fetch commits from GitHub: ${err.message}`);
   }
@@ -128,7 +128,7 @@ router.post('/backfill', requireUser, backfillLimit, asyncHandler(async (req, re
 
     let detail;
     try {
-      detail = await github.fetchCommitDetail(project.owner, project.repo, c.sha);
+      detail = await clientForProject(project).fetchCommitDetail(project.owner, project.repo, c.sha);
     } catch (err) {
       console.warn(`[v2/shipped/backfill] fetchCommitDetail ${c.sha} failed: ${err.message}`);
       stats.failed += 1;
