@@ -216,11 +216,11 @@ function parseScanIgnore(text) {
     .filter(Boolean);
 }
 
-async function loadScanIgnorePatterns(owner, repo, branch, tree) {
+async function loadScanIgnorePatterns(owner, repo, branch, tree, gh = github) {
   const entry = tree.find((f) => f.type === 'blob' && f.path === '.scanignore');
   if (!entry) return [];
   try {
-    const r = await github.fetchFileContent(owner, repo, '.scanignore', branch);
+    const r = await gh.fetchFileContent(owner, repo, '.scanignore', branch);
     if (!r || !r.content) return [];
     return parseScanIgnore(r.content);
   } catch {
@@ -258,27 +258,37 @@ function scorePath(filePath) {
   return 1;
 }
 
-async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
+/**
+ * `opts.github` is the repo-reading client (see services/github-access.js).
+ * `opts.publicOnly` refuses private repos; it defaults on unless a client is
+ * passed, because the default server token can read its owner's private repos.
+ */
+async function analyzeRepo(repoUrl, onProgress, analysisId = null, opts = {}) {
+  const gh = opts.github || github;
+  const publicOnly = opts.publicOnly ?? !opts.github;
   const { owner, repo } = github.parseRepoUrl(repoUrl);
   const send = onProgress || (() => {});
 
   send({ phase: 'meta', message: `Fetching metadata for ${owner}/${repo}...` });
-  const repoMeta = await github.fetchRepoMeta(owner, repo);
+  const repoMeta = await gh.fetchRepoMeta(owner, repo);
+  if (publicOnly && repoMeta.private) {
+    throw new Error('This repository is private. Give Takeoff read-only access to it on GitHub, then try again.');
+  }
 
   const branch = repoMeta.default_branch || 'main';
   send({ phase: 'tree', message: `Reading file tree (branch: ${branch})...` });
 
   let tree;
   try {
-    tree = await github.fetchRepoTree(owner, repo, branch);
+    tree = await gh.fetchRepoTree(owner, repo, branch);
   } catch {
     const fallback = branch === 'main' ? 'master' : 'main';
-    tree = await github.fetchRepoTree(owner, repo, fallback);
+    tree = await gh.fetchRepoTree(owner, repo, fallback);
   }
 
   const treeTruncated = !!tree._truncated;
 
-  const extraIgnore = await loadScanIgnorePatterns(owner, repo, branch, tree);
+  const extraIgnore = await loadScanIgnorePatterns(owner, repo, branch, tree, gh);
   const allFiles = tree.filter((f) => f.type === 'blob' && !shouldSkipFile(f.path, extraIgnore));
   send({ phase: 'tree-done', message: `Found ${allFiles.length} files`, fileCount: allFiles.length });
 
@@ -347,7 +357,7 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null) {
     const batch = toRead.slice(i, i + batchSize);
     const results = await Promise.all(
       batch.map((f) =>
-        github.fetchFileContent(owner, repo, f.path, branch)
+        gh.fetchFileContent(owner, repo, f.path, branch)
           .catch(() => ({ path: f.path, content: null, size: 0 }))
       )
     );
