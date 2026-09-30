@@ -342,6 +342,12 @@ export async function startTakeoffUpload(files: File[], projectName: string): Pr
   return handleApiResponse<{ projectId: string; slug: string; status: string }>(res);
 }
 
+// Browser navigation (not fetch): GitHub App install → back to `returnTo`
+// with `?github_app=<status>` appended.
+export function githubAppInstallUrl(returnTo: string): string {
+  return `${API_BASE}/github-app/install?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 export async function startTakeoff(repoUrl: string): Promise<{ projectId: string; slug: string; status: string }> {
   const res = await authFetch(`${API_BASE}/takeoff`, {
     method: 'POST',
