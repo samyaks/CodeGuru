@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CheckCircle2,
   Search,
@@ -19,7 +19,8 @@ import FaqAccordion from '../components/marketing/FaqAccordion';
 import CtaBand from '../components/marketing/CtaBand';
 import { MARKETING_FAQ, STACK_LOGOS } from '../components/marketing/marketingContent';
 import { useAuth } from '../hooks/useAuth';
-import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
+import { startTakeoff, startTakeoffUpload, fetchMyRepos, githubAppInstallUrl, GitHubRepo } from '../services/api';
+import { ApiError } from '../lib/api-error';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -28,6 +29,17 @@ const EXAMPLES = [
 ];
 
 type Mode = 'connect' | 'picker' | 'url' | 'upload';
+
+// Outcome of the GitHub App install/authorize redirect (?github_app=…).
+const GITHUB_APP_NOTICES: Record<string, { ok: boolean; text: string }> = {
+  connected: { ok: true, text: 'GitHub access updated. Takeoff can now read the repos you picked.' },
+  requested: { ok: false, text: 'Request sent. An owner of that GitHub organization has to approve Takeoff before it can read those repos.' },
+  signin_required: { ok: false, text: 'Sign in with GitHub first, then give Takeoff access to your private repos.' },
+  unavailable: { ok: false, text: 'Private repositories aren’t available yet.' },
+  state_mismatch: { ok: false, text: 'That GitHub connection expired. Please try again.' },
+  missing_code: { ok: false, text: 'GitHub didn’t finish connecting. Please try again.' },
+  error: { ok: false, text: 'We couldn’t connect to GitHub. Please try again.' },
+};
 
 // Primary CTA used across modes. Stone-900 on stone-50 is the v2 detail-page
 // idiom; full-width is opt-in via className so we can drop it inline next
@@ -61,11 +73,24 @@ export default function Landing() {
   const navigate = useNavigate();
   const { user, login } = useAuth();
 
-  const [repoUrl, setRepoUrl] = useState('');
+  // Returning from the GitHub App install: `repo` is what they were trying to
+  // scan, `github_app` how it went. Read once, then drop them from the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [returnedRepo] = useState(() => searchParams.get('repo'));
+  const [githubAppNotice] = useState(() => GITHUB_APP_NOTICES[searchParams.get('github_app') || ''] || null);
+  useEffect(() => {
+    if (searchParams.has('repo') || searchParams.has('github_app')) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const [repoUrl, setRepoUrl] = useState(returnedRepo || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [failedRepoUrl, setFailedRepoUrl] = useState<string | null>(null);
 
-  const [mode, setMode] = useState<Mode>(user ? 'picker' : 'connect');
+  const [mode, setMode] = useState<Mode>(returnedRepo ? 'url' : user ? 'picker' : 'connect');
 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadProjectName, setUploadProjectName] = useState('');
@@ -125,11 +150,14 @@ export default function Landing() {
   const analyze = async (url: string) => {
     setLoading(true);
     setError(null);
+    setErrorCode(null);
     try {
       const { projectId } = await startTakeoff(url);
       navigate(`/takeoff/${projectId}`);
     } catch (err: any) {
       setError(err.message || 'Failed to start analysis');
+      setErrorCode(err instanceof ApiError ? err.code : null);
+      setFailedRepoUrl(url);
       setLoading(false);
     }
   };
@@ -568,9 +596,40 @@ export default function Landing() {
             </div>
           )}
 
+          {githubAppNotice && !error && (
+            <div
+              className={`mt-5 max-w-[520px] mx-auto text-sm rounded-lg px-4 py-2 text-left border ${
+                githubAppNotice.ok
+                  ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                  : 'text-amber-800 bg-amber-50 border-amber-200'
+              }`}
+            >
+              {githubAppNotice.text}
+            </div>
+          )}
+
           {error && (
             <div className="mt-5 max-w-[520px] mx-auto text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-left">
               {error}
+              {errorCode === 'GITHUB_APP_REQUIRED' && failedRepoUrl && (
+                <a
+                  href={githubAppInstallUrl(`/?repo=${encodeURIComponent(failedRepoUrl)}`)}
+                  className="mt-2 flex w-fit items-center gap-1.5 px-3 py-1.5 rounded-md bg-stone-900 text-white text-xs font-medium hover:bg-stone-800 transition-colors"
+                >
+                  <Github className="w-3.5 h-3.5" />
+                  Give Takeoff read-only access
+                </a>
+              )}
+              {errorCode === 'GITHUB_SIGNIN_REQUIRED' && (
+                <button
+                  type="button"
+                  onClick={() => login('github')}
+                  className="mt-2 flex w-fit items-center gap-1.5 px-3 py-1.5 rounded-md bg-stone-900 text-white text-xs font-medium hover:bg-stone-800 transition-colors"
+                >
+                  <Github className="w-3.5 h-3.5" />
+                  Sign in with GitHub
+                </button>
+              )}
             </div>
           )}
 

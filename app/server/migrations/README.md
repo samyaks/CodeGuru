@@ -76,3 +76,11 @@ Postgres, not ANSI SQL.
   objective / audience / core_job — with confidence, JSONB evidence, and an
   optional alternative question). `UNIQUE (project_id, slot)` makes re-drafting
   an upsert; settled (human-corrected) claims survive re-analysis.
+- `025_github_app_access.sql` — private-repo reads through the Takeoff GitHub
+  App. `github_repo_access` (repos each user can read through an installation,
+  captured at install/authorize time) and `deployments.github_installation_id`
+  (the installation a project reads through; NULL = public, server token).
+- `026_processed_pushes.sql` — `processed_pushes`, one row per (project, ref,
+  before, after). The webhook handler claims a push here before running the
+  Shipped matcher/verifier and auto re-analyze, so a push delivered twice (a
+  per-repo hook plus the GitHub App) runs them once.
