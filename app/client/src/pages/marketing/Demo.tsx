@@ -10,12 +10,12 @@ export default function Demo() {
     <div className="px-6 py-16 sm:py-24">
       <PageMeta
         title="Demo"
-        description="See what Takeoff finds when it analyzes a real open-source repo — readiness score, gaps, product map, and security scan."
+        description="See what Jibe finds when it analyzes a real open-source repo — readiness score, gaps, product map, and security scan."
       />
 
       <MarketingPageHero
         eyebrow="Live demo"
-        headline="See what Takeoff"
+        headline="See what Jibe"
         headlineAccent="finds in your repo."
         subhead="This is a sample report from shadcn-ui/taxonomy — readiness breakdown, product map, and top gaps. Analyze your own repo to get the real thing."
       />

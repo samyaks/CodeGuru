@@ -110,7 +110,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
       <div>
         <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What you've shipped</h3>
         <p className="text-stone-600 text-sm leading-relaxed">
-          Takeoff watches your repo. Every commit gets matched to a gap and verified — we re-scan the affected files to confirm the problem is actually gone.
+          Jibe watches your repo. Every commit gets matched to a gap and verified — we re-scan the affected files to confirm the problem is actually gone.
         </p>
       </div>
 
@@ -158,7 +158,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
           <EmptyState
             icon={GitCommit}
             title="No GitHub repo connected"
-            description="Connect a GitHub repo so Takeoff can match your commits to open gaps."
+            description="Connect a GitHub repo so Jibe can match your commits to open gaps."
             action={
               <Link
                 to={`/read/${projectId}#settings`}

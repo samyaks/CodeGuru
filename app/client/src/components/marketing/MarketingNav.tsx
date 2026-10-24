@@ -43,7 +43,7 @@ export default function MarketingNav() {
       <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
         <Link
           to="/"
-          aria-label="Takeoff home"
+          aria-label="Jibe home"
           className="flex items-center gap-3 min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 rounded"
         >
           <div className="w-9 h-9 bg-stone-900 rounded flex items-center justify-center flex-shrink-0">
@@ -51,7 +51,7 @@ export default function MarketingNav() {
           </div>
           <div className="min-w-0">
             <span className="text-lg font-bold text-stone-900 tracking-tight block leading-tight">
-              Takeoff
+              Jibe
             </span>
             <span className="text-xs text-stone-500 hidden sm:block">AI in the loop</span>
           </div>

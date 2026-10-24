@@ -386,7 +386,7 @@ export default function ReadPage() {
     <div className="read-page">
       <div className="masthead">
         <div className="mh-left">
-          <Link to="/dashboard" className="wordmark">Takeoff</Link>
+          <Link to="/dashboard" className="wordmark">Jibe</Link>
           <span className="dateline">
             a read of <span className="mono">{repoLabel ?? 'this project'}</span>
           </span>

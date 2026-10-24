@@ -15,7 +15,7 @@ export default function HowItWorks() {
         eyebrow="How it works"
         headline="Three steps from"
         headlineAccent="vibe code to production."
-        subhead="No install, no clone. Takeoff reads your repo via the GitHub API and tells you exactly what to build next."
+        subhead="No install, no clone. Jibe reads your repo via the GitHub API and tells you exactly what to build next."
       />
 
       <div className="max-w-3xl mx-auto space-y-8 mb-20">
