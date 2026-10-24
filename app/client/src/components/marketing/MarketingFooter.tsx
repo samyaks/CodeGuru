@@ -26,7 +26,7 @@ export default function MarketingFooter() {
       <div className="max-w-6xl mx-auto px-6 py-12">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
           <div>
-            <p className="text-sm font-bold text-stone-900 mb-2">Takeoff</p>
+            <p className="text-sm font-bold text-stone-900 mb-2">Jibe</p>
             <p className="text-sm text-stone-600 leading-relaxed max-w-xs">
               From vibe code to production. Analyze your repo, map it to user needs, and ship
               with AI context.
@@ -53,7 +53,7 @@ export default function MarketingFooter() {
           ))}
         </div>
         <div className="mt-10 pt-6 border-t border-stone-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-stone-500">
-          <span>&copy; {new Date().getFullYear()} Takeoff</span>
+          <span>&copy; {new Date().getFullYear()} Jibe</span>
           <span>Reads ~30 key files via GitHub API — never clones your repo</span>
         </div>
       </div>

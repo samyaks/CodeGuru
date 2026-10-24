@@ -102,7 +102,7 @@ export default function GapExplainerPage() {
               Not sure if your repo has this gap?
             </h3>
             <p className="text-sm text-stone-600 leading-relaxed mb-3">
-              Takeoff scans your actual codebase and flags {gap.title.toLowerCase()} automatically —
+              Jibe scans your actual codebase and flags {gap.title.toLowerCase()} automatically —
               with copy-paste prompts to fix it.
             </p>
             <Link

@@ -17,7 +17,7 @@ export default function GapsIndex() {
         eyebrow="Gap guides"
         headline="Know what's missing"
         headlineAccent="before you ship."
-        subhead="Takeoff detects seven categories of production gaps. Each guide explains why it matters, how to spot it, and how to fix it — then analyze your repo to see which ones you have."
+        subhead="Jibe detects seven categories of production gaps. Each guide explains why it matters, how to spot it, and how to fix it — then analyze your repo to see which ones you have."
       />
 
       <div className="max-w-3xl mx-auto grid grid-cols-1 gap-4 mb-20">
@@ -43,7 +43,7 @@ export default function GapsIndex() {
       </div>
 
       <div className="max-w-3xl mx-auto">
-        <CtaBand subhead="Paste a GitHub URL and Takeoff will tell you which of these gaps your repo has." />
+        <CtaBand subhead="Paste a GitHub URL and Jibe will tell you which of these gaps your repo has." />
       </div>
     </div>
   );
