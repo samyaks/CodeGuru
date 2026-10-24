@@ -71,6 +71,24 @@ test('getInstallationToken caches until near expiry and shares concurrent mints'
   assert.strictEqual(mints, 2);
 });
 
+test('findRepoInstallation asks GitHub as the app and treats 404 as not installed', async () => {
+  const seen = [];
+  const fetchImpl = async (url, opts) => {
+    seen.push(url);
+    assert.match(opts.headers.Authorization, /^Bearer ey/);
+    return url.endsWith('/repos/acme/web/installation')
+      ? jsonResponse({ id: 314, account: { login: 'acme' } })
+      : jsonResponse({ message: 'Not Found' }, 404);
+  };
+  const app = createGithubApp(CONFIG, { fetchImpl });
+  assert.strictEqual(await app.findRepoInstallation('acme', 'web'), 314);
+  assert.strictEqual(await app.findRepoInstallation('acme', 'other'), null);
+  assert.deepStrictEqual(seen, [
+    'https://api.github.com/repos/acme/web/installation',
+    'https://api.github.com/repos/acme/other/installation',
+  ]);
+});
+
 test('exchangeUserCode treats a 200 + { error } body as failure', async () => {
   const app = createGithubApp(CONFIG, {
     fetchImpl: async () => jsonResponse({ error: 'bad_verification_code', error_description: 'The code is incorrect or expired.' }),

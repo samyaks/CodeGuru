@@ -1,5 +1,6 @@
 const github = require('./github');
 const { projectServices } = require('../lib/db');
+const { appInstallationForRepo } = require('./github-access');
 
 const SERVICE_TYPE = 'github';
 
@@ -84,6 +85,34 @@ async function connectWebhook({ projectId, owner, repo, userToken }) {
 }
 
 /**
+ * Scan-time hook registration. Skipped when the Takeoff GitHub App covers the
+ * repo: the app already delivers its pushes, and a per-repo hook would deliver
+ * each one a second time. `installationId` is the one the scan resolved
+ * through the user's grant, if any.
+ */
+async function autoConnectWebhook(
+  { projectId, owner, repo, userToken, installationId = null },
+  deps = { appInstallationForRepo, connectWebhook },
+) {
+  let coveredBy = null;
+  try {
+    coveredBy = await deps.appInstallationForRepo({ owner, repo, knownInstallationId: installationId });
+  } catch (err) {
+    // Can't tell; register the hook. The webhook handler dedupes repeat pushes.
+    console.warn(`app installation lookup ${owner}/${repo}:`, err.message);
+  }
+  if (coveredBy) {
+    console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId, reason: 'github_app_installed', installationId: coveredBy }));
+    return { ok: true, skipped: 'github_app_installed', installationId: coveredBy };
+  }
+  const result = await deps.connectWebhook({ projectId, owner, repo, userToken });
+  if (!result.ok) {
+    console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId, reason: result.error }));
+  }
+  return result;
+}
+
+/**
  * Remove the webhook from GitHub and delete the project_services record.
  */
 async function disconnectWebhook({ projectId, owner, repo, userToken }) {
@@ -116,4 +145,4 @@ async function getWebhookStatus(projectId) {
   };
 }
 
-module.exports = { connectWebhook, disconnectWebhook, getWebhookStatus };
+module.exports = { connectWebhook, autoConnectWebhook, disconnectWebhook, getWebhookStatus };

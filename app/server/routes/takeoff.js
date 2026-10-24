@@ -16,7 +16,7 @@ const { runAISuggestions } = require('../services/suggestion-ai');
 const { runSecurityDetectors, listDetectorNames } = require('../services/security');
 const { applySecurityFindings } = require('../services/security/persist');
 const { computeSecurityScore } = require('../services/security/score');
-const { connectWebhook } = require('../services/github-webhook-manager');
+const { autoConnectWebhook } = require('../services/github-webhook-manager');
 const { resolveRepoAccess, clientForProject } = require('../services/github-access');
 const productMapSvc = require('../services/product-map');
 const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
@@ -173,16 +173,12 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
       });
   });
 
-  // Auto-connect webhook for GitHub-linked projects when the user has a GH token
+  // Auto-connect a per-repo push webhook when the user has a GH token, unless
+  // the GitHub App already delivers this repo's pushes.
   const ghToken = req.cookies?.['gh-provider-token'] || null;
   if (ghToken) {
     setImmediate(() => {
-      connectWebhook({ projectId: id, owner, repo, userToken: ghToken })
-        .then((result) => {
-          if (!result.ok) {
-            console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId: id, reason: result.error }));
-          }
-        })
+      autoConnectWebhook({ projectId: id, owner, repo, userToken: ghToken, installationId: access.installationId })
         .catch((err) => console.warn(`webhook auto-connect ${id}:`, err.message));
     });
   }
