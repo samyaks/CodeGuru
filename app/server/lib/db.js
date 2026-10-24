@@ -2177,6 +2177,26 @@ const webhookEvents = {
   },
 };
 
+// ── Processed pushes (webhook dedupe) ─────────────────────────────
+
+const processedPushes = {
+  /**
+   * True for the first delivery of a push to a project; false when another
+   * delivery (per-repo hook + GitHub App, or a redelivery) already claimed it.
+   * Migration 026 adds the table.
+   */
+  async claim({ projectId, ref, before, after, deliveryId, source }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO processed_pushes (project_id, ref, before_sha, after_sha, delivery_id, source)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (project_id, ref, before_sha, after_sha) DO NOTHING
+        RETURNING project_id`,
+      [projectId, ref, before, after, deliveryId ?? null, source]
+    );
+    return rows.length > 0;
+  },
+};
+
 // ── Intent statements (Takeoff intent substrate) ──────────────────
 //
 // The first-class "what this app is meant to do" object. Gaps and
@@ -2715,7 +2735,7 @@ module.exports = {
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents, securityShares,
+  shippedItems, webhookEvents, processedPushes, securityShares,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

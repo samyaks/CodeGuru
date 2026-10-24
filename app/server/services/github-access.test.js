@@ -1,10 +1,10 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { resolveRepoAccess, clientForProject } = require('./github-access');
+const { resolveRepoAccess, clientForProject, appInstallationForRepo } = require('./github-access');
 
-function makeDeps({ configured = true, grant = null, meta = null, metaError = null } = {}) {
-  const calls = { findForUserRepo: 0, clientForInstallation: [] };
+function makeDeps({ configured = true, grant = null, meta = null, metaError = null, repoInstallation = null } = {}) {
+  const calls = { findForUserRepo: 0, clientForInstallation: [], findRepoInstallation: [] };
   const publicClient = {
     name: 'public',
     async fetchRepoMeta() {
@@ -27,6 +27,10 @@ function makeDeps({ configured = true, grant = null, meta = null, metaError = nu
         clientForInstallation: (id) => {
           calls.clientForInstallation.push(id);
           return { name: `installation-${id}` };
+        },
+        findRepoInstallation: async (owner, repo) => {
+          calls.findRepoInstallation.push(`${owner}/${repo}`);
+          return repoInstallation;
         },
       },
       publicClient,
@@ -90,4 +94,22 @@ test('clientForProject uses the stored installation, else the server token', () 
   assert.strictEqual(clientForProject({ github_installation_id: 7 }, deps).name, 'installation-7');
   assert.strictEqual(clientForProject({ github_installation_id: null }, deps), publicClient);
   assert.strictEqual(clientForProject(null, deps), publicClient);
+});
+
+test('appInstallationForRepo trusts the scan’s grant without asking GitHub', async () => {
+  const { deps, calls } = makeDeps({ repoInstallation: 99 });
+  assert.strictEqual(await appInstallationForRepo({ owner: 'acme', repo: 'web', knownInstallationId: '42' }, deps), 42);
+  assert.deepStrictEqual(calls.findRepoInstallation, []);
+});
+
+test('appInstallationForRepo asks GitHub when the user has no grant (e.g. an org owner installed it)', async () => {
+  const { deps, calls } = makeDeps({ repoInstallation: 99 });
+  assert.strictEqual(await appInstallationForRepo({ owner: 'acme', repo: 'web' }, deps), 99);
+  assert.deepStrictEqual(calls.findRepoInstallation, ['acme/web']);
+});
+
+test('appInstallationForRepo is null without the app configured', async () => {
+  const { deps, calls } = makeDeps({ configured: false, repoInstallation: 99 });
+  assert.strictEqual(await appInstallationForRepo({ owner: 'acme', repo: 'web' }, deps), null);
+  assert.deepStrictEqual(calls.findRepoInstallation, []);
 });

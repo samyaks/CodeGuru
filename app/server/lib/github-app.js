@@ -114,6 +114,19 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     return pending;
   }
 
+  /** Id of the installation covering owner/repo, or null when the app isn't installed there. */
+  async function findRepoInstallation(owner, repo) {
+    assertConfigured();
+    const jwt = createAppJwt({ appId: config.appId, privateKey: config.privateKey, now: now() });
+    try {
+      const data = await githubJson(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`, { token: jwt });
+      return data.id ? Number(data.id) : null;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
   /** Repo-reading client that acts as the installation. */
   function clientForInstallation(installationId) {
     return github.createClient({ token: () => getInstallationToken(installationId) });
@@ -187,6 +200,7 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
   return {
     isConfigured,
     getInstallationToken,
+    findRepoInstallation,
     clientForInstallation,
     installUrl,
     authorizeUrl,

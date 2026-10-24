@@ -72,4 +72,16 @@ function clientForProject(project, deps = defaultDeps()) {
   return deps.publicClient;
 }
 
-module.exports = { resolveRepoAccess, clientForProject };
+/**
+ * The app installation that covers a repo (and so delivers its pushes), or
+ * null. `knownInstallationId` is the one resolveRepoAccess() found through the
+ * user's grant; without it GitHub is asked, so a repo an org owner installed
+ * the app on counts even when this user hasn't authorized it.
+ */
+async function appInstallationForRepo({ owner, repo, knownInstallationId = null }, deps = defaultDeps()) {
+  if (knownInstallationId) return Number(knownInstallationId);
+  if (!deps.app.isConfigured()) return null;
+  return deps.app.findRepoInstallation(owner, repo);
+}
+
+module.exports = { resolveRepoAccess, clientForProject, appInstallationForRepo };
