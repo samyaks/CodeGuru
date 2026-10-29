@@ -1,0 +1,354 @@
+/* Sizes below are export pixels on a 1080px-wide card, not screen sizes, so
+ * they sit off the spacing scale on purpose. Colours are tokens. */
+
+.frame {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 48px;
+  padding: 88px;
+  overflow: hidden;
+  transform-origin: 0 0;
+  font-family: var(--font-sans);
+}
+
+/* Tones */
+.paper {
+  --soc-muted: var(--ink-muted);
+  --soc-runway: var(--beacon);
+  background: var(--paper);
+  color: var(--ink);
+}
+.night {
+  --soc-muted: var(--night-muted);
+  --soc-runway: var(--beacon);
+  background: var(--night);
+  color: var(--on-night);
+}
+.beacon {
+  --soc-muted: var(--on-beacon);
+  --soc-runway: var(--on-beacon);
+  background: var(--beacon);
+  color: var(--on-beacon);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.runway {
+  display: inline-flex;
+  gap: 14px;
+}
+.runway i {
+  display: block;
+  width: 40px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--soc-runway);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--soc-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.main {
+  flex: 1;
+  display: grid;
+  align-content: center;
+  gap: 36px;
+}
+
+.headline {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 104px;
+  line-height: 108px;
+  font-weight: 300;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.headlineSm {
+  font-size: 64px;
+  line-height: 72px;
+}
+
+.quote {
+  font-style: italic;
+  font-weight: 400;
+}
+.quote::before {
+  content: "\201C";
+}
+.quote::after {
+  content: "\201D";
+}
+
+.text {
+  max-width: 30ch;
+  margin: 0;
+  font-size: 34px;
+  line-height: 48px;
+  color: var(--soc-muted);
+  text-wrap: pretty;
+}
+
+.figure {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 260px;
+  line-height: 0.9;
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* versus */
+.versus {
+  flex: 1;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 28px;
+}
+
+.half {
+  --soc-muted: var(--ink-muted);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  padding: 56px;
+  background: var(--paper-raised);
+  color: var(--ink);
+  border-radius: 40px;
+}
+.night .half {
+  --soc-muted: var(--night-muted);
+  background: transparent;
+  color: var(--on-night);
+  border: 2px solid var(--line-night);
+}
+.night .built {
+  --soc-muted: var(--ink-muted);
+  background: var(--paper-raised);
+  color: var(--ink);
+  border-color: var(--paper-raised);
+}
+
+.asked {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 60px;
+  line-height: 70px;
+  font-weight: 400;
+  text-wrap: balance;
+}
+
+.built .text {
+  color: inherit;
+}
+
+.status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 64px;
+  padding: 0 32px 0 24px;
+  border-radius: var(--radius-pill);
+  font-size: 28px;
+  font-weight: 600;
+}
+.status-cleared {
+  background: var(--cleared-soft);
+  color: var(--cleared);
+}
+.status-holding {
+  background: var(--holding-soft);
+  color: var(--holding);
+}
+.status-grounded {
+  background: var(--grounded-soft);
+  color: var(--grounded);
+}
+
+/* feature, screen: copy above a window holding real components or a screenshot */
+.showcase {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+
+.copy {
+  display: grid;
+  gap: 20px;
+}
+.kind-feature .headlineSm {
+  font-size: 68px;
+  line-height: 76px;
+}
+.kind-screen .copy {
+  gap: 12px;
+}
+.kind-screen .headlineSm {
+  font-size: 52px;
+  line-height: 60px;
+}
+
+.window {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  overflow: hidden;
+  background: var(--paper-sunk);
+  color: var(--ink);
+  border-radius: 40px;
+  font-family: var(--font-sans);
+}
+.night .window,
+.beacon .window {
+  background: var(--paper);
+}
+.windowImage {
+  padding: 0;
+}
+
+.zoom {
+  width: max-content;
+  max-width: 100%;
+}
+
+.shot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.wordmark {
+  font-family: var(--font-serif);
+  font-size: 48px;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.handle {
+  font-size: 24px;
+  line-height: 32px;
+  color: var(--soc-muted);
+}
+
+/* story: words stay out of the top 250px and bottom 340px, where the app's own UI sits */
+.story {
+  padding: 250px 88px 340px;
+}
+.story .headline {
+  font-size: 120px;
+  line-height: 124px;
+}
+
+/* landscape (1200 × 627): shorter, so tighter */
+.landscape {
+  padding: 64px 72px;
+  gap: 24px;
+}
+.landscape .headline {
+  font-size: 68px;
+  line-height: 74px;
+}
+.landscape .headlineSm {
+  font-size: 44px;
+  line-height: 52px;
+}
+.landscape .text {
+  max-width: 40ch;
+  font-size: 26px;
+  line-height: 36px;
+}
+.landscape .main {
+  gap: 20px;
+}
+.landscape .figure {
+  font-size: 150px;
+}
+.landscape .versus {
+  grid-template-rows: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.landscape .half {
+  gap: 14px;
+  padding: 32px 36px;
+  border-radius: 28px;
+}
+.landscape .asked {
+  font-size: 36px;
+  line-height: 44px;
+}
+.landscape .status {
+  height: 48px;
+  padding: 0 24px 0 18px;
+  font-size: 22px;
+}
+.landscape .wordmark {
+  font-size: 36px;
+}
+.landscape .runway i {
+  width: 32px;
+  height: 8px;
+}
+.landscape .showcase {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 40px;
+}
+.landscape .copy {
+  flex: 0 0 44%;
+  align-content: center;
+  gap: 14px;
+}
+.landscape.kind-feature .headlineSm,
+.landscape.kind-screen .headlineSm {
+  font-size: 42px;
+  line-height: 50px;
+}
+.landscape .window {
+  padding: 24px;
+  border-radius: 28px;
+}

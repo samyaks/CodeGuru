@@ -74,6 +74,36 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+/* ── Takeoff tokens (styles/tokens.css), for screens inside .takeoff ── */
+/* paper, ink and line are defined above for older screens; inside
+   .takeoff, tokens.css points them at the tokens. So do rounded-sm/md/lg
+   and font-sans/serif/mono. Spacing, pill radius and the card shadow have
+   no class: use p-(--space-5), rounded-full, shadow-(--shadow-card). */
+@theme inline {
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-line-strong: var(--line-strong);
+  --color-ink-muted: var(--ink-muted);
+  --color-beacon: var(--beacon);
+  --color-beacon-soft: var(--beacon-soft);
+  --color-on-beacon: var(--on-beacon);
+  --color-night: var(--night);
+  --color-on-night: var(--on-night);
+  --color-night-muted: var(--night-muted);
+  --color-line-night: var(--line-night);
+  --color-cleared: var(--cleared);
+  --color-cleared-soft: var(--cleared-soft);
+  --color-cleared-glow: var(--cleared-glow);
+  --color-holding: var(--holding);
+  --color-holding-soft: var(--holding-soft);
+  --color-holding-glow: var(--holding-glow);
+  --color-grounded: var(--grounded);
+  --color-grounded-soft: var(--grounded-soft);
+  --color-grounded-glow: var(--grounded-glow);
+  --color-focus: var(--focus);
+  --color-title-accent: var(--title-accent);
+}
+
 html {
   color-scheme: light;
   scroll-behavior: smooth;

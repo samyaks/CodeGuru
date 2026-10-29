@@ -1,6 +1,7 @@
-import { Link } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { ArrowLeft, Rocket, Zap } from 'lucide-react';
 import UserMenu from './UserMenu';
+import takeoffStyles from './Header.module.css';
 
 export interface HeaderProps {
   /** Optional back link rendered to the left of the brand mark. */
@@ -26,8 +27,12 @@ export interface HeaderProps {
    *    pill, semantic color tokens. Keep for marketing / list surfaces.
    *  - `'workspace'`: v2 chrome — stone-900 Zap square, stone palette,
    *    white/80 backdrop. Use for product workspace surfaces (project
-   *    detail, security report, takeoff progress, build story). */
-  variant?: 'app' | 'workspace';
+   *    detail, security report, takeoff progress, build story).
+   *  - `'takeoff'`: the design system's chrome (app/client/CLAUDE.md), for
+   *    screens moved over to it. Must sit inside a .takeoff root. The
+   *    wordmark is "Takeoff" in the serif; `title` and `subtitle` are not
+   *    shown, since those screens carry their own page title. */
+  variant?: 'app' | 'workspace' | 'takeoff';
 }
 
 export default function Header({
@@ -38,6 +43,33 @@ export default function Header({
   actions,
   variant = 'app',
 }: HeaderProps) {
+  if (variant === 'takeoff') {
+    return (
+      <header className={takeoffStyles.header}>
+        <div className={takeoffStyles.inner}>
+          <div className={takeoffStyles.left}>
+            {backTo && (
+              <Link to={backTo} aria-label="Back" className={takeoffStyles.back}>
+                <ArrowLeft size={18} />
+              </Link>
+            )}
+            <Link to="/" className={takeoffStyles.wordmark}>
+              Takeoff
+            </Link>
+            {children}
+          </div>
+          <nav className={takeoffStyles.nav}>
+            {actions}
+            <NavLink to="/dashboard" className={takeoffStyles.navLink}>
+              Dashboard
+            </NavLink>
+            <UserMenu variant="takeoff" />
+          </nav>
+        </div>
+      </header>
+    );
+  }
+
   if (variant === 'workspace') {
     return (
       <header className="sticky top-0 z-40 border-b border-stone-200 bg-white/80 backdrop-blur v2-font-sans">

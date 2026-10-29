@@ -1,24 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   FolderGit2,
   FileText,
-  Loader2,
   ExternalLink,
   Plus,
   AlertCircle,
-  RefreshCw,
+  type LucideProps,
 } from 'lucide-react';
 import Header from '../components/Header';
+import { Button, ButtonLink } from '../components/takeoff';
+import { cx } from '../components/takeoff/status';
 import {
   fetchProjects,
   fetchAnalyses,
   fetchReviews,
   type DashboardProject,
 } from '../services/api';
-import { EmptyState, ProjectCard, TabBar } from '../components/v2';
+import { ProjectCard } from './dashboard/ProjectCard';
+import styles from './Dashboard.module.css';
 
-interface Analysis {
+export interface Analysis {
   id: string;
   repo_url: string;
   owner: string;
@@ -28,7 +30,7 @@ interface Analysis {
   created_at: string;
 }
 
-interface Review {
+export interface Review {
   id: string;
   type: string;
   repo_url: string;
@@ -39,40 +41,229 @@ interface Review {
   created_at: string;
 }
 
-type Tab = 'projects' | 'analyses' | 'reviews';
+export type DashboardTab = 'projects' | 'analyses' | 'reviews';
 
-function PrimaryButton({
-  to,
-  children,
+const LEGACY_TABS: { id: DashboardTab; label: string }[] = [
+  { id: 'projects', label: 'Projects' },
+  { id: 'analyses', label: 'Analyses' },
+  { id: 'reviews', label: 'Reviews' },
+];
+
+function Notice({
+  icon: Icon,
+  title,
+  description,
+  action,
 }: {
-  to: string;
-  children: React.ReactNode;
+  icon?: ComponentType<LucideProps>;
+  title: string;
+  description?: string;
+  action?: ReactNode;
 }) {
   return (
-    <Link
-      to={to}
-      className="inline-flex items-center gap-1.5 bg-stone-900 text-stone-50 hover:bg-stone-800 transition-colors rounded px-4 py-2 text-sm font-medium"
-    >
-      {children}
-    </Link>
+    <div className={styles.notice}>
+      {Icon ? <Icon size={24} className={styles.muted} aria-hidden="true" /> : null}
+      <h2 className="type-heading">{title}</h2>
+      {description ? <p className={cx('type-body', styles.muted)}>{description}</p> : null}
+      {action ? <div className={styles.noticeAction}>{action}</div> : null}
+    </div>
   );
 }
 
-function SecondaryButton({
-  onClick,
-  children,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+export interface DashboardViewProps {
+  loading: boolean;
+  legacyMode: boolean;
+  activeTab: DashboardTab;
+  onTabChange: (tab: DashboardTab) => void;
+  onRetry: () => void;
+  projects: DashboardProject[];
+  analyses: Analysis[];
+  reviews: Review[];
+  projectsError: string | null;
+  analysesError: string | null;
+  reviewsError: string | null;
+}
+
+// Everything the dashboard shows, with no data loading, so /design/dashboard
+// can render it with sample projects in development.
+export function DashboardView({
+  loading,
+  legacyMode,
+  activeTab,
+  onTabChange,
+  onRetry,
+  projects,
+  analyses,
+  reviews,
+  projectsError,
+  analysesError,
+  reviewsError,
+}: DashboardViewProps) {
+  const retryButton = (
+    <Button variant="quiet" size="sm" onClick={onRetry}>
+      Try again
+    </Button>
+  );
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
-    >
-      {children}
-    </button>
+    <div className={cx('takeoff', styles.page)}>
+      <Header variant="takeoff" />
+
+      <main className={styles.main}>
+        <div className={styles.head}>
+          <div className={styles.titles}>
+            <p className={cx('type-eyebrow', styles.muted)}>Your work</p>
+            <h1 className="type-display">Dashboard</h1>
+            <p className={cx('type-body', styles.muted)}>
+              {projects.length === 0
+                ? 'No projects yet.'
+                : `${projects.length} project${projects.length === 1 ? '' : 's'} connected.`}
+            </p>
+          </div>
+          <ButtonLink variant="primary" to="/">
+            <Plus size={16} aria-hidden="true" />
+            Analyze new app
+          </ButtonLink>
+        </div>
+
+        {legacyMode && (
+          <div className={styles.tabs} role="tablist" aria-label="Show">
+            {LEGACY_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === t.id}
+                className={cx('type-button', styles.tab)}
+                onClick={() => onTabChange(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {loading && (
+          <p className={cx('type-body', styles.muted, styles.loading)} role="status">
+            Loading your projects…
+          </p>
+        )}
+
+        {/* Projects */}
+        {!loading && activeTab === 'projects' && projectsError && (
+          <Notice
+            icon={AlertCircle}
+            title="Couldn't load projects"
+            description={`${projectsError} Check your connection and try again.`}
+            action={retryButton}
+          />
+        )}
+
+        {!loading && activeTab === 'projects' && !projectsError && projects.length === 0 && (
+          <Notice
+            icon={FolderGit2}
+            title="No projects yet"
+            description="Analyze your first app to get started."
+            action={
+              <ButtonLink variant="quiet" size="sm" to="/">
+                Analyze a repo
+              </ButtonLink>
+            }
+          />
+        )}
+
+        {!loading && activeTab === 'projects' && !projectsError && projects.length > 0 && (
+          <div className={styles.grid}>
+            {projects.map((p) => (
+              <ProjectCard key={p.id} project={p} />
+            ))}
+          </div>
+        )}
+
+        {/* Analyses (legacy only) */}
+        {!loading && legacyMode && activeTab === 'analyses' && analysesError && (
+          <Notice
+            icon={AlertCircle}
+            title="Couldn't load analyses"
+            description={`${analysesError} Check your connection and try again.`}
+            action={retryButton}
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length === 0 && (
+          <Notice
+            icon={FolderGit2}
+            title="No analyses yet"
+            description="Run an analysis on a GitHub repo to see it here."
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length > 0 && (
+          <div className={styles.rows}>
+            {analyses.map((a) => (
+              <Link
+                key={a.id}
+                to={a.status === 'completed' ? `/results/${a.id}` : `/analyze/${a.id}`}
+                className={styles.row}
+              >
+                <div className={styles.rowText}>
+                  <p className={cx('type-body', styles.rowTitle)}>
+                    {a.owner}/{a.repo}
+                  </p>
+                  <p className={cx('type-small', styles.muted)}>
+                    {new Date(a.created_at).toLocaleDateString()} · {a.status}
+                  </p>
+                </div>
+                {a.completion_pct != null && (
+                  <span className={cx('type-body', styles.rowValue)}>{a.completion_pct}%</span>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {/* Reviews (legacy only) */}
+        {!loading && legacyMode && activeTab === 'reviews' && reviewsError && (
+          <Notice
+            icon={AlertCircle}
+            title="Couldn't load reviews"
+            description={`${reviewsError} Check your connection and try again.`}
+            action={retryButton}
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length === 0 && (
+          <Notice
+            icon={FileText}
+            title="No reviews yet"
+            description="Create a code review to see it here."
+          />
+        )}
+
+        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length > 0 && (
+          <div className={styles.rows}>
+            {reviews.map((r) => (
+              <Link
+                key={r.id}
+                to={r.status === 'completed' ? `/review/${r.id}` : `/review/${r.id}/progress`}
+                className={styles.row}
+              >
+                <div className={styles.rowText}>
+                  <p className={cx('type-body', styles.rowTitle)}>
+                    {r.owner}/{r.repo}
+                    {r.pr_number && <span className={styles.muted}> #{r.pr_number}</span>}
+                  </p>
+                  <p className={cx('type-small', styles.muted)}>
+                    {r.type} review · {new Date(r.created_at).toLocaleDateString()} · {r.status}
+                  </p>
+                </div>
+                <ExternalLink size={16} className={styles.muted} aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
 
@@ -87,11 +278,11 @@ export default function Dashboard() {
   const [analysesError, setAnalysesError] = useState<string | null>(null);
   const [reviewsError, setReviewsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('projects');
+  const [tab, setTab] = useState<DashboardTab>('projects');
 
   // Force the projects tab whenever legacy mode is off, even if stale state
   // or a URL hint would have selected analyses/reviews.
-  const activeTab: Tab = legacyMode ? tab : 'projects';
+  const activeTab: DashboardTab = legacyMode ? tab : 'projects';
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -125,180 +316,19 @@ export default function Dashboard() {
     void reload();
   }, [reload]);
 
-  const tabs = legacyMode
-    ? [
-        { id: 'projects', label: 'Projects' },
-        { id: 'analyses', label: 'Analyses' },
-        { id: 'reviews', label: 'Reviews' },
-      ]
-    : [];
-
-  const retryButton = (
-    <SecondaryButton onClick={() => void reload()}>
-      <RefreshCw className="w-3 h-3" />
-      Retry
-    </SecondaryButton>
-  );
-
   return (
-    <div className="min-h-screen bg-stone-50 v2-font-sans">
-      <Header variant="workspace" title="Dashboard" />
-
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="mb-8 flex items-end justify-between flex-wrap gap-4">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-stone-500 mb-2">Your work</p>
-            <h2 className="text-4xl font-bold text-stone-900 tracking-tight v2-font-serif">
-              Dashboard
-            </h2>
-            <p className="text-stone-600 text-sm mt-2">
-              {projects.length === 0
-                ? 'No projects yet.'
-                : `${projects.length} project${projects.length === 1 ? '' : 's'} connected.`}
-            </p>
-          </div>
-          <PrimaryButton to="/">
-            <Plus className="w-4 h-4" />
-            Analyze new app
-          </PrimaryButton>
-        </div>
-
-        {legacyMode && tabs.length > 0 ? (
-          <TabBar
-            tabs={tabs}
-            activeId={activeTab}
-            onChange={(id) => setTab(id as Tab)}
-            className="mb-8"
-          />
-        ) : null}
-
-        {loading && (
-          <div className="flex justify-center py-24">
-            <Loader2 className="w-8 h-8 animate-spin text-stone-400" />
-          </div>
-        )}
-
-        {/* Projects */}
-        {!loading && activeTab === 'projects' && projectsError && (
-          <EmptyState
-            icon={AlertCircle}
-            title="Couldn't load projects"
-            description={`${projectsError} Check your connection and try again.`}
-            action={retryButton}
-          />
-        )}
-
-        {!loading && activeTab === 'projects' && !projectsError && projects.length === 0 && (
-          <EmptyState
-            icon={FolderGit2}
-            title="No projects yet"
-            description="Analyze your first app to get started."
-            action={
-              <PrimaryButton to="/">
-                <Plus className="w-4 h-4" />
-                Analyze a repo
-              </PrimaryButton>
-            }
-          />
-        )}
-
-        {!loading && activeTab === 'projects' && !projectsError && projects.length > 0 && (
-          <div className="grid md:grid-cols-2 gap-5">
-            {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} />
-            ))}
-          </div>
-        )}
-
-        {/* Analyses (legacy only) */}
-        {!loading && legacyMode && activeTab === 'analyses' && analysesError && (
-          <EmptyState
-            icon={AlertCircle}
-            title="Couldn't load analyses"
-            description={`${analysesError} Check your connection and try again.`}
-            action={retryButton}
-          />
-        )}
-
-        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length === 0 && (
-          <EmptyState
-            icon={FolderGit2}
-            title="No analyses yet"
-            description="Run an analysis on a GitHub repo to see it here."
-          />
-        )}
-
-        {!loading && legacyMode && activeTab === 'analyses' && !analysesError && analyses.length > 0 && (
-          <div className="flex flex-col gap-2.5">
-            {analyses.map((a) => (
-              <Link
-                key={a.id}
-                to={a.status === 'completed' ? `/results/${a.id}` : `/analyze/${a.id}`}
-                className="block bg-white border border-stone-200 rounded-lg px-5 py-4 transition-all hover:border-stone-400 hover:shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-900 truncate">
-                      {a.owner}/{a.repo}
-                    </p>
-                    <p className="text-xs text-stone-500 mt-1">
-                      {new Date(a.created_at).toLocaleDateString()} · {a.status}
-                    </p>
-                  </div>
-                  {a.completion_pct != null && (
-                    <span className="text-sm font-semibold text-stone-900 shrink-0">
-                      {a.completion_pct}%
-                    </span>
-                  )}
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-
-        {/* Reviews (legacy only) */}
-        {!loading && legacyMode && activeTab === 'reviews' && reviewsError && (
-          <EmptyState
-            icon={AlertCircle}
-            title="Couldn't load reviews"
-            description={`${reviewsError} Check your connection and try again.`}
-            action={retryButton}
-          />
-        )}
-
-        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length === 0 && (
-          <EmptyState
-            icon={FileText}
-            title="No reviews yet"
-            description="Create a code review to see it here."
-          />
-        )}
-
-        {!loading && legacyMode && activeTab === 'reviews' && !reviewsError && reviews.length > 0 && (
-          <div className="flex flex-col gap-2.5">
-            {reviews.map((r) => (
-              <Link
-                key={r.id}
-                to={r.status === 'completed' ? `/review/${r.id}` : `/review/${r.id}/progress`}
-                className="block bg-white border border-stone-200 rounded-lg px-5 py-4 transition-all hover:border-stone-400 hover:shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-900 truncate">
-                      {r.owner}/{r.repo}
-                      {r.pr_number && <span className="text-stone-500"> #{r.pr_number}</span>}
-                    </p>
-                    <p className="text-xs text-stone-500 mt-1">
-                      {r.type} review · {new Date(r.created_at).toLocaleDateString()} · {r.status}
-                    </p>
-                  </div>
-                  <ExternalLink className="w-4 h-4 text-stone-400 shrink-0" />
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+    <DashboardView
+      loading={loading}
+      legacyMode={legacyMode}
+      activeTab={activeTab}
+      onTabChange={setTab}
+      onRetry={() => void reload()}
+      projects={projects}
+      analyses={analyses}
+      reviews={reviews}
+      projectsError={projectsError}
+      analysesError={analysesError}
+      reviewsError={reviewsError}
+    />
   );
 }
