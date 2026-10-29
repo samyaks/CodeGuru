@@ -11,10 +11,10 @@ Source of truth for what we are building and in what order.
 
 ## Now
 
-- [ ] **Model picker + cost estimate before a scan** — uncommitted on `cursor/analysis-file-ticker`; tests 227/227, typecheck clean. The Read now uses the picked model too. Opus is signed-in only (2026-10-28): the server rejects it with 401 for signed-out scans, the picker shows it locked, and push re-analyses of ownerless projects drop back to the default.
+- [ ] **Model picker + cost estimate before a scan** — [PR #30](https://github.com/samyaks/CodeGuru/pull/30); tests 227/227, typecheck clean. The Read now uses the picked model too. Opus is signed-in only (2026-10-28): the server rejects it with 401 for signed-out scans, the picker shows it locked, and push re-analyses of ownerless projects drop back to the default.
       Done when: the work is merged.
       A per-step model comparison was shelved on 2026-10-23: the wrong output in stored scans came from detection code, not the model.
-- [ ] **Shipped tab: recent commits with summaries** — commit `0e85558`, on the same branch, no PR yet.
+- [ ] **Shipped tab: recent commits with summaries** — commit `0e85558`, in [PR #30](https://github.com/samyaks/CodeGuru/pull/30).
       Done when: merged to `main`.
 - [ ] **Private repos through a GitHub App** — [PR #28](https://github.com/samyaks/CodeGuru/pull/28), draft.
       Done when: app registered, env vars set, migration 025 run, and install → private scan → re-analyze → Shipped tested signed in.
