@@ -20,6 +20,7 @@ function stubModule(absPath, exports) {
 
 const state = {
   synthCalls: [],
+  synthOpts: [],
   synthError: null,
   deriveCalls: [],
   claimUpserts: [],
@@ -27,10 +28,12 @@ const state = {
   nextUpdates: [],
   codeSliceCalls: [],
   pickCalls: [],
+  storedLlmModel: null,
 };
 
 function reset() {
   state.synthCalls = [];
+  state.synthOpts = [];
   state.synthError = null;
   state.deriveCalls = [];
   state.claimUpserts = [];
@@ -38,6 +41,7 @@ function reset() {
   state.nextUpdates = [];
   state.codeSliceCalls = [];
   state.pickCalls = [];
+  state.storedLlmModel = null;
 }
 
 const MAP = { domain: 'Habits', personas: [{ id: 'p0', name: 'Solo improver' }], jobs: [], entities: [] };
@@ -58,7 +62,7 @@ stubModule(require.resolve('../../lib/db'), {
     async findById(id) {
       return {
         id,
-        analysis_data: { fileTree: ['a.js', 'b.js'], gaps: [] },
+        analysis_data: { fileTree: ['a.js', 'b.js'], gaps: [], llmModel: state.storedLlmModel },
         features_summary: 'features',
         description: 'desc',
         stack_info: { framework: 'Express' },
@@ -86,8 +90,9 @@ stubModule(require.resolve('../../lib/db'), {
 });
 
 stubModule(require.resolve('./synthesize-read'), {
-  async synthesizeRead(inputs) {
+  async synthesizeRead(inputs, opts) {
     state.synthCalls.push(inputs);
+    state.synthOpts.push(opts);
     if (state.synthError) throw state.synthError;
     return {
       claims: [
@@ -100,8 +105,8 @@ stubModule(require.resolve('./synthesize-read'), {
 });
 
 stubModule(require.resolve('./next-thing'), {
-  async deriveNextThing(inputs, settledClaims) {
-    state.deriveCalls.push({ inputs, settledClaims });
+  async deriveNextThing(inputs, settledClaims, opts) {
+    state.deriveCalls.push({ inputs, settledClaims, opts });
     return { title: 'T', why: 'W', prompt: 'P', category: 'auth' };
   },
 });
@@ -204,4 +209,35 @@ test('rederiveNext skips the code slice load and updates only next_*', async () 
     { slot: 'objective', text: 'human-corrected objective' },
   ]);
   assert.strictEqual(state.deriveCalls[0].inputs.codeSlice, null);
+});
+
+test('runRead passes an explicit model to both LLM stages', async () => {
+  reset();
+  state.storedLlmModel = { id: 'haiku', model: 'claude-haiku-4-5' };
+
+  await runRead('proj-1', null, { model: 'claude-opus-5-5' });
+
+  assert.strictEqual(state.synthOpts[0].model, 'claude-opus-5-5');
+  assert.strictEqual(state.deriveCalls[0].opts.model, 'claude-opus-5-5');
+});
+
+test('runRead and rederiveNext fall back to the model the project was scanned with', async () => {
+  reset();
+  state.storedLlmModel = { id: 'opus', model: 'claude-opus-5-5' };
+
+  await runRead('proj-1', null);
+  assert.strictEqual(state.synthOpts[0].model, 'claude-opus-5-5');
+  assert.strictEqual(state.deriveCalls[0].opts.model, 'claude-opus-5-5');
+
+  await rederiveNext('proj-1');
+  assert.strictEqual(state.deriveCalls[1].opts.model, 'claude-opus-5-5');
+});
+
+test('runRead leaves the model unset when none was picked or stored', async () => {
+  reset();
+
+  await runRead('proj-1', null);
+
+  assert.strictEqual(state.synthOpts[0].model, undefined);
+  assert.strictEqual(state.deriveCalls[0].opts.model, undefined);
 });

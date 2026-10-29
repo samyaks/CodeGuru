@@ -220,7 +220,7 @@ function remapEntityIdsForPersistence(entities, edges) {
   return { entities: newEntities, edges: newEdges };
 }
 
-async function createProductMap(projectId, analysisId, description, { req } = {}) {
+async function createProductMap(projectId, analysisId, description, { req, model: llmModel } = {}) {
   if (!description || !String(description).trim()) {
     throw AppError.badRequest('description is required');
   }
@@ -235,7 +235,7 @@ async function createProductMap(projectId, analysisId, description, { req } = {}
   const entitiesLogical = extractCodeEntities(codebaseModel);
   const codeContext = summarizeCodeContext(entitiesLogical);
 
-  const intent = await extractProductIntent(description, analysisId, codeContext);
+  const intent = await extractProductIntent(description, analysisId, codeContext, { model: llmModel });
   let { personas, jobs } = remapProductNodes(intent.personas, intent.jobs);
   if (personas.length === 0) {
     personas = [{
@@ -257,7 +257,7 @@ async function createProductMap(projectId, analysisId, description, { req } = {}
     }];
   }
 
-  const edgesLogical = await linkAll(jobs, entitiesLogical, codebaseModel, analysisId);
+  const edgesLogical = await linkAll(jobs, entitiesLogical, codebaseModel, analysisId, { model: llmModel });
   const scores = buildScoresObject(jobs, entitiesLogical, edgesLogical);
   const { entities, edges } = remapEntityIdsForPersistence(entitiesLogical, edgesLogical);
 

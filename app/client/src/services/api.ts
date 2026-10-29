@@ -200,6 +200,11 @@ export interface AnalysisData {
     hasContextMd: boolean;
   };
   fileTree: string[];
+  llmModel?: {
+    id?: string;
+    model: string;
+    label?: string;
+  } | null;
 }
 
 export interface Project {
@@ -318,9 +323,27 @@ function shouldUploadFile(path: string): boolean {
   return true;
 }
 
-export async function startTakeoffUpload(files: File[], projectName: string): Promise<{ projectId: string; slug: string; status: string }> {
+export function summarizeUploadFiles(files: File[]): { fileCount: number; totalBytes: number } {
+  let fileCount = 0;
+  let totalBytes = 0;
+  for (const file of files) {
+    const relativePath = file.webkitRelativePath || file.name;
+    if (!shouldUploadFile(relativePath)) continue;
+    if (file.size > 2 * 1024 * 1024) continue;
+    fileCount += 1;
+    totalBytes += file.size;
+  }
+  return { fileCount, totalBytes };
+}
+
+export async function startTakeoffUpload(
+  files: File[],
+  projectName: string,
+  opts: { model?: string } = {},
+): Promise<{ projectId: string; slug: string; status: string }> {
   const formData = new FormData();
   formData.append('projectName', projectName);
+  if (opts.model) formData.append('model', opts.model);
 
   let count = 0;
   for (const file of files) {
@@ -342,13 +365,79 @@ export async function startTakeoffUpload(files: File[], projectName: string): Pr
   return handleApiResponse<{ projectId: string; slug: string; status: string }>(res);
 }
 
-export async function startTakeoff(repoUrl: string): Promise<{ projectId: string; slug: string; status: string }> {
+export async function startTakeoff(
+  repoUrl: string,
+  opts: { model?: string } = {},
+): Promise<{ projectId: string; slug: string; status: string }> {
   const res = await authFetch(`${API_BASE}/takeoff`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoUrl }),
+    body: JSON.stringify({ repoUrl, model: opts.model }),
   });
   return handleApiResponse<{ projectId: string; slug: string; status: string }>(res);
+}
+
+export interface AnalysisModelEstimate {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  costUsdLow: number;
+  costUsdHigh: number;
+}
+
+export interface AnalysisModelOption {
+  id: string;
+  label: string;
+  tagline: string;
+  description: string;
+  model: string;
+  speed: 'fast' | 'balanced' | 'slow';
+  recommended: boolean;
+  // False when the caller may not pick this model (Opus while signed out).
+  available: boolean;
+  unavailableReason: string | null;
+  estimate?: AnalysisModelEstimate;
+}
+
+export interface AnalysisEstimate {
+  defaultModelId: string;
+  repo: {
+    owner: string;
+    name: string;
+    fullName: string;
+    language: string | null;
+    description: string | null;
+    defaultBranch: string;
+  } | null;
+  corpus: {
+    fileCount: number;
+    treeBytes: number;
+    treeTokens: number;
+    ingestedFiles: number;
+    ingestedTokens: number;
+    truncated: boolean;
+  };
+  models: AnalysisModelOption[];
+}
+
+export async function fetchAnalysisModels(): Promise<{ defaultModelId: string; models: AnalysisModelOption[] }> {
+  const res = await authFetch(`${API_BASE}/takeoff/models`);
+  return handleApiResponse<{ defaultModelId: string; models: AnalysisModelOption[] }>(res);
+}
+
+export async function estimateAnalysis(input: {
+  repoUrl?: string;
+  projectId?: string;
+  fileCount?: number;
+  totalBytes?: number;
+}): Promise<AnalysisEstimate> {
+  const res = await authFetch(`${API_BASE}/takeoff/estimate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return handleApiResponse<AnalysisEstimate>(res);
 }
 
 export async function fetchProject(id: string): Promise<Project> {
@@ -367,9 +456,14 @@ export async function fetchProject(id: string): Promise<Project> {
 // Returns 202 + `{ projectId, status: 'analyzing' }`. The caller is
 // responsible for navigating to `/takeoff/:id` so the SSE progress
 // page can drive the user through the new run.
-export async function reanalyzeProject(id: string): Promise<{ projectId: string; status: string }> {
+export async function reanalyzeProject(
+  id: string,
+  opts: { model?: string } = {},
+): Promise<{ projectId: string; status: string }> {
   const res = await authFetch(`${API_BASE}/takeoff/${id}/reanalyze`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: opts.model }),
   });
   return handleApiResponse<{ projectId: string; status: string }>(res);
 }

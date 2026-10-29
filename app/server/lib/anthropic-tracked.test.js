@@ -29,10 +29,16 @@ test('extractText falls back to content[0].text when no typed text block', () =>
   assert.strictEqual(extractText(resp), 'legacy-shape');
 });
 
-test('estimateCost matches claude-sonnet-5 (intro $2/$10 or std $3/$15)', () => {
+test('estimateCost matches claude-sonnet-5 at $2/$10', () => {
   const cost = estimateCost('claude-sonnet-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 });
-  // Intro through Aug 31 2026 → 12; after → 18
-  assert.ok(cost === 12 || cost === 18, `unexpected sonnet-5 cost ${cost}`);
+  assert.strictEqual(cost, 12);
+});
+
+test('estimateCost prices opus-5-5 at $4/$20, not the older opus-5 / opus-4 buckets', () => {
+  const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+  assert.strictEqual(estimateCost('claude-opus-5-5', usage), 24);
+  assert.strictEqual(estimateCost('claude-opus-5', usage), 30);
+  assert.strictEqual(estimateCost('claude-opus-4-0', usage), 90);
 });
 
 test('estimateCost matches claude-haiku-4-5 at $1/$5 (not retired 3.5 rates)', () => {

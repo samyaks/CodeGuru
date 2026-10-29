@@ -42,7 +42,8 @@ function renderFilesBlock(files) {
     .join('\n\n');
 }
 
-async function describeFeatures(analysisId, codebaseModel) {
+async function describeFeatures(analysisId, codebaseModel, opts = {}) {
+  const llmModel = opts.model || HAIKU_MODEL;
   broadcast(analysisId, {
     type: 'progress',
     phase: 'describing',
@@ -103,7 +104,7 @@ ${keyFiles}`;
     targetPath: null,
     filesUsed,
     params: {
-      model: HAIKU_MODEL,
+      model: llmModel,
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{

@@ -43,3 +43,9 @@ export type { ShareSecurityModalProps } from './ShareSecurityModal';
 
 export { ReanalyzeModal } from './ReanalyzeModal';
 export type { ReanalyzeModalProps } from './ReanalyzeModal';
+
+export { AnalysisModelPicker } from './AnalysisModelPicker';
+export type { AnalysisModelPickerProps } from './AnalysisModelPicker';
+
+export { AnalysisConfirmModal } from './AnalysisConfirmModal';
+export type { AnalysisConfirmModalProps, AnalysisConfirmSource } from './AnalysisConfirmModal';

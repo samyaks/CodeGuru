@@ -1,5 +1,5 @@
 const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
-const { createMessageTracked } = require('../lib/anthropic-tracked');
+const { createMessageTracked, extractText } = require('../lib/anthropic-tracked');
 const { stripJsonFence } = require('./map-extractor');
 
 const LINK_PROMPT = `You are mapping product jobs to code entities.
@@ -84,7 +84,7 @@ function heuristicLink(jobs, entities) {
   return edges;
 }
 
-async function claudeLink(job, entities, codebaseModel, analysisId) {
+async function claudeLink(job, entities, codebaseModel, analysisId, llmModel = CLAUDE_MODEL) {
   const entityList = entities
     .map((e) => `${e.id}: ${e.label || e.key} (${e.type}, status: ${e.status})`)
     .join('\n');
@@ -94,7 +94,7 @@ async function claudeLink(job, entities, codebaseModel, analysisId) {
     analysisId: analysisId || null,
     phase: 'link-job',
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: 1000,
       system: [{ type: 'text', text: LINK_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{
@@ -107,7 +107,7 @@ async function claudeLink(job, entities, codebaseModel, analysisId) {
     },
   });
 
-  const raw = response.content?.[0]?.text || '[]';
+  const raw = extractText(response) || '[]';
   const links = JSON.parse(stripJsonFence(raw));
   if (!Array.isArray(links)) return [];
   const entityIds = new Set(entities.map((e) => e.id));
@@ -214,7 +214,8 @@ function mergeEdges(edgeLists) {
 /**
  * @returns {Promise<Array<{ fromId, toId, type, label, confidence, method }>>}
  */
-async function linkAll(jobs, entities, codebaseModel, analysisId) {
+async function linkAll(jobs, entities, codebaseModel, analysisId, opts = {}) {
+  const llmModel = opts.model || CLAUDE_MODEL;
   const h = heuristicLink(jobs, entities);
   const fileContents = (codebaseModel && codebaseModel.fileContents) || {};
   const code = linkCodeEntities(entities, fileContents);
@@ -229,7 +230,7 @@ async function linkAll(jobs, entities, codebaseModel, analysisId) {
   for (const job of jobs) {
     if ((byJobNeeds.get(job.id) || 0) >= 2) continue;
     try {
-      const more = await claudeLink(job, entities, codebaseModel, analysisId);
+      const more = await claudeLink(job, entities, codebaseModel, analysisId, llmModel);
       aiEdges.push(...more);
     } catch (err) {
       console.warn(`[map-linker] claudeLink failed for job ${job.id}:`, err.message);

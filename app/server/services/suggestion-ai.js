@@ -161,6 +161,7 @@ async function runAISuggestions({
   staticSuggestions,
   featuresSummary,
   tokenBudget = 12000,
+  model: llmModel,
 }) {
   broadcast(projectId, { type: 'progress', phase: 'ai-suggestions', message: 'AI is analyzing your codebase for deeper suggestions...' });
 
@@ -174,7 +175,7 @@ async function runAISuggestions({
       analysisId: projectId,
       phase: 'ai-suggestions',
       params: {
-        model: HAIKU_MODEL,
+        model: llmModel || HAIKU_MODEL,
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],

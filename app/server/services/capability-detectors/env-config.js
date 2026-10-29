@@ -13,6 +13,8 @@
  * documented env keys and ones referenced in code is a Phase 3 task.
  */
 
+const { collectPackageDeps } = require('../../lib/package-manifests');
+
 const NAME = 'envConfig';
 
 // Anchored to the basename: match `.env.example` whether it lives at the
@@ -36,11 +38,6 @@ const ENV_LIB_DEPS = [
 const STRONG_SIGNAL = 0.9;
 const WEAK_SIGNAL = 0.8;
 const LIB_SIGNAL = 0.5;
-
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
 
 function combine(signals) {
   let inv = 1;
@@ -82,20 +79,17 @@ async function run({ files = [], fileContents = {} } = {}) {
 
   const hasExample = !!strongMatch || !!weakMatch;
 
-  const pkg = safeJson(fileContents['package.json']);
-  if (pkg) {
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    const libHits = ENV_LIB_DEPS.filter((name) => deps[name]);
-    if (libHits.length > 0) {
-      signals.push(LIB_SIGNAL);
-      for (const name of libHits) {
-        evidence.push({ file: 'package.json', reason: `declares ${name}` });
-      }
+  const { deps, depFiles } = collectPackageDeps(fileContents);
+  const libHits = ENV_LIB_DEPS.filter((name) => deps[name]);
+  if (libHits.length > 0) {
+    signals.push(LIB_SIGNAL);
+    for (const name of libHits) {
+      evidence.push({ file: depFiles[name], reason: `declares ${name}` });
     }
-    if (deps['zod'] && zodUsedWithProcessEnv(fileContents)) {
-      signals.push(LIB_SIGNAL);
-      evidence.push({ file: 'package.json', reason: 'zod used near process.env' });
-    }
+  }
+  if (deps['zod'] && zodUsedWithProcessEnv(fileContents)) {
+    signals.push(LIB_SIGNAL);
+    evidence.push({ file: depFiles.zod, reason: 'zod used near process.env' });
   }
 
   const confidence = combine(signals);

@@ -198,7 +198,7 @@ Respond with JSON only, no prose, no markdown fences:
  * a failed batch are *not* attempted, so the caller should leave
  * their `v2_job_links` as NULL — that lets the next linker pass retry.
  */
-async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
+async function claudeLinkBatch(gaps, jobs, personasById, projectId, llmModel) {
   const result = new Map(); // gapId → JobLink[]
   const attemptedGapIds = new Set();
 
@@ -226,7 +226,7 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
           // claude-3-5-sonnet-latest was retired by Anthropic; fall
           // back to the canonical CLAUDE_MODEL constant the rest of
           // the app uses. V2_GAP_LINK_MODEL still overrides per-phase.
-          model: process.env.V2_GAP_LINK_MODEL || CLAUDE_MODEL,
+          model: llmModel || process.env.V2_GAP_LINK_MODEL || CLAUDE_MODEL,
           // 25 gaps × up to 3 links ≈ 2.2K tokens of JSON; bump to give
           // a comfortable margin so the response never truncates and
           // dumps the whole batch into the parse-failure / retry path.
@@ -311,7 +311,7 @@ async function claudeLinkBatch(gaps, jobs, personasById, projectId) {
  * Returns a small summary so callers can log progress without re-querying.
  */
 async function linkGapsToJobs(projectId, opts = {}) {
-  const { force = false, useClaude = true } = opts;
+  const { force = false, useClaude = true, model: llmModel } = opts;
 
   const map = await productMap.getMapByProject(projectId);
   if (!map || !map.map) {
@@ -358,7 +358,7 @@ async function linkGapsToJobs(projectId, opts = {}) {
       claudeUsed = true;
       try {
         const { links: claudeLinks, attemptedGapIds } = await claudeLinkBatch(
-          remaining, jobs, personasById, projectId
+          remaining, jobs, personasById, projectId, llmModel
         );
         for (const [gapId, links] of claudeLinks.entries()) {
           linkedById.set(gapId, links);

@@ -16,6 +16,8 @@
  * Legacy gap shape: { exists, hasRoles } — preserved via `extra`.
  */
 
+const { collectPackageDeps } = require('../../lib/package-manifests');
+
 const NAME = 'permissions';
 
 const AUTHZ_DEPS = [
@@ -43,11 +45,6 @@ const PATH_SIGNAL = 0.7;
 const FILE_PER_HIT = 0.7;
 const FILE_CAP = 0.9;
 
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
-
 function combine(signals) {
   let inv = 1;
   for (const s of signals) inv *= (1 - s);
@@ -61,10 +58,8 @@ function capAt(values, perItem, cap) {
 }
 
 function findDepHits(fileContents) {
-  const pkg = safeJson(fileContents['package.json']);
-  if (!pkg) return [];
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-  return AUTHZ_DEPS.filter((name) => deps[name]);
+  const { deps, depFiles } = collectPackageDeps(fileContents);
+  return AUTHZ_DEPS.filter((name) => deps[name]).map((name) => ({ pkg: name, file: depFiles[name] }));
 }
 
 function findPathHits(files) {
@@ -99,8 +94,8 @@ async function run({ files = [], fileContents = {} } = {}) {
   const depHits = findDepHits(fileContents);
   if (depHits.length > 0) {
     signals.push(DEP_SIGNAL);
-    for (const pkg of depHits) {
-      evidence.push({ file: 'package.json', reason: `declares ${pkg}` });
+    for (const hit of depHits) {
+      evidence.push({ file: hit.file, reason: `declares ${hit.pkg}` });
     }
   }
 

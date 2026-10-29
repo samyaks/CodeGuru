@@ -1,6 +1,8 @@
 import type { ReadClaim } from '../../services/readApi';
 import { isUncertain } from './ClaimPhrase';
 
+const GUESSING_PREFIX = /^We're guessing\.\s*/;
+
 function basename(filePath: string): string {
   const parts = filePath.split('/');
   return parts[parts.length - 1] || filePath;
@@ -13,10 +15,14 @@ export default function Marginalia({ claims }: { claims: ReadClaim[] }) {
       {claims.map((claim, i) => {
         const uncertain = isUncertain(claim);
         const settledByYou = claim.status === 'settled' && claim.source === 'human';
-        const noteText = claim.evidence
-          .map((e) => e.note)
-          .filter((n): n is string => !!n)
-          .join(' ');
+        // Distinct notes only: several evidence rows often carry the same
+        // sentence. Reads drafted before the label moved here still start
+        // their note with it, so strip that to avoid printing it twice.
+        const noteText = [...new Set(
+          claim.evidence
+            .map((e) => e.note?.replace(GUESSING_PREFIX, ''))
+            .filter((n): n is string => !!n),
+        )].join(' ');
         const files = [...new Set(
           claim.evidence
             .map((e) => e.filePath)

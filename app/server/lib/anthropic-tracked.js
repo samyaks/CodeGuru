@@ -4,11 +4,13 @@ const { analyses, analysisLlmCalls, analysisEvents } = require('./db');
 // explicit so `claude-sonnet-5` / `claude-haiku-4-5` do not silently fall
 // through to a wrong bucket.
 //
-// Sonnet 5: Anthropic introductory $2/$10 through 2026-08-31, then $3/$15.
+// Opus 5.5: $4/$20. Opus 5: $5/$25. Sonnet 5 / 5.5: $2/$10.
 // Haiku 4.5: $1/$5 (not the retired Haiku 3.5 $0.80/$4 rates).
 const PRICING = {
+  'claude-opus-5-5': { input: 4, output: 20 },
+  'claude-opus-5': { input: 5, output: 25 },
   'claude-opus-4': { input: 15, output: 75 },
-  'claude-sonnet-5': { input: 3, output: 15 },
+  'claude-sonnet-5': { input: 2, output: 10 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-sonnet-4': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 1, output: 5 },
@@ -17,16 +19,6 @@ const PRICING = {
   'claude-3-5-haiku': { input: 0.80, output: 4 },
   default: { input: 3, output: 15 },
 };
-
-/** Sonnet 5 intro window ends 2026-09-01 UTC. */
-const SONNET5_INTRO_ENDS_MS = Date.UTC(2026, 8, 1);
-
-function resolveRate(modelKey) {
-  if (modelKey === 'claude-sonnet-5' && Date.now() < SONNET5_INTRO_ENDS_MS) {
-    return { input: 2, output: 10 };
-  }
-  return PRICING[modelKey] || PRICING.default;
-}
 
 function estimateCost(model, { inputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0, outputTokens = 0 } = {}) {
   const lower = String(model || '').toLowerCase();
@@ -39,7 +31,7 @@ function estimateCost(model, { inputTokens = 0, cacheCreationTokens = 0, cacheRe
       matchedLen = key.length;
     }
   }
-  const rate = matched ? resolveRate(matched) : PRICING.default;
+  const rate = matched ? PRICING[matched] : PRICING.default;
   // Anthropic billing multipliers for prompt-caching buckets:
   //   cache writes  = 1.25x base input rate
   //   cache reads   = 0.10x base input rate
@@ -248,7 +240,6 @@ module.exports = {
   streamMessageTracked,
   extractText,
   estimateCost,
-  resolveRate,
   PRICING,
   getSharedClient,
 };

@@ -235,6 +235,9 @@ function detectorKeyFor(entity) {
  * the `suggestions` table and they don't have a cached `cursor_prompt`
  * (the UI fetches one on demand via `/gaps/:id/prompt`).
  *
+ * One gap per blocking entity: every uncovered job that needs it is listed
+ * on that one card (required_for, affectedJobs, jobLinks).
+ *
  * Dedupe rule (revised after code-review H3):
  *   - Heuristic links carry the entity they were derived from
  *     (`link.entityId`). For those, we suppress only the matching
@@ -299,7 +302,10 @@ function synthesizeMapGaps(productMap, existingGaps, detectorGaps = {}) {
     }
   }
 
-  const synthetic = [];
+  // Group by entity first: one card per blocking entity, listing every
+  // uncovered job that needs it. A card per (job, entity) pair printed the
+  // same "Finish X" once for each job.
+  const byEntity = new Map();
   for (const edge of productMap.edges) {
     if (edge.type !== 'needs') continue;
     // Raw db rows use snake_case; `graphFromDbRow` returns camelCase.
@@ -333,26 +339,32 @@ function synthesizeMapGaps(productMap, existingGaps, detectorGaps = {}) {
     const wildcardKey = `${job.id}::*`;
     if (covered.has(pairKey) || covered.has(wildcardKey)) continue;
 
-    const persona = personasById.get(job.persona_id || job.personaId);
+    if (!byEntity.has(entity.id)) byEntity.set(entity.id, { entity, status, jobs: [] });
+    const group = byEntity.get(entity.id);
+    if (!group.jobs.some((j) => j.id === job.id)) group.jobs.push(job);
+  }
+
+  const synthetic = [];
+  for (const { entity, status, jobs } of byEntity.values()) {
     const entityLabel = entity.label || entity.key || 'Component';
     const partial = status === 'partial' || status === 'stub';
+    const personas = jobs.map((job) => personasById.get(job.persona_id || job.personaId) || null);
+    const personaNames = [...new Set(personas.map((p) => p?.name).filter(Boolean))];
 
     synthetic.push({
       // `map-` prefix is the routing signal: the GET /gaps/:id/prompt
       // endpoint inspects the prefix and generates a prompt on demand
       // (these gaps don't live in the DB, so there's nothing to cache).
-      id: `map-${entity.id}-${job.id}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
+      id: `map-${entity.id}`.replace(/[^a-zA-Z0-9_-]/g, '_'),
       category: 'missing',
       title: partial
         ? `Finish ${entityLabel}`
         : `Build ${entityLabel}`,
-      description: partial
-        ? `${persona?.name || 'Someone'} needs to "${job.title}". ${entityLabel} is partially built — fill in the gaps so this job can be completed end-to-end.`
-        : `${persona?.name || 'Someone'} needs to "${job.title}". ${entityLabel} isn't built yet, so this job is blocked.`,
+      description: describeSyntheticGap(entityLabel, partial, jobs, personas[0]),
       effort: partial ? 'Medium' : 'Large',
       files: undefined,
-      affects: persona?.name ? [persona.name] : undefined,
-      required_for: [job.title],
+      affects: personaNames.length > 0 ? personaNames : undefined,
+      required_for: jobs.map((job) => job.title),
       prompt: null, // generated lazily via /gaps/:id/prompt
       status: 'untriaged',
       verification: null,
@@ -362,24 +374,24 @@ function synthesizeMapGaps(productMap, existingGaps, detectorGaps = {}) {
       affectedFiles: entity.filePath || entity.file_path ? [entity.filePath || entity.file_path] : [],
       rejectedReason: null,
       committedAt: null,
-      jobLinks: [{
+      jobLinks: jobs.map((job, i) => ({
         jobId: job.id,
-        personaId: persona?.id || null,
+        personaId: personas[i]?.id || null,
         confidence: 1,
         reason: `Job "${job.title}" has a needs edge to ${entityLabel}`,
         method: 'synthetic',
         entityId: entity.id,
-      }],
-      affectedJobs: [{
+      })),
+      affectedJobs: jobs.map((job, i) => ({
         jobId: job.id,
         jobTitle: job.title,
-        personaId: persona?.id || null,
-        personaName: persona?.name || null,
-        personaEmoji: persona?.emoji || null,
+        personaId: personas[i]?.id || null,
+        personaName: personas[i]?.name || null,
+        personaEmoji: personas[i]?.emoji || null,
         confidence: 1,
         method: 'synthetic',
         reason: null,
-      }],
+      })),
       // Synthetic map gaps are never security-tagged. Keep the shape
       // consistent with `toGap` so the v2 frontend can rely on these
       // fields existing on every gap rather than guarding undefined.
@@ -390,11 +402,28 @@ function synthesizeMapGaps(productMap, existingGaps, detectorGaps = {}) {
       // Marker so the UI / lazy prompt route can treat these specially.
       source: 'map',
       // Carrying the entity reference makes the prompt route's job easy.
+      // mapJobId is the first job; every job is in jobLinks.
       mapEntityId: entity.id,
-      mapJobId: job.id,
+      mapJobId: jobs[0].id,
     });
   }
   return synthetic;
+}
+
+// One job keeps the persona-led sentence. Several jobs name up to three
+// and count the rest, so a shared blocker reads as one card.
+function describeSyntheticGap(entityLabel, partial, jobs, firstPersona) {
+  if (jobs.length === 1) {
+    const who = firstPersona?.name || 'Someone';
+    return partial
+      ? `${who} needs to "${jobs[0].title}". ${entityLabel} is partially built — fill in the gaps so this job can be completed end-to-end.`
+      : `${who} needs to "${jobs[0].title}". ${entityLabel} isn't built yet, so this job is blocked.`;
+  }
+  const shown = jobs.slice(0, 3).map((job) => `"${job.title}"`).join(', ');
+  const rest = jobs.length > 3 ? ` and ${jobs.length - 3} more` : '';
+  return partial
+    ? `${entityLabel} is partially built, and ${jobs.length} jobs depend on it: ${shown}${rest}. Fill in the gaps so they can be completed end-to-end.`
+    : `${entityLabel} isn't built yet, so ${jobs.length} jobs are blocked: ${shown}${rest}.`;
 }
 
 /** Group an array of `toGap()` results into { broken, missing, infra }. */

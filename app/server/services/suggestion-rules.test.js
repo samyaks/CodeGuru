@@ -71,3 +71,27 @@ test('static suggestions never ship a canned cursor prompt', () => {
     assert.equal(s.cursor_prompt, null, s.title);
   }
 });
+
+function expressFindings(suggestions) {
+  return suggestions
+    .map((s) => s.title)
+    .filter((title) => /helmet|rate limiting/i.test(title));
+}
+
+test('Express rules skip Node apps that are not Express (e.g. Next.js)', () => {
+  const pkg = JSON.stringify({ dependencies: { next: '15.0.0', react: '19.0.0' } });
+  const out = run({ 'package.json': pkg }, { stack: { framework: 'Next.js', runtime: 'node' } });
+  assert.deepEqual(expressFindings(out), []);
+});
+
+test('Express rules still flag an Express app without helmet or rate limiting', () => {
+  const pkg = JSON.stringify({ dependencies: { express: '5.0.0' } });
+  const out = run({ 'package.json': pkg }, { stack: { framework: 'Express', runtime: 'node' } });
+  assert.equal(expressFindings(out).length, 2);
+});
+
+test('Express rules apply when express is a dependency of another framework', () => {
+  const pkg = JSON.stringify({ dependencies: { next: '15.0.0', express: '5.0.0' } });
+  const out = run({ 'package.json': pkg }, { stack: { framework: 'Next.js', runtime: 'node' } });
+  assert.equal(expressFindings(out).length, 2);
+});

@@ -125,6 +125,9 @@ async function loadReadInputs(projectId, { codebaseModel = null, withCodeSlice =
 
   const analysisData = project.analysis_data || {};
   const fileTree = analysisData.fileTree;
+  // Model the scan was run with (set by the takeoff model picker), so a
+  // regenerate or correction re-derive stays on the same model.
+  const llmModel = (analysisData.llmModel && analysisData.llmModel.model) || null;
 
   return {
     projectId,
@@ -143,6 +146,7 @@ async function loadReadInputs(projectId, { codebaseModel = null, withCodeSlice =
     codeSlice,
     settledClaims,
     coreJobCandidate,
+    llmModel,
   };
 }
 
@@ -165,8 +169,10 @@ function toSettledClaims(claimRows) {
  * @param {object} codebaseModel - analyzer output, handed to buildCodeSlice
  *   as an in-memory shortcut; the slice falls back to persisted analysis
  *   state when it's absent (regenerate without a fresh analysis)
+ * @param {object} [opts] - { model } Claude model for both LLM stages;
+ *   falls back to the model the project was last scanned with
  */
-async function runRead(projectId, codebaseModel) {
+async function runRead(projectId, codebaseModel, opts = {}) {
   let inputs;
   try {
     inputs = await loadReadInputs(projectId, { codebaseModel, withCodeSlice: true });
@@ -174,12 +180,13 @@ async function runRead(projectId, codebaseModel) {
     console.error(`[read] input load for ${projectId} failed (aborting read): ${err.message}`);
     return { ran: false };
   }
+  const llmOpts = { model: opts.model || inputs.llmModel || undefined };
 
   // Stage 1: synthesize + persist the three claims.
   let claimsPersisted = 0;
   try {
     const synthesizeRead = loadSynthesizeRead();
-    const { claims } = await synthesizeRead(inputs, {});
+    const { claims } = await synthesizeRead(inputs, llmOpts);
     for (const claim of claims || []) {
       const row = await readClaims.upsertDraft(projectId, claim);
       if (row) claimsPersisted += 1; // null => slot is settled, left untouched
@@ -194,7 +201,7 @@ async function runRead(projectId, codebaseModel) {
   try {
     const claimRows = await readClaims.findByProjectId(projectId);
     const deriveNextThing = loadDeriveNextThing();
-    next = await deriveNextThing(inputs, toSettledClaims(claimRows), {});
+    next = await deriveNextThing(inputs, toSettledClaims(claimRows), llmOpts);
   } catch (err) {
     console.error(`[read] next-thing derivation for ${projectId} failed (non-fatal): ${err.message}`);
   }
@@ -234,7 +241,9 @@ async function rederiveNext(projectId) {
   const inputs = await loadReadInputs(projectId);
   const claimRows = await readClaims.findByProjectId(projectId);
   const deriveNextThing = loadDeriveNextThing();
-  const next = await deriveNextThing(inputs, toSettledClaims(claimRows), {});
+  const next = await deriveNextThing(inputs, toSettledClaims(claimRows), {
+    model: inputs.llmModel || undefined,
+  });
   await projectReads.updateNext(projectId, {
     nextTitle: next.title,
     nextWhy: next.why,
