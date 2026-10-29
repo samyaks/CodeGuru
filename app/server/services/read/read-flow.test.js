@@ -129,7 +129,8 @@ test('full read flow: synthesis -> correction -> conditioned next-thing', async 
   // under the threshold, carrying the structured alternative.
   assert.ok(audience.confidence < UNCERTAIN_THRESHOLD);
   assert.strictEqual(audience.evidence[0].filePath, null);
-  assert.match(audience.evidence[0].note, /guessing/i);
+  assert.match(audience.evidence[0].note, /^Inferred from/);
+  assert.doesNotMatch(audience.evidence[0].note, /guessing/i, 'the UI adds the label');
   assert.ok(audience.alternative);
   assert.strictEqual(audience.alternative.options.length, 2);
   const sharedOption = audience.alternative.options.find((o) => o.id === 'shared');

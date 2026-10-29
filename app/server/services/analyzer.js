@@ -5,6 +5,7 @@ const { estimateTokens, extractSkeleton, inferLanguage, computeDepth } = require
 const { runAllDetectors } = require('./capability-detectors');
 const { computeImportGraph } = require('./import-graph');
 const { extractStructureAnchors } = require('./structure-extractor');
+const { collectPackageDeps } = require('../lib/package-manifests');
 
 // Deterministic structure extraction. Wrapped so a parser failure can never
 // break an analysis — a missing/empty anchor list is always acceptable.
@@ -519,11 +520,11 @@ function detectStack(files, contents) {
   };
 
   const paths = files.map((f) => f.path);
-  const pkg = safeJson(contents['package.json']);
-  const allDeps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {};
+  // Every package.json, so apps kept in a subfolder or monorepo are detected too.
+  const { deps: allDeps, manifests } = collectPackageDeps(contents);
 
   // Runtime
-  if (pkg) stack.runtime = 'node';
+  if (manifests.length > 0) stack.runtime = 'node';
   if (paths.some((p) => p.endsWith('.py') || p === 'requirements.txt' || p === 'pyproject.toml')) {
     stack.runtime = stack.runtime || 'python';
   }
@@ -712,11 +713,6 @@ function detectExistingContext(files) {
     hasClaudeMd: paths.some((p) => /CLAUDE\.md$/i.test(p)),
     hasContextMd: paths.some((p) => p.includes('.context.md')),
   };
-}
-
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
 }
 
 async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId = null) {
@@ -974,6 +970,7 @@ async function analyzeFromFiles(fileEntries, projectName, onProgress, analysisId
 module.exports = {
   analyzeRepo,
   analyzeFromFiles,
+  detectStack,
   shouldSkipFile,
   isArchivedPath,
   parseScanIgnore,

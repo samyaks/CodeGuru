@@ -15,6 +15,8 @@
  * compound but no single weak signal can dominate.
  */
 
+const { collectPackageDeps } = require('../../lib/package-manifests');
+
 const NAME = 'auth';
 
 const JS_AUTH_DEPS = [
@@ -89,11 +91,6 @@ const CALL_SIGNAL_PER_FILE = 0.7;
 const CALL_SIGNAL_CAP = 0.9;
 const DEP_SIGNAL = 0.95;
 
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
-
 function combine(signals) {
   let inv = 1;
   for (const s of signals) inv *= (1 - s);
@@ -108,10 +105,9 @@ function capAt(values, perItem, cap) {
 
 function findDepHits(fileContents) {
   const hits = [];
-  const pkg = safeJson(fileContents['package.json']);
-  const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {};
+  const { deps, depFiles } = collectPackageDeps(fileContents);
   for (const pkgName of JS_AUTH_DEPS) {
-    if (deps[pkgName]) hits.push({ file: 'package.json', pkg: pkgName });
+    if (deps[pkgName]) hits.push({ file: depFiles[pkgName], pkg: pkgName });
   }
 
   const req = fileContents['requirements.txt'];

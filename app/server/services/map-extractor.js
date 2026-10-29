@@ -1,5 +1,5 @@
 const { CLAUDE_MODEL, anthropic } = require('../lib/constants');
-const { createMessageTracked } = require('../lib/anthropic-tracked');
+const { createMessageTracked, extractText } = require('../lib/anthropic-tracked');
 const { AppError } = require('../lib/app-error');
 
 const EXTRACT_PROMPT = `You are a product strategist analyzing an app.
@@ -78,7 +78,8 @@ function summarizeCodeContext(entities, { perTypeCap = 25 } = {}) {
  * @param {string} [codeContext] — optional summary of real code surfaces
  *   (from summarizeCodeContext) to ground persona/job derivation.
  */
-async function extractProductIntent(description, analysisId = null, codeContext = '') {
+async function extractProductIntent(description, analysisId = null, codeContext = '', opts = {}) {
+  const llmModel = opts.model || CLAUDE_MODEL;
   const userContent = codeContext
     ? `App description:\n${description}\n\nActual code surfaces (ground your jobs in these):\n${codeContext}`
     : description;
@@ -88,14 +89,14 @@ async function extractProductIntent(description, analysisId = null, codeContext 
     analysisId: analysisId || null,
     phase: 'extract-intent',
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: 2000,
       system: [{ type: 'text', text: EXTRACT_PROMPT, cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: userContent }],
     },
   });
 
-  const raw = response.content?.[0]?.text || '';
+  const raw = extractText(response);
   let parsed;
   try {
     parsed = JSON.parse(stripJsonFence(raw));

@@ -13,6 +13,8 @@
  * any tests were found (we don't actually measure %), `'none'` otherwise.
  */
 
+const { collectPackageDeps } = require('../../lib/package-manifests');
+
 const NAME = 'testing';
 
 const JS_TEST_DEPS = [
@@ -45,11 +47,6 @@ const DEP_SIGNAL = 0.7;
 const PY_SIGNAL = 0.7;
 const GO_SIGNAL = 0.95;
 
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
-
 function combine(signals) {
   let inv = 1;
   for (const s of signals) inv *= (1 - s);
@@ -76,17 +73,15 @@ function findTestPaths(files) {
 }
 
 function findJsTestDeps(fileContents) {
-  const pkg = safeJson(fileContents['package.json']);
-  if (!pkg) return [];
-  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-  const hits = [];
+  const { deps, depFiles } = collectPackageDeps(fileContents);
+  const names = [];
   for (const name of JS_TEST_DEPS) {
-    if (deps[name]) hits.push(name);
+    if (deps[name]) names.push(name);
   }
   for (const dep of Object.keys(deps)) {
-    if (JS_TEST_DEP_PREFIXES.some((p) => dep.startsWith(p))) hits.push(dep);
+    if (JS_TEST_DEP_PREFIXES.some((p) => dep.startsWith(p))) names.push(dep);
   }
-  return hits;
+  return names.map((name) => ({ pkg: name, file: depFiles[name] }));
 }
 
 function findPythonTestImports(fileContents) {
@@ -127,8 +122,8 @@ async function run({ files = [], fileContents = {} } = {}) {
   const depHits = findJsTestDeps(fileContents);
   if (depHits.length > 0) {
     signals.push(DEP_SIGNAL);
-    for (const pkg of depHits.slice(0, 5)) {
-      evidence.push({ file: 'package.json', reason: `declares ${pkg}` });
+    for (const hit of depHits.slice(0, 5)) {
+      evidence.push({ file: hit.file, reason: `declares ${hit.pkg}` });
     }
   }
 

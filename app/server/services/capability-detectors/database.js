@@ -13,6 +13,8 @@
  * via `extra` so readiness-scorer / suggestion-rules keep working unchanged.
  */
 
+const { collectPackageDeps } = require('../../lib/package-manifests');
+
 const NAME = 'database';
 
 const JS_DB_DEPS = [
@@ -88,11 +90,6 @@ const PATH_CAP = 0.9;
 const CODE_PER_FILE = 0.6;
 const CODE_CAP = 0.9;
 
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
-
 function combine(signals) {
   let inv = 1;
   for (const s of signals) inv *= (1 - s);
@@ -107,10 +104,9 @@ function capAt(values, perItem, cap) {
 
 function findDepHits(fileContents) {
   const hits = [];
-  const pkg = safeJson(fileContents['package.json']);
-  const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {};
+  const { deps, depFiles } = collectPackageDeps(fileContents);
   for (const name of JS_DB_DEPS) {
-    if (deps[name]) hits.push({ file: 'package.json', pkg: name });
+    if (deps[name]) hits.push({ file: depFiles[name], pkg: name });
   }
 
   const req = fileContents['requirements.txt'];

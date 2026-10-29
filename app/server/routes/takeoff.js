@@ -29,6 +29,12 @@ const { seedFromAnalysis } = require('../lib/auto-entries');
 const { checkProjectAccess } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
 const { buildTakeoffCostPlan } = require('../lib/cost-budget');
+const { listAnalysisModels, resolveAnalysisModel } = require('../lib/analysis-models');
+const {
+  estimateForRepo,
+  estimateFromStats,
+  estimateForProject,
+} = require('../services/analysis-estimate');
 const { toCommitSnapshot } = require('../services/dashboard-cards');
 
 const router = express.Router();
@@ -76,6 +82,40 @@ const reanalyzeRateLimit = createRateLimit({
 
 const REANALYZABLE_STATUSES = new Set(['ready', 'live', 'scored', 'failed']);
 
+// Opus is for signed-in users; see lib/analysis-models.
+function requestedLlmModel(req) {
+  return resolveAnalysisModel(req.body && req.body.model, { signedIn: !!req.user });
+}
+
+router.get('/models', asyncHandler(async (req, res) => {
+  res.json(listAnalysisModels({ signedIn: !!req.user }));
+}));
+
+router.post('/estimate', takeoffRateLimit, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const signedIn = !!req.user;
+  if (body.projectId) {
+    const project = await deployments.findById(String(body.projectId));
+    if (!project) throw AppError.notFound('Project not found');
+    checkProjectAccess(project, req);
+    const estimate = await estimateForProject(project, { signedIn });
+    return res.json(estimate);
+  }
+  if (body.repoUrl) {
+    const estimate = await estimateForRepo(body.repoUrl, { signedIn });
+    return res.json(estimate);
+  }
+  if (body.fileCount != null || body.totalBytes != null) {
+    const estimate = await estimateFromStats({
+      fileCount: body.fileCount,
+      treeBytes: body.totalBytes,
+      signedIn,
+    });
+    return res.json(estimate);
+  }
+  throw AppError.badRequest('Provide repoUrl, projectId, or fileCount and totalBytes');
+}));
+
 router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES), asyncHandler(async (req, res) => {
   if (!req.files || req.files.length === 0) {
     throw AppError.badRequest('No files uploaded');
@@ -88,6 +128,7 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
 
   const projectName = req.body.projectName || 'Uploaded Project';
   const userId = req.user?.id || null;
+  const llmChoice = requestedLlmModel(req);
 
   const id = uuidv4();
   let slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + id.slice(0, 6);
@@ -120,7 +161,7 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
     }));
 
   setImmediate(() => {
-    runUploadAnalysis(id, fileEntries, projectName, userId).catch((err) => {
+    runUploadAnalysis(id, fileEntries, projectName, userId, { llmModel: llmChoice.model, llmChoice }).catch((err) => {
       console.error(`runUploadAnalysis ${id} unhandled:`, err);
     });
   });
@@ -131,6 +172,7 @@ router.post('/upload', takeoffRateLimit, upload.array('files', MAX_UPLOAD_FILES)
 router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   const { repoUrl } = req.body;
   if (!repoUrl) throw AppError.badRequest('repoUrl is required');
+  const llmChoice = requestedLlmModel(req);
 
   const validation = validateRepoUrl(repoUrl);
   if (!validation.valid) throw AppError.badRequest(validation.error);
@@ -158,7 +200,7 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
 
   inFlightAnalyses.add(id);
   setImmediate(() => {
-    runTakeoff(id, repoUrl)
+    runTakeoff(id, repoUrl, { llmModel: llmChoice.model, llmChoice })
       .catch((err) => {
         console.error(`runTakeoff ${id} unhandled:`, err);
       })
@@ -184,10 +226,10 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   res.status(201).json({ projectId: id, slug, status: 'pending' });
 }));
 
-async function runTakeoff(id, repoUrl) {
+async function runTakeoff(id, repoUrl, { llmModel, llmChoice } = {}) {
   const label = repoUrl;
   const tTotal = startTimer('takeoff_total', id);
-  console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, timestamp: new Date().toISOString() }));
+  console.log(JSON.stringify({ event: 'takeoff_start', projectId: id, repoUrl, model: llmModel || null, timestamp: new Date().toISOString() }));
   try {
     // Ensure a parent `analyses` row exists so the data-capture FKs resolve.
     // Takeoff reuses the deployments.id for the analyses.id; the capture
@@ -224,7 +266,7 @@ async function runTakeoff(id, repoUrl) {
 
     const currentDeployment = await deployments.findById(id);
     const userId = currentDeployment?.user_id;
-    await runPipeline(id, codebaseModel, userId, label);
+    await runPipeline(id, codebaseModel, userId, label, { llmModel, llmChoice });
 
     try {
       await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
@@ -245,7 +287,7 @@ async function runTakeoff(id, repoUrl) {
   }
 }
 
-async function runUploadAnalysis(id, fileEntries, projectName, userId) {
+async function runUploadAnalysis(id, fileEntries, projectName, userId, { llmModel, llmChoice } = {}) {
   const label = projectName;
   const tTotal = startTimer('upload_analysis_total', id);
   console.log(JSON.stringify({ event: 'upload_analysis_start', projectId: id, projectName, timestamp: new Date().toISOString() }));
@@ -280,7 +322,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
       files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
     });
 
-    await runPipeline(id, codebaseModel, userId, label);
+    await runPipeline(id, codebaseModel, userId, label, { llmModel, llmChoice });
 
     try {
       await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
@@ -301,7 +343,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
   }
 }
 
-async function runPipeline(id, codebaseModel, userId, label) {
+async function runPipeline(id, codebaseModel, userId, label, { llmModel, llmChoice } = {}) {
   const tPipeline = startTimer('pipeline_total', id);
 
   // ── Triage preservation for re-analyses ──────────────────────
@@ -384,6 +426,9 @@ async function runPipeline(id, codebaseModel, userId, label) {
       deployInfo: codebaseModel.deployInfo,
       existingContext: codebaseModel.existingContext,
       fileTree: codebaseModel.fileTree,
+      llmModel: llmChoice
+        ? { id: llmChoice.id, model: llmChoice.model, label: llmChoice.label }
+        : (llmModel ? { model: llmModel } : null),
     },
   });
   tStage1.end();
@@ -392,7 +437,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   const tStage1b = startTimer('stage1b_describe_features', id);
   let featuresSummary = null;
   try {
-    featuresSummary = await describeFeatures(id, codebaseModel);
+    featuresSummary = await describeFeatures(id, codebaseModel, { model: llmModel });
     await deployments.update(id, { features_summary: featuresSummary });
     tStage1b.end({ ok: true, hasSummary: !!featuresSummary });
   } catch (err) {
@@ -572,7 +617,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // still broadcasts `product-map-failed` so the frontend's wait
   // unblocks instead of relying solely on the 60s timeout fallback.
   setImmediate(() => {
-    autoCreateProductMap(id, codebaseModel, featuresSummary, { costPlan }).catch((err) => {
+    autoCreateProductMap(id, codebaseModel, featuresSummary, { costPlan, llmModel }).catch((err) => {
       console.error(`[takeoff] auto product-map for ${id} failed (non-fatal):`, err.message);
       try {
         broadcast(id, { type: 'product-map-failed', error: err.message });
@@ -611,6 +656,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
       staticSuggestions: allStaticSuggestions,
       featuresSummary,
       tokenBudget: costPlan.suggestionTokenBudget,
+      model: llmModel,
     });
     aiSuggestionsCount = aiSuggestions.length;
 
@@ -772,6 +818,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   try {
     const { contextFiles, completionPct } = await generateContextFiles(id, codebaseModel, {
       context: costPlan.context,
+      model: llmModel,
     });
     contextFilesCount = contextFiles.length;
     try {
@@ -805,7 +852,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
   // Claude (it does, on cold maps).
   setImmediate(() => {
     const tStage5 = startTimer('stage5_link_gaps_to_jobs', id);
-    linkGapsToJobs(id, { useClaude: costPlan.useClaudeGapLink }).then((summary) => {
+    linkGapsToJobs(id, { useClaude: costPlan.useClaudeGapLink, model: llmModel }).then((summary) => {
       if (summary.linked > 0 || summary.total > 0) {
         console.log(`[takeoff] gap-job linker for ${id}: ${JSON.stringify(summary)}`);
       }
@@ -827,7 +874,10 @@ async function runPipeline(id, codebaseModel, userId, label) {
   setImmediate(() => {
     runIntentPipeline(id, codebaseModel, {
       maxInvariantJobs: costPlan.maxInvariantJobs,
-      invariantModel: costPlan.invariantModel,
+      // Honor an explicit user-picked model; only auto-degrade to Haiku
+      // when the user didn't choose one.
+      invariantModel: llmModel ? null : costPlan.invariantModel,
+      model: llmModel,
     }).catch((err) => {
       console.error(`[takeoff] intent pipeline for ${id} failed (non-fatal):`, err.message);
     }).then(() => {
@@ -835,7 +885,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
       // map (created earlier in this tail) and the job invariants generated by
       // the intent pipeline above — so it chains after intent settles. It
       // re-reads both from the DB and copes when either is missing.
-      return runRead(id, codebaseModel);
+      return runRead(id, codebaseModel, { model: llmModel });
     }).catch((err) => {
       console.error(`[takeoff] read pipeline for ${id} failed (non-fatal):`, err.message);
     });
@@ -864,7 +914,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
 //   - 'product-map-failed'             on Claude / persistence error
 // The frontend treats ready/skipped/failed as "we're done waiting"
 // and proceeds with whatever data it has.
-async function autoCreateProductMap(projectId, codebaseModel, featuresSummary, { costPlan } = {}) {
+async function autoCreateProductMap(projectId, codebaseModel, featuresSummary, { costPlan, llmModel } = {}) {
   // Don't overwrite an existing map.
   try {
     const existing = await productMapSvc.getMapByProject(projectId);
@@ -898,7 +948,7 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary, {
   try {
     // analyses.id === deployments.id for Takeoff — pass real id so map LLM
     // spend attributes to analysis_llm_calls (never fake map-extract ids).
-    result = await productMapSvc.createProductMap(projectId, projectId, description);
+    result = await productMapSvc.createProductMap(projectId, projectId, description, { model: llmModel });
   } catch (err) {
     console.error(`[takeoff] auto product-map for ${projectId} failed (non-fatal):`, err.message);
     broadcast(projectId, { type: 'product-map-failed', error: err.message });
@@ -917,7 +967,7 @@ async function autoCreateProductMap(projectId, codebaseModel, featuresSummary, {
   // left alone (only `v2_job_links IS NULL` rows are touched).
   const useClaude = !(costPlan && costPlan.useClaudeGapLink === false);
   setImmediate(() => {
-    linkGapsToJobs(projectId, { useClaude }).then((summary) => {
+    linkGapsToJobs(projectId, { useClaude, model: llmModel }).then((summary) => {
       if (summary.linked > 0) {
         console.log(`[takeoff] gap-job linker (post-map) for ${projectId}: ${JSON.stringify(summary)}`);
       }
@@ -999,9 +1049,11 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
   // triggerReanalyzeForProject throws AppError.{badRequest,conflict} for the
   // same gates as the old inline body; asyncHandler propagates them to the
   // shared error middleware so the HTTP shape stays identical.
+  const llmChoice = requestedLlmModel(req);
   const { acceptedStatus } = await triggerReanalyzeForProject(project, {
     reason: 'manual',
     requestUserId: req.user?.id || null,
+    llmChoice,
   });
 
   res.status(202).json({ projectId: project.id, status: acceptedStatus });
@@ -1030,7 +1082,7 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
 // catches same-process double-fires (manual + auto colliding) without
 // hitting the DB; the status check catches cross-restart races where the
 // Set was lost but the row is still in 'analyzing'.
-async function triggerReanalyzeForProject(project, { reason, requestUserId } = {}) {
+async function triggerReanalyzeForProject(project, { reason, requestUserId, llmChoice } = {}) {
   if (typeof project.repo_url !== 'string' || project.repo_url.startsWith('local://')) {
     throw AppError.badRequest(
       'Re-analyze is only available for GitHub-connected projects. ' +
@@ -1046,6 +1098,20 @@ async function triggerReanalyzeForProject(project, { reason, requestUserId } = {
   }
 
   inFlightAnalyses.add(project.id);
+
+  // Push-triggered runs keep the last model. With no request user, an
+  // owned project counts as signed in; an ownerless one drops back from
+  // Opus to the default.
+  let resolvedChoice = llmChoice || null;
+  if (!resolvedChoice) {
+    const prev = project.analysis_data && project.analysis_data.llmModel;
+    const signedIn = !!(requestUserId || project.user_id);
+    try {
+      resolvedChoice = resolveAnalysisModel(prev && (prev.id || prev.model), { signedIn });
+    } catch {
+      resolvedChoice = resolveAnalysisModel(null, { signedIn });
+    }
+  }
 
   // Order matters: status update must commit BEFORE we drop the SSE
   // buffer, so any client that's mid-reconnect doesn't see the stale
@@ -1066,6 +1132,7 @@ async function triggerReanalyzeForProject(project, { reason, requestUserId } = {
     repoUrl: project.repo_url,
     reason: reason || 'unknown',
     userId: requestUserId || null,
+    model: resolvedChoice ? resolvedChoice.model : null,
     timestamp: new Date().toISOString(),
   }));
 
@@ -1074,7 +1141,10 @@ async function triggerReanalyzeForProject(project, { reason, requestUserId } = {
   // settlement (success or failure) to drain queued-during-run requests.
   const completion = new Promise((resolve) => {
     setImmediate(() => {
-      runTakeoff(project.id, project.repo_url)
+      runTakeoff(project.id, project.repo_url, {
+        llmModel: resolvedChoice.model,
+        llmChoice: resolvedChoice,
+      })
         .catch((err) => {
           console.error(`reanalyze runTakeoff ${project.id} unhandled:`, err);
         })

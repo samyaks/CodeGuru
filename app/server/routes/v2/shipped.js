@@ -7,6 +7,7 @@ const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
 const github = require('../../services/github');
 const { processCommit } = require('../../services/v2/shipped-runner');
+const { loadRecentCommits, RECENT_COMMIT_LIMIT } = require('../../services/v2/recent-commits');
 
 const router = express.Router({ mergeParams: true });
 
@@ -69,9 +70,13 @@ function shapeShipped(row) {
 
 router.get('/', readLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
-  const rows = await shippedItems.listByProjectId(req.params.id);
+  const [rows, recentCommits] = await Promise.all([
+    shippedItems.listByProjectId(req.params.id),
+    loadRecentCommits(project, { limit: RECENT_COMMIT_LIMIT }),
+  ]);
   res.json({
     repo: project.owner && project.repo ? `${project.owner}/${project.repo}` : null,
+    recentCommits,
     items: rows.map(shapeShipped),
   });
 }));

@@ -14,6 +14,8 @@
  * confidence/evidence pipeline stays uniform across capabilities.
  */
 
+const { listPackageManifests } = require('../../lib/package-manifests');
+
 const NAME = 'deployment';
 
 const HOSTING_PATTERNS = [
@@ -52,11 +54,6 @@ const PORT_ENV_RE = /\$(?:PORT|\{PORT\})|process\.env\.PORT/;
 const FILE_SIGNAL_PER_FILE = 0.9;
 const FILE_SIGNAL_CAP = 1.0;
 const SCRIPT_SIGNAL = 0.4;
-
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
-}
 
 function combine(signals) {
   let inv = 1;
@@ -100,19 +97,21 @@ async function run({ files = [], fileContents = {} } = {}) {
     }
   }
 
-  const pkg = safeJson(fileContents['package.json']);
-  if (pkg && pkg.scripts && typeof pkg.scripts === 'object') {
+  // One script signal at most, from the first manifest (root first) that has one.
+  for (const { path, pkg } of listPackageManifests(fileContents)) {
+    if (!pkg.scripts || typeof pkg.scripts !== 'object') continue;
     let scriptHit = null;
     if (typeof pkg.scripts.deploy === 'string') {
-      scriptHit = { file: 'package.json', reason: '"deploy" script defined' };
+      scriptHit = { file: path, reason: '"deploy" script defined' };
     } else if (typeof pkg.scripts.start === 'string' && PORT_ENV_RE.test(pkg.scripts.start)) {
-      scriptHit = { file: 'package.json', reason: '"start" script uses $PORT' };
+      scriptHit = { file: path, reason: '"start" script uses $PORT' };
     } else if (typeof pkg.scripts.build === 'string' && ARTIFACT_DIR_RE.test(pkg.scripts.build)) {
-      scriptHit = { file: 'package.json', reason: '"build" script writes to known artifact dir' };
+      scriptHit = { file: path, reason: '"build" script writes to known artifact dir' };
     }
     if (scriptHit) {
       signals.push(SCRIPT_SIGNAL);
       evidence.push(scriptHit);
+      break;
     }
   }
 

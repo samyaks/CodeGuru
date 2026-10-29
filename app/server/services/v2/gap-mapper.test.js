@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { toGap, isCannedCursorPrompt } = require('./gap-mapper');
+const { toGap, isCannedCursorPrompt, synthesizeMapGaps } = require('./gap-mapper');
 
 test('strips canned static cursor prompts so the UI can generate a grounded one', () => {
   const row = {
@@ -56,4 +56,55 @@ test('does not strip AI-generated prompts', () => {
   };
   assert.equal(isCannedCursorPrompt(row), false);
   assert.ok(toGap(row).prompt);
+});
+
+function sharedBlockerMap() {
+  return {
+    personas: [
+      { id: 'p1', name: 'Writer', emoji: '✍️' },
+      { id: 'p2', name: 'Editor', emoji: '🧐' },
+    ],
+    jobs: [
+      { id: 'j1', title: 'Delete a post', persona_id: 'p1' },
+      { id: 'j2', title: 'Clean up drafts', persona_id: 'p1' },
+      { id: 'j3', title: 'Remove spam', persona_id: 'p2' },
+    ],
+    entities: [
+      { id: 'e1', label: 'DELETE /api/posts/[postId]', status: 'partial', file_path: 'app/api/posts/[postId]/route.ts' },
+    ],
+    edges: [
+      { type: 'needs', from_id: 'j1', to_id: 'e1' },
+      { type: 'needs', from_id: 'j2', to_id: 'e1' },
+      { type: 'needs', from_id: 'j3', to_id: 'e1' },
+    ],
+  };
+}
+
+test('synthesizeMapGaps makes one card per blocking entity, listing every job', () => {
+  const gaps = synthesizeMapGaps(sharedBlockerMap(), []);
+  assert.equal(gaps.length, 1);
+  const [gap] = gaps;
+  assert.equal(gap.id, 'map-e1');
+  assert.equal(gap.title, 'Finish DELETE /api/posts/[postId]');
+  assert.deepEqual(gap.required_for, ['Delete a post', 'Clean up drafts', 'Remove spam']);
+  assert.deepEqual(gap.affects, ['Writer', 'Editor']);
+  assert.deepEqual(gap.affectedJobs.map((j) => j.jobId), ['j1', 'j2', 'j3']);
+  assert.deepEqual(gap.jobLinks.map((l) => l.jobId), ['j1', 'j2', 'j3']);
+  assert.match(gap.description, /3 jobs depend on it/);
+});
+
+test('synthesizeMapGaps leaves covered jobs off the card', () => {
+  const existing = [{ jobLinks: [{ jobId: 'j2', entityId: 'e1' }, { jobId: 'j3', entityId: 'e1' }], affectedFiles: [] }];
+  const gaps = synthesizeMapGaps(sharedBlockerMap(), existing);
+  assert.equal(gaps.length, 1);
+  assert.deepEqual(gaps[0].required_for, ['Delete a post']);
+  assert.equal(
+    gaps[0].description,
+    'Writer needs to "Delete a post". DELETE /api/posts/[postId] is partially built — fill in the gaps so this job can be completed end-to-end.',
+  );
+});
+
+test('synthesizeMapGaps drops the card when every job is covered', () => {
+  const existing = [{ jobLinks: ['j1', 'j2', 'j3'].map((jobId) => ({ jobId, entityId: 'e1' })), affectedFiles: [] }];
+  assert.deepEqual(synthesizeMapGaps(sharedBlockerMap(), existing), []);
 });

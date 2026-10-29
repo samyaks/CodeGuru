@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { collectPackageDeps } = require('../lib/package-manifests');
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 
@@ -45,15 +46,13 @@ function makeSuggestion({ type, category, priority, title, description, evidence
   };
 }
 
-function getDeps(fileContents) {
-  const pkg = safeJson(fileContents['package.json']);
-  if (!pkg) return {};
-  return { ...pkg.dependencies, ...pkg.devDependencies };
-}
+const RATE_LIMIT_IMPORT_RE = /(?:require\(\s*|from\s+)['"][^'"]*rate[-_]?limit[^'"]*['"]/i;
 
-function safeJson(str) {
-  if (!str) return null;
-  try { return JSON.parse(str); } catch { return null; }
+// Express-specific rules key on Express itself, not on any Node runtime:
+// a Next.js or SvelteKit app runs on Node but has no Express middleware
+// to add helmet or express-rate-limit to.
+function isExpressApp(stack, deps) {
+  return Boolean((stack.framework && stack.framework.includes('Express')) || deps.express);
 }
 
 function findMainServerFile(structure, fileContents) {
@@ -188,21 +187,21 @@ function ruleEnvInCode({ fileContents }) {
 // ---------------------------------------------------------------------------
 // Rule 3: no-rate-limit — Express app without rate limiting
 // ---------------------------------------------------------------------------
-function ruleNoRateLimit({ stack, fileContents, structure, deps }) {
-  const isExpress = (stack.framework && stack.framework.includes('Express')) || stack.runtime === 'node';
-  if (!isExpress) return null;
+function ruleNoRateLimit({ stack, fileContents, structure, deps, depFiles }) {
+  if (!isExpressApp(stack, deps)) return null;
 
   if (deps['express-rate-limit'] || deps['rate-limiter-flexible']) return null;
 
+  // Any imported module named like a rate limiter counts, including a
+  // hand-written one (`require('./lib/rate-limit')`, `@upstash/ratelimit`).
   for (const content of Object.values(fileContents)) {
-    if (/require\(['"]express-rate-limit['"]\)|from ['"]express-rate-limit['"]/.test(content)) return null;
-    if (/require\(['"]rate-limit['"]\)|from ['"]rate-limit['"]/.test(content)) return null;
+    if (RATE_LIMIT_IMPORT_RE.test(content)) return null;
   }
 
   const mainFile = findMainServerFile(structure, fileContents);
   const evidence = mainFile
     ? [{ file: mainFile, reason: 'Server entry point has no rate limiting middleware' }]
-    : [{ file: 'package.json', reason: 'No rate limiting dependency found' }];
+    : [{ file: depFiles.express || 'package.json', reason: 'No rate limiting dependency found' }];
 
   return makeSuggestion({
     type: 'fix',
@@ -213,16 +212,15 @@ function ruleNoRateLimit({ stack, fileContents, structure, deps }) {
       'Your Express app has no rate limiting. Without it, a single user or bot can spam your API with thousands of requests, causing outages or running up your cloud bill.',
     evidence,
     effort: 'quick',
-    affectedFiles: mainFile ? [mainFile, 'package.json'] : ['package.json'],
+    affectedFiles: mainFile ? [mainFile, depFiles.express || 'package.json'] : [depFiles.express || 'package.json'],
   });
 }
 
 // ---------------------------------------------------------------------------
 // Rule 4: no-helmet — Express app without helmet security headers
 // ---------------------------------------------------------------------------
-function ruleNoHelmet({ stack, fileContents, structure, deps }) {
-  const isExpress = (stack.framework && stack.framework.includes('Express')) || stack.runtime === 'node';
-  if (!isExpress) return null;
+function ruleNoHelmet({ stack, fileContents, structure, deps, depFiles }) {
+  if (!isExpressApp(stack, deps)) return null;
 
   if (deps.helmet) return null;
 
@@ -233,7 +231,7 @@ function ruleNoHelmet({ stack, fileContents, structure, deps }) {
   const mainFile = findMainServerFile(structure, fileContents);
   const evidence = mainFile
     ? [{ file: mainFile, reason: 'Server entry point does not use helmet for security headers' }]
-    : [{ file: 'package.json', reason: 'helmet is not in dependencies' }];
+    : [{ file: depFiles.express || 'package.json', reason: 'helmet is not in dependencies' }];
 
   return makeSuggestion({
     type: 'fix',
@@ -244,7 +242,7 @@ function ruleNoHelmet({ stack, fileContents, structure, deps }) {
       'Your Express app isn\'t using helmet, which sets important HTTP security headers (Content-Security-Policy, X-Frame-Options, etc.). Without these, your app is more vulnerable to XSS, clickjacking, and other common attacks.',
     evidence,
     effort: 'quick',
-    affectedFiles: mainFile ? [mainFile, 'package.json'] : ['package.json'],
+    affectedFiles: mainFile ? [mainFile, depFiles.express || 'package.json'] : [depFiles.express || 'package.json'],
   });
 }
 
@@ -476,8 +474,9 @@ const ALL_RULES = [
 ];
 
 function runStaticSuggestions({ stack, gaps, features, structure, fileContents, fileTree, buildPlan }) {
-  const deps = getDeps(fileContents);
-  const input = { stack, gaps, features, structure, fileContents, fileTree, buildPlan, deps };
+  // Every package.json, so apps kept in a subfolder or monorepo count too.
+  const { deps, depFiles } = collectPackageDeps(fileContents);
+  const input = { stack, gaps, features, structure, fileContents, fileTree, buildPlan, deps, depFiles };
   const results = [];
 
   for (const rule of ALL_RULES) {

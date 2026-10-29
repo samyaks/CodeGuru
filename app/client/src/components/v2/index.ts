@@ -31,8 +31,21 @@ export type {
 export { ShippedItem } from './ShippedItem';
 export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedItem';
 
+export { RecentCommitCard } from './RecentCommitCard';
+export type {
+  RecentCommitCardProps,
+  RecentCommitData,
+  RecentCommitSummarySource,
+} from './RecentCommitCard';
+
 export { ShareSecurityModal } from './ShareSecurityModal';
 export type { ShareSecurityModalProps } from './ShareSecurityModal';
 
 export { ReanalyzeModal } from './ReanalyzeModal';
 export type { ReanalyzeModalProps } from './ReanalyzeModal';
+
+export { AnalysisModelPicker } from './AnalysisModelPicker';
+export type { AnalysisModelPickerProps } from './AnalysisModelPicker';
+
+export { AnalysisConfirmModal } from './AnalysisConfirmModal';
+export type { AnalysisConfirmModalProps, AnalysisConfirmSource } from './AnalysisConfirmModal';

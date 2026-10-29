@@ -1,6 +1,6 @@
 const { broadcast } = require('../lib/sse');
 const { CLAUDE_MODEL, anthropic, truncate } = require('../lib/constants');
-const { createMessageTracked, streamMessageTracked } = require('../lib/anthropic-tracked');
+const { createMessageTracked, streamMessageTracked, extractText } = require('../lib/anthropic-tracked');
 const { selectFilesForPrompt } = require('./file-selector');
 const { analysisFiles } = require('../lib/db');
 const { computeImportGraph } = require('./import-graph');
@@ -281,6 +281,7 @@ async function runDelimitedCall({
   plan,
   send,
   combinedMaxTokens = COMBINED_MAX_TOKENS,
+  llmModel = CLAUDE_MODEL,
 }) {
   const dynamicInstruction = buildDynamicInstructionBlock(plan);
   const finalReminder =
@@ -334,7 +335,7 @@ async function runDelimitedCall({
     targetPath: 'multi',
     filesUsed: [...allFilesUsed],
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: combinedMaxTokens,
       system: COMBINED_SYSTEM_PROMPT,
       messages: [{
@@ -359,6 +360,7 @@ async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
   const send = (data) => broadcast(analysisId, data);
   send({ type: 'progress', phase: 'context-start', message: 'Generating context files...' });
 
+  const llmModel = opts.model || CLAUDE_MODEL;
   const contextOpts = opts.context || {};
   const tokenBudget = Number(contextOpts.tokenBudget) > 0 ? Number(contextOpts.tokenBudget) : 11000;
   const featureDirMax = Number(contextOpts.featureDirMax) > 0 ? Number(contextOpts.featureDirMax) : FEATURE_DIR_MAX;
@@ -394,6 +396,7 @@ async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
       plan,
       send,
       combinedMaxTokens,
+      llmModel,
     });
   } catch (err) {
     console.error(`[context-generator] combined streaming call failed: ${err.message}`);
@@ -418,6 +421,7 @@ async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
           plan: missing,
           send,
           combinedMaxTokens,
+          llmModel,
         });
         for (const [k, v] of retried) sectionsByKey.set(k, v);
       } catch (err) {
@@ -430,7 +434,7 @@ async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
     console.warn(
       '[context-generator] delimited parse produced no sections; falling back to legacy multi-call path',
     );
-    return generateContextFilesLegacy(analysisId, codebaseModel, skeletons);
+    return generateContextFilesLegacy(analysisId, codebaseModel, skeletons, llmModel);
   }
 
   const contextFiles = [];
@@ -456,7 +460,7 @@ async function generateContextFiles(analysisId, codebaseModel, opts = {}) {
 // can degrade over-budget files to their skeleton form. Only invoked if the
 // combined streaming call fails to produce a single parseable section.
 
-async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons = {}) {
+async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons = {}, llmModel = CLAUDE_MODEL) {
   const send = (data) => broadcast(analysisId, data);
   const contextFiles = [];
 
@@ -464,7 +468,7 @@ async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons =
     buildCacheablePrefix(codebaseModel, skeletons);
 
   send({ type: 'progress', phase: 'context-app', message: 'Generating app-level .context.md...' });
-  const appContext = await generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed);
+  const appContext = await generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed, llmModel);
   contextFiles.push({ path: '.context.md', content: appContext, type: 'existing' });
 
   const featureDirs = identifyFeatureDirs(codebaseModel, skeletons);
@@ -479,6 +483,7 @@ async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons =
         cachedFilesUsed,
         appContext,
         skeletons,
+        llmModel,
       );
       if (featureContext) {
         contextFiles.push({ path: `${dir}/.context.md`, content: featureContext, type: 'existing' });
@@ -498,6 +503,7 @@ async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons =
         cacheablePrefix,
         cachedFilesUsed,
         appContext,
+        llmModel,
       );
       contextFiles.push({ path: gap.path, content: gapContext, type: 'gap' });
     } catch (err) {
@@ -510,7 +516,7 @@ async function generateContextFilesLegacy(analysisId, codebaseModel, skeletons =
   return { contextFiles, completionPct };
 }
 
-async function generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed) {
+async function generateAppContextLegacy(analysisId, cacheablePrefix, cachedFilesUsed, llmModel = CLAUDE_MODEL) {
   const dynamicInstruction = `Generate the root .context.md file for this project.
 
 Use the project info, stack, gaps, file tree, and key files above. Produce a comprehensive .context.md that captures the project's purpose, tech stack, current state, and what still needs to be built.`;
@@ -522,7 +528,7 @@ Use the project info, stack, gaps, file tree, and key files above. Produce a com
     targetPath: '.context.md',
     filesUsed: cachedFilesUsed,
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: LEGACY_MAX_TOKENS,
       system: BASE_SYSTEM_PROMPT,
       messages: [{
@@ -542,7 +548,7 @@ Use the project info, stack, gaps, file tree, and key files above. Produce a com
 }
 
 async function generateFeatureContextLegacy(
-  analysisId, model, dirPath, cacheablePrefix, cachedFilesUsed, appContext, skeletons,
+  analysisId, model, dirPath, cacheablePrefix, cachedFilesUsed, appContext, skeletons, llmModel = CLAUDE_MODEL,
 ) {
   const { files: dirFiles } = selectFilesForPrompt({
     fileContents: model.fileContents || {},
@@ -574,7 +580,7 @@ Produce a focused .context.md for this specific module. Include purpose, constra
     targetPath: dirPath,
     filesUsed: [...cachedFilesUsed, ...dirFilesUsed],
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: LEGACY_MAX_TOKENS,
       system: BASE_SYSTEM_PROMPT,
       messages: [{
@@ -588,10 +594,10 @@ Produce a focused .context.md for this specific module. Include purpose, constra
     },
   });
 
-  return response.content?.[0]?.text || '';
+  return extractText(response);
 }
 
-async function generateGapContextLegacy(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext) {
+async function generateGapContextLegacy(analysisId, gap, cacheablePrefix, cachedFilesUsed, appContext, llmModel = CLAUDE_MODEL) {
   const appContextBlock = `## Root .context.md (already generated for this project)\n${truncate(appContext || '', APP_CONTEXT_CACHE_CHARS)}`;
 
   const dynamicInstruction = `This codebase is MISSING: ${gap.name}
@@ -619,7 +625,7 @@ This is a PRESCRIPTIVE spec, not documentation of existing code.`;
     targetPath: gap.path,
     filesUsed: cachedFilesUsed,
     params: {
-      model: CLAUDE_MODEL,
+      model: llmModel,
       max_tokens: LEGACY_MAX_TOKENS,
       system: BASE_SYSTEM_PROMPT,
       messages: [{

@@ -19,7 +19,12 @@ import FaqAccordion from '../components/marketing/FaqAccordion';
 import CtaBand from '../components/marketing/CtaBand';
 import { MARKETING_FAQ, STACK_LOGOS } from '../components/marketing/marketingContent';
 import { useAuth } from '../hooks/useAuth';
-import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
+import { startTakeoff, startTakeoffUpload, fetchMyRepos, summarizeUploadFiles, GitHubRepo } from '../services/api';
+import { AnalysisConfirmModal, type AnalysisConfirmSource } from '../components/v2';
+import {
+  classifyRepoAccessError,
+  repoAccessErrorCopy,
+} from '../lib/repo-access-error';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -64,6 +69,7 @@ export default function Landing() {
   const [repoUrl, setRepoUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmSource, setConfirmSource] = useState<AnalysisConfirmSource | null>(null);
 
   const [mode, setMode] = useState<Mode>(user ? 'picker' : 'connect');
 
@@ -123,15 +129,8 @@ export default function Landing() {
   };
 
   const analyze = async (url: string) => {
-    setLoading(true);
     setError(null);
-    try {
-      const { projectId } = await startTakeoff(url);
-      navigate(`/takeoff/${projectId}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to start analysis');
-      setLoading(false);
-    }
+    setConfirmSource({ kind: 'repo', repoUrl: url, label: url.replace(/^https?:\/\/github\.com\//i, '') });
   };
 
   const selectRepo = (repo: GitHubRepo) => {
@@ -207,17 +206,44 @@ export default function Landing() {
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return;
+    const stats = summarizeUploadFiles(selectedFiles);
+    if (stats.fileCount === 0) {
+      setError('No uploadable source files found in the selected folder');
+      return;
+    }
+    setError(null);
+    setConfirmSource({
+      kind: 'upload',
+      fileCount: stats.fileCount,
+      totalBytes: stats.totalBytes,
+      label: uploadProjectName || 'Uploaded folder',
+    });
+  };
+
+  const handleConfirmAnalysis = async (modelId: string) => {
+    if (!confirmSource) return;
     setLoading(true);
     setError(null);
     try {
-      const { projectId } = await startTakeoffUpload(
-        selectedFiles,
-        uploadProjectName || 'My Project',
-      );
-      navigate(`/takeoff/${projectId}`);
-    } catch (err: any) {
-      setError(err.message || 'Upload failed');
+      if (confirmSource.kind === 'repo') {
+        const { projectId } = await startTakeoff(confirmSource.repoUrl, { model: modelId });
+        navigate(`/takeoff/${projectId}`);
+        return;
+      }
+      if (confirmSource.kind === 'upload') {
+        const { projectId } = await startTakeoffUpload(
+          selectedFiles,
+          uploadProjectName || 'My Project',
+          { model: modelId },
+        );
+        navigate(`/takeoff/${projectId}`);
+        return;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to start analysis';
+      setError(message);
       setLoading(false);
+      throw err;
     }
   };
 
@@ -426,7 +452,7 @@ export default function Landing() {
                   onClick={() => setMode('url')}
                   className="underline underline-offset-[3px] hover:text-stone-700 transition-colors"
                 >
-                  paste a URL
+                  paste a public URL
                 </button>
                 <span className="text-stone-300" aria-hidden>
                   ·
@@ -445,13 +471,37 @@ export default function Landing() {
           {/* ── Paste URL ── */}
           {mode === 'url' && (
             <div className="max-w-[520px] mx-auto text-left">
+              <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-stone-200 bg-stone-50 px-3.5 py-3 text-[13px] text-stone-600 leading-relaxed">
+                <Lock className="w-3.5 h-3.5 text-stone-500 mt-0.5 shrink-0" aria-hidden />
+                <div>
+                  <p className="font-medium text-stone-800">
+                    Public repos only
+                  </p>
+                  <p className="mt-0.5">
+                    Pasting a URL reads the repo anonymously via the GitHub API.
+                    Private repos won&rsquo;t show up — use{' '}
+                    <button
+                      type="button"
+                      onClick={() => setMode(user ? 'picker' : 'connect')}
+                      className="underline underline-offset-2 text-stone-900 hover:text-stone-700"
+                    >
+                      {user ? 'your connected GitHub repos' : 'Connect GitHub'}
+                    </button>
+                    {' '}or upload a folder.
+                  </p>
+                </div>
+              </div>
               <form onSubmit={handleSubmit} className="flex gap-2">
                 <input
                   type="text"
                   value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
+                  onChange={(e) => {
+                    setRepoUrl(e.target.value);
+                    if (error) setError(null);
+                  }}
                   placeholder="https://github.com/owner/repo"
                   disabled={loading}
+                  aria-describedby="paste-url-hint"
                   className="flex-1 px-4 py-3 rounded-lg bg-white border border-stone-200 text-stone-900 text-sm font-mono outline-none focus:border-stone-400 focus:ring-2 focus:ring-stone-100 transition-all shadow-sm"
                 />
                 <PrimaryButton type="submit" disabled={loading || !repoUrl.trim()}>
@@ -465,8 +515,11 @@ export default function Landing() {
                   )}
                 </PrimaryButton>
               </form>
+              <p id="paste-url-hint" className="mt-2 text-[12px] text-stone-500">
+                Format: https://github.com/owner/repo — must be a public repository.
+              </p>
               <div className="mt-3 text-[13px] text-stone-500">
-                Try:
+                Try a public example:
                 {EXAMPLES.map((ex, i) => (
                   <button
                     key={i}
@@ -569,8 +622,33 @@ export default function Landing() {
           )}
 
           {error && (
-            <div className="mt-5 max-w-[520px] mx-auto text-red-700 text-sm bg-red-50 border border-red-200 rounded-lg px-4 py-2 text-left">
-              {error}
+            <div className="mt-5 max-w-[520px] mx-auto text-left rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+              {(() => {
+                const kind = classifyRepoAccessError(error);
+                if (!kind || kind === 'other') {
+                  return <p className="text-red-700 text-sm">{error}</p>;
+                }
+                const copy = repoAccessErrorCopy(kind);
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-semibold text-red-900">{copy.title}</p>
+                    <p className="text-[13px] text-red-800 leading-relaxed">{copy.body}</p>
+                    <p className="text-[11px] text-red-700/80 font-mono break-words">{error}</p>
+                    {(kind === 'private_or_missing' || kind === 'rate_limit') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError(null);
+                          setMode(user ? 'picker' : 'connect');
+                        }}
+                        className="mt-1 text-[13px] font-medium text-red-950 underline underline-offset-2 hover:text-red-800"
+                      >
+                        {user ? 'Pick from my GitHub repos' : 'Connect GitHub'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -627,6 +705,13 @@ export default function Landing() {
           <CtaBand />
         </div>
       </div>
+
+      <AnalysisConfirmModal
+        open={confirmSource != null}
+        source={confirmSource}
+        onClose={() => { if (!loading) setConfirmSource(null); }}
+        onConfirm={handleConfirmAnalysis}
+      />
     </>
   );
 }

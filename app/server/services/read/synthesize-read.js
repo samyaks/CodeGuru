@@ -406,6 +406,8 @@ function resolveAudienceEvidence(claim, map) {
   }
 
   // Otherwise this is an inference from persona/job names alone — say so.
+  // The "We're guessing." label comes from the UI (Marginalia), which shows
+  // it for every claim under the uncertainty threshold.
   const persona =
     personas.find((p) => hints.some((h) => String(p.name || '').toLowerCase().includes(h) || h.includes(String(p.name || '').toLowerCase()))) ||
     personas.find((p) => p.priority === 'high') ||
@@ -419,7 +421,7 @@ function resolveAudienceEvidence(claim, map) {
     {
       filePath: null,
       symbol: null,
-      note: `We're guessing. ${basis} Nothing in the code proves who it's for — but absence isn't proof. Worth your eyes.`,
+      note: `${basis} Nothing in the code proves who it's for — but absence isn't proof. Worth your eyes.`,
     },
   ];
 }
@@ -436,7 +438,8 @@ function resolveAudienceEvidence(claim, map) {
  *                      null or source:'empty' degrades to map-only prompting
  *   settledClaims    - [{ slot, text }] human-settled claims (may be empty)
  *   coreJobCandidate - pickCoreJob output or null
- * @param {object} [opts] - { client } optional Anthropic client override
+ * @param {object} [opts] - { client, model } optional Anthropic client and
+ *   model overrides (model defaults to CLAUDE_MODEL)
  * @returns {Promise<{claims: Array}>} exactly three claims
  *          (slots: objective, audience, core_job)
  */
@@ -455,7 +458,7 @@ async function synthesizeRead(inputs, opts = {}) {
       analysisId: inputs.projectId,
       phase: 'read.synthesize',
       params: {
-        model: CLAUDE_MODEL,
+        model: opts.model || CLAUDE_MODEL,
         max_tokens: MAX_TOKENS,
         system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: userContent }],

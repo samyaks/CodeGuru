@@ -188,7 +188,8 @@ function parseNextThing(rawText) {
  * @param {object} inputs - { projectId, readiness, gaps, securityFindings, stack, map }
  * @param {Array<{slot: string, text: string, source: string}>} settledClaims
  *        current claims including human corrections — they condition the copy
- * @param {object} [opts] - { client } optional Anthropic client override
+ * @param {object} [opts] - { client, model } optional Anthropic client and
+ *   model overrides (model defaults to CLAUDE_MODEL)
  * @returns {Promise<{title: string, why: string, prompt: string, category: string}>}
  */
 async function deriveNextThing(inputs, settledClaims, opts = {}) {
@@ -206,7 +207,7 @@ async function deriveNextThing(inputs, settledClaims, opts = {}) {
       analysisId: inputs.projectId,
       phase: 'read.next',
       params: {
-        model: CLAUDE_MODEL,
+        model: opts.model || CLAUDE_MODEL,
         // The builder prompt alone can run several hundred tokens; 1200 was
         // observed truncating mid-JSON on a real project.
         max_tokens: 2500,

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { reanalyzeProject } from '../../services/api';
 import { ApiError } from '../../lib/api-error';
+import { useAnalysisEstimate } from '../../hooks/useAnalysisEstimate';
+import { AnalysisModelPicker } from './AnalysisModelPicker';
 
 export interface ReanalyzeModalProps {
   open: boolean;
@@ -34,6 +36,10 @@ export function ReanalyzeModal({
 }: ReanalyzeModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The estimate's default is the model this project last ran with.
+  const {
+    models, selectedId, setSelectedId, estimate, estimateLoading, estimateError,
+  } = useAnalysisEstimate(open, { projectId });
 
   // Reset internal state every time the modal re-opens. Otherwise a
   // failed attempt leaves a stale error pinned even after the user
@@ -60,14 +66,14 @@ export function ReanalyzeModal({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await reanalyzeProject(projectId);
+      const result = await reanalyzeProject(projectId, { model: selectedId });
       onTriggered(result.projectId);
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError(err instanceof Error ? err.message : 'Failed to start re-analysis');
       setSubmitting(false);
     }
-  }, [projectId, onTriggered]);
+  }, [projectId, onTriggered, selectedId]);
 
   if (!open) return null;
 
@@ -112,8 +118,19 @@ export function ReanalyzeModal({
         <div className="p-5 space-y-4 text-sm">
           <p className="text-stone-700 leading-relaxed">
             We&rsquo;ll re-scan the repo and refresh the readiness score, stack detection,
-            security report, gaps, and AI-ready context files.
+            security report, gaps, and AI-ready context files. Choose a model and
+            confirm the estimated token usage first.
           </p>
+
+          <AnalysisModelPicker
+            models={models}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            estimate={estimate}
+            estimateLoading={estimateLoading}
+            estimateError={estimateError}
+            disabled={submitting}
+          />
 
           <div className="bg-stone-50 border border-stone-200 rounded-md p-3 space-y-2">
             <p className="text-xs uppercase tracking-wider font-semibold text-stone-700">

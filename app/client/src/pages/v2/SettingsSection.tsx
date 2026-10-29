@@ -118,6 +118,16 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
           {project.framework ? <Row label="Framework" value={project.framework} /> : null}
           {project.deploy_type ? <Row label="Deploy type" value={project.deploy_type} /> : null}
           <Row label="Status" value={project.status} />
+          {project.analysis_data?.llmModel ? (
+            <Row
+              label="Last model"
+              value={
+                project.analysis_data.llmModel.label
+                || project.analysis_data.llmModel.id
+                || project.analysis_data.llmModel.model
+              }
+            />
+          ) : null}
           {project.live_url ? (
             <div className="flex items-baseline justify-between gap-3 py-2 border-b border-stone-100 last:border-b-0">
               <span className="text-xs text-stone-500 uppercase tracking-wider">Live URL</span>
