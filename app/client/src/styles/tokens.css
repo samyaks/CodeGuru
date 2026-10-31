@@ -1,0 +1,162 @@
+/* Takeoff design tokens. Rules: app/client/CLAUDE.md.
+ *
+ * Scoped to `.takeoff`, not :root, while screens move over. Tailwind's own
+ * --radius-sm/md/lg and --font-sans/serif/mono live on :root, so defining
+ * these there would restyle every unmigrated screen (173 `rounded-*` classes
+ * alone). Put `className="takeoff"` on a migrated screen's root, once; when
+ * every screen has moved, these selectors can become :root.
+ *
+ * Theme follows prefers-color-scheme unless data-theme="light" | "dark" is set
+ * on <html>, on the .takeoff root, or on any element inside it.
+ */
+
+/* Same in both themes */
+.takeoff {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+/* Light, the default */
+.takeoff,
+.takeoff [data-theme="light"] {
+  --paper: #f6f3ec;
+  --paper-raised: #fffdf8;
+  --paper-sunk: #ece7dd;
+  --line: #ddd6c9;
+  --line-strong: #8f877c;
+  --ink: #161412;
+  --ink-muted: #665d53;
+  --beacon: #b2452a;
+  --beacon-soft: #f5e0d5;
+  --on-beacon: #ffffff;
+  --night: #1b1917;
+  --on-night: #f1ece3;
+  --night-muted: #a69d92;
+  --line-night: #3a3530;
+  --cleared: #1d5c6c;
+  --cleared-soft: #dcecef;
+  --holding: #80530a;
+  --holding-soft: #f5e8c6;
+  --grounded: #8a2342;
+  --grounded-soft: #f6dce3;
+  --cleared-glow: #7cc4d2;
+  --holding-glow: #e2b25a;
+  --grounded-glow: #ef93ab;
+  --title-accent: #2a4a7f;
+  --shadow-card: 0 1px 2px rgba(22,20,18,0.05), 0 10px 28px rgba(22,20,18,0.06);
+  color-scheme: light;
+}
+
+/* Dark, from the system setting */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .takeoff:not([data-theme="light"]) {
+    --paper: #171513;
+    --paper-raised: #211e1b;
+    --paper-sunk: #100e0d;
+    --line: #38322c;
+    --line-strong: #7d746a;
+    --ink: #f1ece3;
+    --ink-muted: #aaa094;
+    --beacon: #ec8a66;
+    --beacon-soft: #3b1e14;
+    --on-beacon: #1a0f0a;
+    --night: #0b0a09;
+    --on-night: #f1ece3;
+    --night-muted: #a69d92;
+    --line-night: #3a3530;
+    --cleared: #7cc4d2;
+    --cleared-soft: #12313a;
+    --holding: #e2b25a;
+    --holding-soft: #3a2b0e;
+    --grounded: #ef93ab;
+    --grounded-soft: #3f1522;
+    --cleared-glow: #7cc4d2;
+    --holding-glow: #e2b25a;
+    --grounded-glow: #ef93ab;
+    --title-accent: #9db8e8;
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 10px 28px rgba(0,0,0,0.3);
+    color-scheme: dark;
+  }
+}
+
+/* Dark, chosen */
+:root[data-theme="dark"] .takeoff:not([data-theme="light"]),
+.takeoff[data-theme="dark"],
+.takeoff [data-theme="dark"] {
+  --paper: #171513;
+  --paper-raised: #211e1b;
+  --paper-sunk: #100e0d;
+  --line: #38322c;
+  --line-strong: #7d746a;
+  --ink: #f1ece3;
+  --ink-muted: #aaa094;
+  --beacon: #ec8a66;
+  --beacon-soft: #3b1e14;
+  --on-beacon: #1a0f0a;
+  --night: #0b0a09;
+  --on-night: #f1ece3;
+  --night-muted: #a69d92;
+  --line-night: #3a3530;
+  --cleared: #7cc4d2;
+  --cleared-soft: #12313a;
+  --holding: #e2b25a;
+  --holding-soft: #3a2b0e;
+  --grounded: #ef93ab;
+  --grounded-soft: #3f1522;
+  --cleared-glow: #7cc4d2;
+  --holding-glow: #e2b25a;
+  --grounded-glow: #ef93ab;
+  --title-accent: #9db8e8;
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 10px 28px rgba(0,0,0,0.3);
+  color-scheme: dark;
+}
+
+/* Derived values, declared on every themed element so they follow its theme.
+ * paper, ink and line already name older colours in index.css's @theme; here
+ * they point at the tokens, so `bg-paper` etc. are the new colours inside. */
+.takeoff,
+.takeoff [data-theme] {
+  --focus: var(--beacon);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-line: var(--line);
+}
+
+.takeoff {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 24px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.takeoff :focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Type styles */
+.type-display { font-family: var(--font-serif); font-size: 56px; line-height: 60px; font-weight: 300; letter-spacing: -0.01em; }
+.type-title { font-family: var(--font-serif); font-size: 32px; line-height: 38px; font-weight: 400; }
+.type-intent { font-family: var(--font-serif); font-size: 20px; line-height: 30px; font-weight: 400; }
+.type-numeral { font-family: var(--font-serif); font-size: 40px; line-height: 44px; font-weight: 300; font-variant-numeric: tabular-nums; }
+.type-heading { font-family: var(--font-sans); font-size: 17px; line-height: 24px; font-weight: 600; }
+.type-body { font-family: var(--font-sans); font-size: 15px; line-height: 24px; font-weight: 400; }
+.type-small { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 400; }
+.type-eyebrow { font-family: var(--font-sans); font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; }
+.type-button { font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: 0.02em; }
+.type-code { font-family: var(--font-mono); font-size: 13px; line-height: 20px; font-weight: 400; }

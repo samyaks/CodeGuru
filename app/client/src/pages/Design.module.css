@@ -1,0 +1,174 @@
+.page {
+  min-height: 100vh;
+  padding: var(--space-8) var(--space-4);
+}
+
+.inner {
+  display: grid;
+  gap: var(--space-7);
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.header {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.wordmark {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 30px;
+}
+
+.lede {
+  max-width: 640px;
+}
+
+.link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+/* Theme switch: built from tokens, not one of the components. */
+.themes {
+  display: inline-flex;
+  justify-self: start;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.themeOption {
+  position: relative;
+  display: inline-flex;
+}
+
+.themeOption input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.themeOption span {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+}
+
+.themeOption input:checked + span {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.themeOption input:focus-visible {
+  outline: none;
+}
+.themeOption input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.section {
+  display: grid;
+  gap: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.sectionHead {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 640px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+
+.stack {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.column {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 640px;
+}
+
+.narrow {
+  max-width: 360px;
+}
+
+.state {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.nightWell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--night);
+  border-radius: var(--radius-lg);
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-4);
+}
+
+.swatch {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.swatchChip {
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.typeList {
+  display: grid;
+}
+
+.typeRow {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.socialVisual {
+  width: 420px;
+}
+
+.socialVisualNarrow {
+  width: 340px;
+}
