@@ -16,7 +16,8 @@ const { runAISuggestions } = require('../services/suggestion-ai');
 const { runSecurityDetectors, listDetectorNames } = require('../services/security');
 const { applySecurityFindings } = require('../services/security/persist');
 const { computeSecurityScore } = require('../services/security/score');
-const { connectWebhook } = require('../services/github-webhook-manager');
+const { autoConnectWebhook } = require('../services/github-webhook-manager');
+const { resolveRepoAccess, clientForProject } = require('../services/github-access');
 const productMapSvc = require('../services/product-map');
 const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
 const { runIntentPipeline } = require('../services/intent/pipeline');
@@ -135,6 +136,8 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   const validation = validateRepoUrl(repoUrl);
   if (!validation.valid) throw AppError.badRequest(validation.error);
   const { owner, repo } = validation;
+  // Throws (401/403) for a private repo the user hasn't granted the app.
+  const access = await resolveRepoAccess({ userId: req.user?.id || null, owner, repo });
 
   const id = uuidv4();
   await deployments.create({
@@ -155,6 +158,9 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
     slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
     await deployments.update(id, { slug });
   }
+  if (access.installationId) {
+    await deployments.update(id, { github_installation_id: access.installationId });
+  }
 
   inFlightAnalyses.add(id);
   setImmediate(() => {
@@ -167,16 +173,12 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
       });
   });
 
-  // Auto-connect webhook for GitHub-linked projects when the user has a GH token
+  // Auto-connect a per-repo push webhook when the user has a GH token, unless
+  // the GitHub App already delivers this repo's pushes.
   const ghToken = req.cookies?.['gh-provider-token'] || null;
   if (ghToken) {
     setImmediate(() => {
-      connectWebhook({ projectId: id, owner, repo, userToken: ghToken })
-        .then((result) => {
-          if (!result.ok) {
-            console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId: id, reason: result.error }));
-          }
-        })
+      autoConnectWebhook({ projectId: id, owner, repo, userToken: ghToken, installationId: access.installationId })
         .catch((err) => console.warn(`webhook auto-connect ${id}:`, err.message));
     });
   }
@@ -213,10 +215,15 @@ async function runTakeoff(id, repoUrl) {
     await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
+    // Private repos read through the project's GitHub App installation;
+    // everything else uses the server token and must be public.
+    const project = await deployments.findById(id);
+    const gh = clientForProject(project);
+
     const tAnalyze = startTimer('analyze_repo', id);
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    }, id);
+    }, id, { github: gh, publicOnly: !project?.github_installation_id });
     tAnalyze.end({
       files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
       readBytes: codebaseModel?.meta?.ingestedBytes ?? null,
@@ -224,7 +231,7 @@ async function runTakeoff(id, repoUrl) {
 
     const currentDeployment = await deployments.findById(id);
     const userId = currentDeployment?.user_id;
-    await runPipeline(id, codebaseModel, userId, label);
+    await runPipeline(id, codebaseModel, userId, label, { github: gh });
 
     try {
       await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
@@ -301,7 +308,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
   }
 }
 
-async function runPipeline(id, codebaseModel, userId, label) {
+async function runPipeline(id, codebaseModel, userId, label, { github: gh = github } = {}) {
   const tPipeline = startTimer('pipeline_total', id);
 
   // ── Triage preservation for re-analyses ──────────────────────
@@ -352,7 +359,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     && !String(repoUrl).startsWith('local://')
   ) {
     try {
-      const commits = await github.fetchCommits(
+      const commits = await gh.fetchCommits(
         codebaseModel.meta.owner,
         codebaseModel.meta.repo,
         { branch: codebaseModel.meta.defaultBranch || 'main', perPage: 1 }

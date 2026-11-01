@@ -4,6 +4,7 @@ const { analyses, analysisFiles, analysisLlmCalls } = require('../lib/db');
 const { addConnection, broadcast } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
+const { resolveRepoAccess } = require('../services/github-access');
 const { generateContextFiles } = require('../services/context-generator');
 const { describeFeatures } = require('../services/features-describer');
 const { createRateLimit } = require('../lib/rate-limit');
@@ -28,6 +29,7 @@ router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
   const validation = validateRepoUrl(repoUrl);
   if (!validation.valid) throw AppError.badRequest(validation.error);
   const { owner, repo } = validation;
+  const access = await resolveRepoAccess({ userId: req.user?.id || null, owner, repo });
 
   const id = uuidv4();
   await analyses.create({
@@ -41,7 +43,7 @@ router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
   });
 
   setImmediate(() => {
-    runAnalysis(id, repoUrl).catch((err) => {
+    runAnalysis(id, repoUrl, access.client).catch((err) => {
       console.error(`runAnalysis ${id} unhandled:`, err);
     });
   });
@@ -49,14 +51,14 @@ router.post('/', analyzeRateLimit, asyncHandler(async (req, res) => {
   res.status(201).json({ projectId: id, status: 'pending' });
 }));
 
-async function runAnalysis(id, repoUrl) {
+async function runAnalysis(id, repoUrl, githubClient) {
   try {
     await analyses.update(id, { status: 'analyzing' });
     broadcast(id, { type: 'analysis-started', id });
 
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    }, id);
+    }, id, { github: githubClient });
 
     await analyses.update(id, {
       owner: codebaseModel.meta.owner,

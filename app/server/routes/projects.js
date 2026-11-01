@@ -2,7 +2,7 @@ const express = require('express');
 const { deployments, buildEntries, commitReviews, analyses } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const railway = require('@codeguru/railway');
-const github = require('../services/github');
+const { clientForProject } = require('../services/github-access');
 const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../services/github-webhook-manager');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
@@ -64,7 +64,7 @@ router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {
   }
 
   try {
-    const commits = await github.fetchCommits(project.owner, project.repo, {
+    const commits = await clientForProject(project).fetchCommits(project.owner, project.repo, {
       branch: project.branch || 'main',
       perPage: 50,
     });
@@ -81,7 +81,7 @@ router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
 
   checkProjectAccess(project, req);
 
-  const detail = await github.fetchCommitDetail(project.owner, project.repo, req.params.sha);
+  const detail = await clientForProject(project).fetchCommitDetail(project.owner, project.repo, req.params.sha);
   res.json(detail);
 }));
 

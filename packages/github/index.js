@@ -1,19 +1,24 @@
 const GITHUB_API = 'https://api.github.com';
 
-function headers() {
+// `token === undefined` means "use the server's GITHUB_TOKEN"; pass an
+// explicit token (e.g. a GitHub App installation token) to act as that
+// identity instead. `null` sends no Authorization header at all.
+function headers(token) {
   const h = {
     'Accept': 'application/vnd.github.v3+json',
     'User-Agent': 'CodeGuru-Reviewer',
   };
-  if (process.env.GITHUB_TOKEN) {
-    h['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const t = token === undefined ? process.env.GITHUB_TOKEN : token;
+  if (t) {
+    h['Authorization'] = `Bearer ${t}`;
   }
   return h;
 }
 
 async function githubFetch(urlPath, opts = {}) {
+  const { token, ...fetchOpts } = opts;
   const url = urlPath.startsWith('http') ? urlPath : `${GITHUB_API}${urlPath}`;
-  const res = await fetch(url, { headers: { ...headers(), ...opts.headers }, ...opts });
+  const res = await fetch(url, { ...fetchOpts, headers: { ...headers(token), ...fetchOpts.headers } });
 
   const remaining = res.headers.get('x-ratelimit-remaining');
   if (remaining !== null && parseInt(remaining, 10) < 10) {
@@ -23,7 +28,7 @@ async function githubFetch(urlPath, opts = {}) {
   if (!res.ok) {
     const body = await res.text();
     let message = `GitHub API ${res.status}: ${body}`;
-    if (res.status === 404 && !process.env.GITHUB_TOKEN) {
+    if (res.status === 404 && token === undefined && !process.env.GITHUB_TOKEN) {
       message = `Repository not found. If this is a private repo, set GITHUB_TOKEN in .env. If public, you may have hit the unauthenticated rate limit (60 req/hr). Original: ${body}`;
     }
     if (res.status === 403) {
@@ -50,143 +55,172 @@ function parsePRUrl(prUrl) {
   return null;
 }
 
-async function fetchPullRequest(owner, repo, prNumber) {
-  const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
-  return res.json();
-}
-
-async function fetchPRDiff(owner, repo, prNumber) {
-  const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`, {
-    headers: { 'Accept': 'application/vnd.github.v3.diff' },
+/**
+ * Repo-reading API bound to one identity. `createClient()` uses the server's
+ * GITHUB_TOKEN; `createClient({ token })` reads as that token instead (a
+ * GitHub App installation token for private repos). `token` may also be an
+ * async getter, so short-lived tokens are re-resolved on every request.
+ */
+function createClient({ token } = {}) {
+  const request = async (urlPath, opts = {}) => githubFetch(urlPath, {
+    ...opts,
+    token: typeof token === 'function' ? await token() : token,
   });
-  return res.text();
-}
 
-async function fetchPRFiles(owner, repo, prNumber) {
-  const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
-  return res.json();
-}
-
-async function fetchRepoTree(owner, repo, branch = 'main') {
-  const res = await githubFetch(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
-  const data = await res.json();
-  const tree = data.tree || [];
-  if (data.truncated) {
-    tree._truncated = true;
-    console.warn(`GitHub tree for ${owner}/${repo}@${branch} is truncated — results may be incomplete.`);
-  } else {
-    tree._truncated = false;
+  async function fetchPullRequest(owner, repo, prNumber) {
+    const res = await request(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+    return res.json();
   }
-  return tree;
-}
 
-async function fetchFileContent(owner, repo, filePath, ref) {
-  const query = ref ? `?ref=${ref}` : '';
-  const res = await githubFetch(`/repos/${owner}/${repo}/contents/${filePath}${query}`);
-  const data = await res.json();
+  async function fetchPRDiff(owner, repo, prNumber) {
+    const res = await request(`/repos/${owner}/${repo}/pulls/${prNumber}`, {
+      headers: { 'Accept': 'application/vnd.github.v3.diff' },
+    });
+    return res.text();
+  }
 
-  if (data.encoding === 'base64' && data.content) {
+  async function fetchPRFiles(owner, repo, prNumber) {
+    const res = await request(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
+    return res.json();
+  }
+
+  async function fetchRepoTree(owner, repo, branch = 'main') {
+    const res = await request(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
+    const data = await res.json();
+    const tree = data.tree || [];
+    if (data.truncated) {
+      tree._truncated = true;
+      console.warn(`GitHub tree for ${owner}/${repo}@${branch} is truncated — results may be incomplete.`);
+    } else {
+      tree._truncated = false;
+    }
+    return tree;
+  }
+
+  async function fetchFileContent(owner, repo, filePath, ref) {
+    const query = ref ? `?ref=${ref}` : '';
+    const res = await request(`/repos/${owner}/${repo}/contents/${filePath}${query}`);
+    const data = await res.json();
+
+    if (data.encoding === 'base64' && data.content) {
+      return {
+        path: filePath,
+        content: Buffer.from(data.content, 'base64').toString('utf-8'),
+        size: data.size,
+        sha: data.sha,
+      };
+    }
+
+    return { path: filePath, content: null, size: data.size, sha: data.sha };
+  }
+
+  async function fetchRepoMeta(owner, repo) {
+    const res = await request(`/repos/${owner}/${repo}`);
+    return res.json();
+  }
+
+  async function fetchUserRepos(username, { page = 1, perPage = 20 } = {}) {
+    const res = await request(
+      `/users/${username}/repos?sort=updated&direction=desc&per_page=${perPage}&page=${page}&type=all`
+    );
+    return res.json();
+  }
+
+  async function searchRepos(query, { page = 1, perPage = 20 } = {}) {
+    const res = await request(
+      `/search/repositories?q=${encodeURIComponent(query)}&sort=updated&per_page=${perPage}&page=${page}`
+    );
+    return res.json();
+  }
+
+  async function fetchRepoPulls(owner, repo, { state = 'open', page = 1, perPage = 20 } = {}) {
+    const res = await request(
+      `/repos/${owner}/${repo}/pulls?state=${state}&sort=updated&direction=desc&per_page=${perPage}&page=${page}`
+    );
+    return res.json();
+  }
+
+  async function fetchCommits(owner, repo, { branch = 'main', perPage = 50, since = null } = {}) {
+    let url = `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}`;
+    if (since) url += `&since=${since}`;
+
+    const res = await request(url);
+    const commits = await res.json();
+
+    return commits.map((c) => ({
+      sha: c.sha,
+      shortSha: c.sha.slice(0, 7),
+      message: c.commit.message,
+      title: c.commit.message.split('\n')[0].trim(),
+      author: c.commit.author?.name || c.author?.login || 'Unknown',
+      authorLogin: c.author?.login || null,
+      authorAvatar: c.author?.avatar_url || null,
+      date: c.commit.author?.date || c.commit.committer?.date,
+      url: c.html_url,
+    }));
+  }
+
+  async function fetchCommitDetail(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/commits/${sha}`);
+    const data = await res.json();
     return {
-      path: filePath,
-      content: Buffer.from(data.content, 'base64').toString('utf-8'),
-      size: data.size,
       sha: data.sha,
+      files: (data.files || []).map((f) => ({
+        path: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+      })),
+      stats: data.stats,
     };
   }
 
-  return { path: filePath, content: null, size: data.size, sha: data.sha };
-}
+  /**
+   * Full commit payload including per-file patches (for single-commit review).
+   */
+  async function fetchCommitWithPatches(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/commits/${sha}`);
+    const data = await res.json();
+    return {
+      sha: data.sha,
+      message: data.commit?.message || '',
+      title: (data.commit?.message || '').split('\n')[0].trim(),
+      files: (data.files || []).map((f) => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+        patch: f.patch || null,
+      })),
+      stats: data.stats,
+      parents: (data.parents || []).map((p) => p.sha),
+    };
+  }
 
-async function fetchRepoMeta(owner, repo) {
-  const res = await githubFetch(`/repos/${owner}/${repo}`);
-  return res.json();
-}
+  /**
+   * Compare two commits (e.g. before...after from a push). Returns GitHub compare JSON.
+   */
+  async function fetchCompare(owner, repo, base, head) {
+    const basehead = `${base}...${head}`;
+    const res = await request(`/repos/${owner}/${repo}/compare/${basehead}`);
+    return res.json();
+  }
 
-async function fetchUserRepos(username, { page = 1, perPage = 20 } = {}) {
-  const res = await githubFetch(
-    `/users/${username}/repos?sort=updated&direction=desc&per_page=${perPage}&page=${page}&type=all`
-  );
-  return res.json();
-}
-
-async function searchRepos(query, { page = 1, perPage = 20 } = {}) {
-  const res = await githubFetch(
-    `/search/repositories?q=${encodeURIComponent(query)}&sort=updated&per_page=${perPage}&page=${page}`
-  );
-  return res.json();
-}
-
-async function fetchRepoPulls(owner, repo, { state = 'open', page = 1, perPage = 20 } = {}) {
-  const res = await githubFetch(
-    `/repos/${owner}/${repo}/pulls?state=${state}&sort=updated&direction=desc&per_page=${perPage}&page=${page}`
-  );
-  return res.json();
-}
-
-async function fetchCommits(owner, repo, { branch = 'main', perPage = 50, since = null } = {}) {
-  let url = `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}`;
-  if (since) url += `&since=${since}`;
-
-  const res = await githubFetch(url);
-  const commits = await res.json();
-
-  return commits.map((c) => ({
-    sha: c.sha,
-    shortSha: c.sha.slice(0, 7),
-    message: c.commit.message,
-    title: c.commit.message.split('\n')[0].trim(),
-    author: c.commit.author?.name || c.author?.login || 'Unknown',
-    authorLogin: c.author?.login || null,
-    authorAvatar: c.author?.avatar_url || null,
-    date: c.commit.author?.date || c.commit.committer?.date,
-    url: c.html_url,
-  }));
-}
-
-async function fetchCommitDetail(owner, repo, sha) {
-  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`);
-  const data = await res.json();
   return {
-    sha: data.sha,
-    files: (data.files || []).map((f) => ({
-      path: f.filename,
-      status: f.status,
-      additions: f.additions,
-      deletions: f.deletions,
-    })),
-    stats: data.stats,
+    fetchPullRequest,
+    fetchPRDiff,
+    fetchPRFiles,
+    fetchRepoTree,
+    fetchFileContent,
+    fetchRepoMeta,
+    fetchUserRepos,
+    searchRepos,
+    fetchRepoPulls,
+    fetchCommits,
+    fetchCommitDetail,
+    fetchCommitWithPatches,
+    fetchCompare,
   };
-}
-
-/**
- * Full commit payload including per-file patches (for single-commit review).
- */
-async function fetchCommitWithPatches(owner, repo, sha) {
-  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${sha}`);
-  const data = await res.json();
-  return {
-    sha: data.sha,
-    message: data.commit?.message || '',
-    title: (data.commit?.message || '').split('\n')[0].trim(),
-    files: (data.files || []).map((f) => ({
-      filename: f.filename,
-      status: f.status,
-      additions: f.additions || 0,
-      deletions: f.deletions || 0,
-      patch: f.patch || null,
-    })),
-    stats: data.stats,
-    parents: (data.parents || []).map((p) => p.sha),
-  };
-}
-
-/**
- * Compare two commits (e.g. before...after from a push). Returns GitHub compare JSON.
- */
-async function fetchCompare(owner, repo, base, head) {
-  const basehead = `${base}...${head}`;
-  const res = await githubFetch(`/repos/${owner}/${repo}/compare/${basehead}`);
-  return res.json();
 }
 
 /**
@@ -268,19 +302,9 @@ async function deleteRepoWebhook(owner, repo, userToken, hookId) {
 module.exports = {
   parseRepoUrl,
   parsePRUrl,
-  fetchPullRequest,
-  fetchPRDiff,
-  fetchPRFiles,
-  fetchRepoTree,
-  fetchFileContent,
-  fetchRepoMeta,
-  fetchUserRepos,
-  searchRepos,
-  fetchRepoPulls,
-  fetchCommits,
-  fetchCommitDetail,
-  fetchCommitWithPatches,
-  fetchCompare,
+  createClient,
+  // Default client: reads with the server's GITHUB_TOKEN.
+  ...createClient(),
   createRepoWebhook,
   deleteRepoWebhook,
   listRepoWebhooks,
