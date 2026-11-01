@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { AuthContext, useAuthProvider } from './hooks/useAuth';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -21,6 +22,10 @@ import UseCasePage from './pages/marketing/UseCasePage';
 import Demo from './pages/marketing/Demo';
 import GapsIndex from './pages/marketing/GapsIndex';
 import GapExplainerPage from './pages/marketing/GapExplainerPage';
+
+// Design system review pages. Dev only: the imports are dropped from production builds.
+const Design = import.meta.env.DEV ? lazy(() => import('./pages/Design')) : null;
+const DesignDashboard = import.meta.env.DEV ? lazy(() => import('./pages/DesignDashboard')) : null;
 
 // Canonical project surface is The Read; preserve any #tab deep link.
 function NavigateToRead() {
@@ -79,6 +84,12 @@ export default function App() {
 
             {/* v2 (Takeoff) — additive routes, do not affect v1 */}
             <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
+            {Design && (
+              <Route path="/design" element={<Suspense fallback={null}><Design /></Suspense>} />
+            )}
+            {DesignDashboard && (
+              <Route path="/design/dashboard" element={<Suspense fallback={null}><DesignDashboard /></Suspense>} />
+            )}
             {/* Legacy /v2/projects/:id URL — canonical is /read/:id. */}
             <Route path="/v2/projects/:id" element={<NavigateToRead />} />
             <Route path="/v2/projects/:id/security" element={<SecurityReportV2 mode="owner" />} />

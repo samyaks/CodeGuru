@@ -1,0 +1,185 @@
+.roadmap {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.head {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.title {
+  margin: 0;
+  text-wrap: balance;
+}
+
+/* Phones: stages stack along a vertical line. */
+.stages {
+  display: grid;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mark {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-1);
+}
+
+.mark::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: calc(-1 * var(--space-5));
+  left: 7px;
+  border-left: 2px solid var(--line);
+}
+.stage:last-child .mark::before {
+  bottom: 0;
+}
+
+/* The line: solid beacon through Live, dashed beacon through Now, then neutral. */
+.live .mark::before {
+  border-color: var(--beacon);
+}
+.now .mark::before {
+  border-color: var(--beacon);
+  border-style: dashed;
+}
+.later .mark::before {
+  border-style: dashed;
+}
+
+.dot {
+  position: relative;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  background: var(--paper);
+  border: 2px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+.live .dot {
+  background: var(--beacon);
+  border-color: var(--beacon);
+}
+.now .dot {
+  border-color: var(--beacon);
+  outline: 4px solid var(--beacon-soft);
+}
+
+.body {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.stageHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.stageName {
+  color: var(--ink);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.items {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Live and Now: built, so raised. Next and Later: planned, so outlined. */
+.item {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.next .item,
+.later .item {
+  background: transparent;
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.itemTitle {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 24px;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.note {
+  margin: 0;
+}
+
+.empty {
+  padding: var(--space-3) 0;
+  font-style: italic;
+}
+
+/* Wider screens: four columns along a horizontal line. */
+@media (min-width: 720px) {
+  .stages {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+
+  .mark {
+    align-items: center;
+    justify-content: flex-start;
+    height: 16px;
+    padding-top: 0;
+  }
+
+  .mark::before {
+    top: 7px;
+    bottom: auto;
+    left: 0;
+    right: calc(-1 * var(--space-4));
+    border-left: 0;
+    border-top: 2px solid var(--line);
+  }
+  .stage:last-child .mark::before {
+    right: 0;
+  }
+}

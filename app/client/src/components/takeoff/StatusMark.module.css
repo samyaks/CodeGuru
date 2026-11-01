@@ -1,0 +1,39 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cleared {
+  background: var(--cleared-soft);
+  color: var(--cleared);
+}
+.holding {
+  background: var(--holding-soft);
+  color: var(--holding);
+}
+.grounded {
+  background: var(--grounded-soft);
+  color: var(--grounded);
+}
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hint {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink-muted);
+}

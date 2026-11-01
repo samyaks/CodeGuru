@@ -1,0 +1,126 @@
+.page {
+  min-height: 100vh;
+}
+
+.main {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-4) var(--space-8);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.titles {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+.loading {
+  padding: var(--space-8) 0;
+  text-align: center;
+}
+
+.grid {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.notice {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.noticeAction {
+  margin-top: var(--space-2);
+}
+
+/* Legacy mode (?legacy=true) only. */
+.tabs {
+  display: inline-flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-6);
+  padding: var(--space-1);
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+}
+
+.tab {
+  height: 36px;
+  padding: 0 var(--space-4);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.tab[aria-selected="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.rows {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  color: var(--ink);
+  text-decoration: none;
+}
+.row:hover {
+  border-color: var(--line-strong);
+}
+
+.rowText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowValue {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 768px) {
+  .main {
+    padding-inline: var(--space-6);
+  }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

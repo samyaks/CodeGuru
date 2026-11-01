@@ -1,0 +1,96 @@
+/* The `takeoff` variant of UserMenu. Tokens come from the .takeoff root. */
+
+.signIn,
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.signIn:hover,
+.trigger:hover {
+  color: var(--ink);
+}
+
+.avatar,
+.initial {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+}
+
+.avatar {
+  border: 1px solid var(--line);
+}
+
+.initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name {
+  display: none;
+}
+@media (min-width: 640px) {
+  .name {
+    display: inline;
+  }
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  width: 224px;
+  margin-top: var(--space-2);
+  padding: var(--space-1) 0;
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.email {
+  padding: var(--space-2) var(--space-3);
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.item:hover {
+  background: var(--paper-sunk);
+}

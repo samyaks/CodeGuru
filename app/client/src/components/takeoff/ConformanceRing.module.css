@@ -1,0 +1,76 @@
+.ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+/* Start at 12 o'clock. */
+.ring svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.track {
+  fill: none;
+  stroke: var(--paper-sunk);
+}
+
+.arc {
+  fill: none;
+  stroke: var(--beacon);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.knobTurn {
+  transition: transform 0.6s ease;
+}
+
+.knob {
+  fill: var(--paper-raised);
+  stroke: var(--beacon);
+  stroke-width: 3;
+}
+
+.middle {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: calc(var(--ring-num) * 0.12);
+  text-align: center;
+}
+
+.count {
+  font-family: var(--font-serif);
+  font-size: var(--ring-num);
+  line-height: 1.05;
+  font-weight: 300;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.label {
+  margin: 0;
+  max-width: calc(var(--ring-inner) * 0.8);
+  font-size: var(--ring-label);
+  line-height: 1.35;
+  letter-spacing: 0.14em;
+  color: var(--ink-muted);
+  text-wrap: balance;
+}
+
+.text {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arc,
+  .knobTurn {
+    transition: none;
+  }
+}
