@@ -27,7 +27,7 @@ The production system is a **Node.js/Express API** serving a **React + TypeScrip
 | **GitHub integration** | GitHub REST API | Token optional (60 req/hr anon, 5000/hr with token) |
 | **Real-time** | Server-Sent Events (SSE) | Custom in-memory broadcaster |
 | **Monorepo** | npm workspaces | `packages/*` + `app` |
-| **CI/CD** | GitHub Actions | `ci.yml` (build+test), `deploy.yml` (Railway via `@railway/cli`) |
+| **CI/CD** | GitHub Actions + Railway GitHub integration | `ci.yml` (build+test on push/PR); production deploys on push to `main` via Railway dashboard |
 | **Containerization** | Docker | Multi-stage Dockerfile, `docker-compose.yml` |
 | **Hosting** | Railway | `railway.toml` with healthcheck |
 
@@ -294,7 +294,7 @@ Multi-stage `Dockerfile`:
 #### GitHub Actions CI
 
 - **`ci.yml`:** Node 20, `npm ci`, TypeScript check, client build, require-test server routes, Docker build + smoke test on `/health`
-- **`deploy.yml`:** Build + typecheck, then `railway up --service codeguru` using the `RAILWAY_TOKEN` GitHub secret
+- **Production deploy:** Railway’s GitHub app watches `main` (see `railway.toml`); no GitHub Actions deploy job
 
 #### Environment Variables
 

@@ -31,6 +31,13 @@ export type {
 export { ShippedItem } from './ShippedItem';
 export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedItem';
 
+export { RecentCommitCard } from './RecentCommitCard';
+export type {
+  RecentCommitCardProps,
+  RecentCommitData,
+  RecentCommitSummarySource,
+} from './RecentCommitCard';
+
 export { ShareSecurityModal } from './ShareSecurityModal';
 export type { ShareSecurityModalProps } from './ShareSecurityModal';
 
