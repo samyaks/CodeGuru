@@ -298,51 +298,60 @@ export function IntentStatementCard({
               </div>
             ) : null}
 
-            <div className="flex items-center gap-1 flex-wrap">
-              {isRejected ? (
-                <button
-                  type="button"
-                  onClick={() => onRestore?.(statement.id)}
-                  disabled={busy}
-                  aria-label="Restore statement"
-                  className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" /> Restore
-                </button>
-              ) : (
-                <>
-                  {!isConfirmed ? (
-                    <button
-                      type="button"
-                      onClick={() => onAccept?.(statement.id)}
-                      disabled={busy}
-                      aria-label="Accept statement"
-                      className="flex items-center gap-2 px-4 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
-                    >
-                      <Check className="w-4 h-4" /> Accept
-                    </button>
-                  ) : null}
+            {/* Each control renders only when its handler is supplied, so a
+                read-only parent (signed-out visitor) gets a card with no
+                actions rather than buttons that silently do nothing. */}
+            {(isRejected ? onRestore : (onAccept || onEdit || onReject)) ? (
+              <div className="flex items-center gap-1 flex-wrap">
+                {isRejected ? (
                   <button
                     type="button"
-                    onClick={openEditor}
+                    onClick={() => onRestore?.(statement.id)}
                     disabled={busy}
-                    aria-label="Edit statement"
+                    aria-label="Restore statement"
                     className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
                   >
-                    <Pencil className="w-4 h-4" /> Edit
+                    <RotateCcw className="w-4 h-4" /> Restore
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onReject?.(statement.id)}
-                    disabled={busy}
-                    aria-label="Reject statement"
-                    className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
-                  >
-                    <X className="w-4 h-4" /> Reject
-                  </button>
-                </>
-              )}
-            </div>
+                ) : (
+                  <>
+                    {!isConfirmed && onAccept ? (
+                      <button
+                        type="button"
+                        onClick={() => onAccept(statement.id)}
+                        disabled={busy}
+                        aria-label="Accept statement"
+                        className="flex items-center gap-2 px-4 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Check className="w-4 h-4" /> Accept
+                      </button>
+                    ) : null}
+                    {onEdit ? (
+                      <button
+                        type="button"
+                        onClick={openEditor}
+                        disabled={busy}
+                        aria-label="Edit statement"
+                        className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <Pencil className="w-4 h-4" /> Edit
+                      </button>
+                    ) : null}
+                    {onReject ? (
+                      <button
+                        type="button"
+                        onClick={() => onReject(statement.id)}
+                        disabled={busy}
+                        aria-label="Reject statement"
+                        className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+                      >
+                        <X className="w-4 h-4" /> Reject
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            ) : null}
           </>
         )}
       </div>

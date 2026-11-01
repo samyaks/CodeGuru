@@ -87,6 +87,10 @@
 .read-page .editable:hover { background-size: 100% 100%; }
 .read-page .editable:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; border-radius: 2px; }
 .read-page .editable.settled { background: none; border-bottom: none; }
+/* read-only visitors: keep the "we're unsure" wash, lose the click affordance */
+.read-page .editable.static { cursor: default; }
+.read-page .editable.static:hover { background-size: 100% 42%; }
+.read-page .editable.static::after { content: none; }
 .read-page .editable.settled.underlined { text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 5px; text-decoration-thickness: 1px; }
 
 /* confident-but-still-editable claims: quiet dotted underline, pencil on hover */
@@ -175,6 +179,13 @@
 
 /* gentle inline notices (401s, save failures) */
 .read-page .gentle-note { font-style: italic; color: var(--mark); font-size: 14.5px; margin: 14px 0 0; }
+
+/* signed-out visitors: one quiet line under the rules, no owner controls */
+.read-page .visitor-note { font-style: italic; color: var(--ink-soft); font-size: 14px; margin: 12px 0 0; }
+.read-page .visitor-note .link { font-size: 14px; }
+
+/* the "then" / "and after that" hand-offs between tabs */
+.read-page .next .link { margin-top: 4px; }
 
 @media (max-width: 860px) {
   .read-page .read { grid-template-columns: 1fr; gap: 0; }

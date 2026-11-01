@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -10,14 +10,14 @@ import {
   FileText,
 } from 'lucide-react';
 import { MetadataLabel, EmptyState, ReanalyzeModal } from '../../components/v2';
-import IntentSection from './IntentSection';
 import {
   fetchProjectDetail,
-  fetchBuildStory,
   type ProjectWithEntries,
-  type BuildEntry,
   type ContextFile,
 } from '../../services/api';
+
+// Context files, detected stack and repo shape. Rendered inside the
+// Settings tab; the living spec (IntentSection) lives on the Spec tab.
 
 // `existing` files (refreshed context for paths that already have a .context.md)
 // surface first; prescriptive `gap` files (specs for missing capabilities) come
@@ -88,6 +88,8 @@ function estimateTokens(text: string): number {
 
 export interface ContextSectionProps {
   projectId: string;
+  /** Signed-out / non-owner view: no re-analyze affordance. */
+  readOnly?: boolean;
 }
 
 function Collapsible({
@@ -275,10 +277,9 @@ function ContextFilesCard({
   );
 }
 
-export function ContextSection({ projectId }: ContextSectionProps) {
+export function ContextSection({ projectId, readOnly = false }: ContextSectionProps) {
   const navigate = useNavigate();
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
-  const [story, setStory] = useState<BuildEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reanalyzeModalOpen, setReanalyzeModalOpen] = useState(false);
@@ -288,9 +289,7 @@ export function ContextSection({ projectId }: ContextSectionProps) {
     navigate(`/takeoff/${id}`);
   }, [navigate]);
 
-  // `reload` is the user-triggered Retry path on the load-error empty
-  // state. The story fetch is best-effort, so we only block on the
-  // main project fetch's success/failure for the error UI.
+  // `reload` is the user-triggered Retry path on the load-error empty state.
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -302,10 +301,6 @@ export function ContextSection({ projectId }: ContextSectionProps) {
     } finally {
       setLoading(false);
     }
-    // Story refresh is fire-and-forget; failures don't surface.
-    fetchBuildStory(projectId)
-      .then((entries) => setStory(entries.slice(0, 10)))
-      .catch(() => { /* best-effort */ });
   }, [projectId]);
 
   useEffect(() => {
@@ -316,11 +311,6 @@ export function ContextSection({ projectId }: ContextSectionProps) {
       .then((p) => { if (!cancelled) setProject(p); })
       .catch((err: Error) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
-
-    fetchBuildStory(projectId)
-      .then((entries) => { if (!cancelled) setStory(entries.slice(0, 10)); })
-      .catch(() => { /* best-effort */ });
-
     return () => { cancelled = true; };
   }, [projectId]);
 
@@ -366,13 +356,10 @@ export function ContextSection({ projectId }: ContextSectionProps) {
 
   return (
     <div className="space-y-6">
-      <IntentSection projectId={projectId} />
-
       <div>
-        <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What you've built</h3>
+        <MetadataLabel className="mb-1">Repo &amp; context</MetadataLabel>
         <p className="text-stone-600 text-sm leading-relaxed">
-          Context files for Cursor, the stack we detected, and the shape of the repo.
-          What's missing or broken lives on the Gaps tab.
+          Context files for Cursor and Claude Code, the stack we detected, and the shape of the repo.
         </p>
       </div>
 
@@ -385,39 +372,28 @@ export function ContextSection({ projectId }: ContextSectionProps) {
         /* The Context-Files generator runs as part of the takeoff
            pipeline, but projects analyzed before that wiring landed
            (or those where the stage failed silently) have no files
-           on disk. Surface this explicitly instead of silently
-           hiding the card — otherwise users reading the tab's
-           "AI-ready context files" sub-promise have no idea why
-           the section is absent. The Build Story page is a working
-           alternative path: it generates a single .context.md from
-           the user's narrative entries. */
+           on disk. Say so instead of silently hiding the card. */
         <EmptyState
           icon={FileText}
-          title="No AI-ready context files yet"
+          title="No context files yet"
           description={
             isLocalProject
-              ? "This was an uploaded folder, so we can't re-analyze to generate context files. You can still build one from your story below."
-              : 'This project was analyzed before our context-file generator landed (or the stage failed). Re-analyze to generate them automatically, or build one from your story below.'
+              ? "This was an uploaded folder, so we can't re-analyze to generate context files."
+              : readOnly
+                ? 'This project was analyzed before the context-file generator landed. The owner can re-analyze to generate them.'
+                : 'This project was analyzed before the context-file generator landed (or the stage failed). Re-analyze to generate them.'
           }
           action={
-            <div className="flex items-center gap-2">
-              {!isLocalProject ? (
-                <button
-                  type="button"
-                  onClick={() => setReanalyzeModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  Re-analyze
-                </button>
-              ) : null}
-              <Link
-                to={`/projects/${projectId}/story`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            !isLocalProject && !readOnly ? (
+              <button
+                type="button"
+                onClick={() => setReanalyzeModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
               >
-                Build from story
-              </Link>
-            </div>
+                <RefreshCw className="w-3 h-3" />
+                Re-analyze
+              </button>
+            ) : undefined
           }
         />
       )}
@@ -514,35 +490,7 @@ export function ContextSection({ projectId }: ContextSectionProps) {
         </Collapsible>
       ) : null}
 
-      <div className="bg-white border border-stone-200 rounded-lg p-5">
-        <div className="flex items-center justify-between mb-3">
-          <MetadataLabel>Build history</MetadataLabel>
-          <Link
-            to={`/projects/${projectId}/story`}
-            className="text-xs text-stone-600 hover:text-stone-900 font-medium"
-          >
-            View full history →
-          </Link>
-        </div>
-        {story.length === 0 ? (
-          <p className="text-xs text-stone-500">No build entries yet.</p>
-        ) : (
-          <ul className="space-y-2 text-sm">
-            {story.map((entry) => (
-              <li key={entry.id} className="flex items-start gap-2">
-                <span className="text-xs text-stone-400 mt-0.5 uppercase tracking-wider">
-                  {entry.entry_type}
-                </span>
-                <span className="text-stone-700 truncate flex-1">
-                  {entry.title || entry.content.slice(0, 80)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {!isLocalProject ? (
+      {!isLocalProject && !readOnly ? (
         <ReanalyzeModal
           open={reanalyzeModalOpen}
           onClose={() => setReanalyzeModalOpen(false)}

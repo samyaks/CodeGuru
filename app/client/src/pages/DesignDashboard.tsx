@@ -1,11 +1,10 @@
-import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { DashboardProject } from '../services/api';
-import { DashboardView, type Analysis, type DashboardTab, type Review } from './Dashboard';
+import { DashboardView } from './Dashboard';
 
 // Dev-only preview of the dashboard with made-up projects, since the real
 // one needs a signed-in API. Mounted at /design/dashboard only when
-// import.meta.env.DEV. ?state=projects|empty|error|loading|legacy.
+// import.meta.env.DEV. ?state=projects|empty|error|loading.
 
 const DAY = 24 * 60 * 60 * 1000;
 const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
@@ -117,33 +116,16 @@ const SAMPLE_PROJECTS: DashboardProject[] = [
   },
 ];
 
-const SAMPLE_ANALYSES: Analysis[] = [
-  { id: 'a1', repo_url: '', owner: 'sample', repo: 'bakery-orders', status: 'completed', completion_pct: 72, created_at: ago(3) },
-];
-
-const SAMPLE_REVIEWS: Review[] = [
-  { id: 'r1', type: 'security', repo_url: '', owner: 'sample', repo: 'clinic-booking', pr_number: 12, status: 'completed', created_at: ago(5) },
-];
-
 export default function DesignDashboard() {
   const [searchParams] = useSearchParams();
   const state = searchParams.get('state') ?? 'projects';
-  const [tab, setTab] = useState<DashboardTab>('projects');
-  const legacyMode = state === 'legacy';
 
   return (
     <DashboardView
       loading={state === 'loading'}
-      legacyMode={legacyMode}
-      activeTab={legacyMode ? tab : 'projects'}
-      onTabChange={setTab}
       onRetry={() => {}}
       projects={state === 'empty' || state === 'error' ? [] : SAMPLE_PROJECTS}
-      analyses={SAMPLE_ANALYSES}
-      reviews={SAMPLE_REVIEWS}
       projectsError={state === 'error' ? 'The server didn’t answer.' : null}
-      analysesError={null}
-      reviewsError={null}
     />
   );
 }

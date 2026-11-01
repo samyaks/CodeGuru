@@ -63,13 +63,14 @@ function isFocusableGapId(id: string): boolean {
 
 function gapsHref(projectId: string, gapId?: string): string {
   if (gapId && isFocusableGapId(gapId)) {
-    return `/read/${projectId}?focus=${encodeURIComponent(gapId)}#gaps`;
+    return `/read/${projectId}?focus=${encodeURIComponent(gapId)}#build`;
   }
-  return `/read/${projectId}#gaps`;
+  return `/read/${projectId}#build`;
 }
 
 function mapHref(projectId: string): string {
-  return `/read/${projectId}#map`;
+  // Personas and jobs live on the Spec tab, which is the default view.
+  return `/read/${projectId}`;
 }
 
 function readHref(projectId: string): string {
@@ -264,18 +265,18 @@ export function ProjectCard({ project }: ProjectCardProps) {
       </div>
       <div className="px-5 py-2.5 border-t border-stone-200 flex items-center gap-4">
         <Link
-          to={`/read/${project.id}#map`}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
-        >
-          <Map className="w-3 h-3" />
-          Product map →
-        </Link>
-        <Link
-          to={`/read/${project.id}#gaps`}
+          to={readHref(project.id)}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
         >
           <BookOpen className="w-3 h-3" />
-          Gaps →
+          Spec →
+        </Link>
+        <Link
+          to={gapsHref(project.id)}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-600 hover:text-stone-900 transition-colors"
+        >
+          <Map className="w-3 h-3" />
+          Build →
         </Link>
       </div>
     </article>

@@ -6,10 +6,11 @@ import {
   type ReadPayload, type ReadClaim, type ReadClaimSlot, type ClaimCorrection,
 } from '../../services/readApi';
 import { ApiError } from '../../lib/api-error';
+import { useAuth } from '../../hooks/useAuth';
 import GapsSection from '../v2/GapsSection';
 import ShippedSection from '../v2/ShippedSection';
 import MapSection from '../v2/MapSection';
-import ContextSection from '../v2/ContextSection';
+import IntentSection from '../v2/IntentSection';
 import SettingsSection from '../v2/SettingsSection';
 import ClaimPhrase from './ClaimPhrase';
 import EditorPop from './EditorPop';
@@ -17,34 +18,45 @@ import Marginalia from './Marginalia';
 import PromptFrame from './PromptFrame';
 import './read.css';
 
-// "The Read" — the manuscript page, now also the project shell. Other
-// workspace sections (gaps / map / context / shipped / settings) live as
-// tabs here. Visual source of truth for the read tab:
-// prototypes/living-spec-draft.html. GET is public; corrections/unlock
-// surface a gentle sign-in note on 401 instead of a wall.
+// "The Read" — the manuscript page, now also the project shell. Four tabs:
+//   Spec     — the prose read + jobs by persona + the guarantees under them
+//   Build    — the next thing to build (with its prompt) + the gap queue
+//   Shipped  — what landed and whether it held
+//   Settings — repo, context files, danger zone
+// Visual source of truth for the prose: prototypes/living-spec-draft.html.
+// GET is public; writes surface a gentle sign-in note on 401 instead of a
+// wall, and signed-out visitors see no owner controls at all.
 
 const SLOT_ORDER: ReadClaimSlot[] = ['objective', 'audience', 'core_job'];
 const POLL_INTERVAL_MS = 5000;
 const POLL_MAX_ATTEMPTS = 36; // ~3 minutes of "still drafting" polling
 
-const TABS = ['read', 'gaps', 'map', 'context', 'shipped', 'settings'] as const;
+const TABS = ['spec', 'build', 'shipped', 'settings'] as const;
 type TabId = (typeof TABS)[number];
 
 const TAB_DEFS: Array<{ id: TabId; label: string }> = [
-  { id: 'read', label: 'Read' },
-  { id: 'gaps', label: 'Gaps' },
-  { id: 'map', label: 'Map' },
-  { id: 'context', label: 'Context' },
+  { id: 'spec', label: 'Spec' },
+  { id: 'build', label: 'Build' },
   { id: 'shipped', label: 'Shipped' },
   { id: 'settings', label: 'Settings' },
 ];
 
+// Old six-tab deep links keep resolving to the section that absorbed them.
+const LEGACY_HASH: Record<string, TabId> = {
+  read: 'spec',
+  map: 'spec',
+  intent: 'spec',
+  gaps: 'build',
+  context: 'settings', // repo & context files now live under Settings
+};
+
 type Phase = 'loading' | 'drafting' | 'error' | 'ready';
 
 function readHashTab(): TabId {
-  if (typeof window === 'undefined') return 'read';
+  if (typeof window === 'undefined') return 'spec';
   const raw = window.location.hash.replace(/^#/, '').toLowerCase();
-  return (TABS as readonly string[]).includes(raw) ? (raw as TabId) : 'read';
+  if ((TABS as readonly string[]).includes(raw)) return raw as TabId;
+  return LEGACY_HASH[raw] ?? 'spec';
 }
 
 function timeAgo(iso: string | null): string {
@@ -70,6 +82,11 @@ function prefersReducedMotion(): boolean {
 export default function ReadPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user, loading: authLoading, login } = useAuth();
+  // Owner controls (confirm / accept / delete / re-analyze) only render for
+  // signed-in visitors. The server still enforces this; hiding the controls
+  // is what keeps a shared Read from looking editable to a stranger.
+  const canEdit = !!user;
 
   const [read, setRead] = useState<ReadPayload | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
@@ -96,7 +113,7 @@ export default function ReadPage() {
   }, []);
 
   const setTab = useCallback((next: TabId) => {
-    if (next === 'read') {
+    if (next === 'spec') {
       // Default tab — keep the URL clean.
       if (window.location.hash) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -224,14 +241,26 @@ export default function ReadPage() {
       setRead(await unlockRead(id));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setPromptNotice('Sign in to unlock the prompt.');
+        setPromptNotice('Sign in to see the prompt.');
       } else {
-        setPromptNotice(err instanceof Error ? err.message : "The unlock didn't take. Try again.");
+        setPromptNotice(err instanceof Error ? err.message : "The prompt didn't load. Try again.");
       }
     } finally {
       setUnlocking(false);
     }
   }, [id]);
+
+  // The prompt is gated on sign-in, nothing more. Once a signed-in reader
+  // lands on a gated read, fetch the prompt for them without a click.
+  const autoUnlockedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !user || authLoading || !read?.next.gated) return;
+    if (autoUnlockedRef.current === id) return;
+    autoUnlockedRef.current = id;
+    void handleUnlock();
+  }, [id, user, authLoading, read?.next.gated, handleUnlock]);
+
+  const handleSignIn = useCallback(() => login('github'), [login]);
 
   const repoLabel = project ? `${project.owner}/${project.repo}` : null;
   const appName = useMemo(() => {
@@ -262,6 +291,7 @@ export default function ReadPage() {
   const renderClaim = (claim: ReadClaim) => (
     <ClaimPhrase
       claim={claim}
+      readOnly={!canEdit}
       saving={savingClaimId === claim.id}
       onOpenPop={() => setOpenPopClaimId(claim.id)}
       onCommitText={(text) => handleCorrection(claim.id, { text })}
@@ -273,114 +303,151 @@ export default function ReadPage() {
   const coreJob = claimBySlot('core_job');
   const hasNext = !!read && (read.next.title !== null || read.next.why !== null);
 
-  const readBody = (
-    <>
-      {phase === 'loading' ? (
-        <div className="read-state">
-          <p className="st-lead">Fetching the read…</p>
-        </div>
-      ) : phase === 'error' ? (
-        <div className="read-state">
-          <p className="st-lead">The read couldn't be fetched.</p>
-          <p className="st-sub">{error}</p>
-          <button type="button" className="link" onClick={manualRefresh}>Try again</button>
-        </div>
-      ) : phase === 'drafting' ? (
-        <div className="read-state">
-          {pollExpired ? (
-            <>
-              <p className="st-lead">The read is taking longer than it should.</p>
-              <p className="st-sub">
-                The draft wasn't ready after a few minutes of checking. It may still
-                be on its way — or the analysis may not have finished.
-              </p>
-              <button type="button" className="link" onClick={manualRefresh}>Check again</button>
-            </>
-          ) : (
-            <>
-              <p className="st-lead">The read is still being drafted…</p>
-              <p className="st-sub">
-                The repo is being read and set in type. This page checks again every
-                few seconds — the draft will appear on its own.
-              </p>
-            </>
-          )}
-        </div>
-      ) : read ? (
+  // Loading / drafting / error states are shared by the Spec and Build tabs,
+  // since both are drawn from the same read payload.
+  const readState = phase === 'loading' ? (
+    <div className="read-state">
+      <p className="st-lead">Fetching the read…</p>
+    </div>
+  ) : phase === 'error' ? (
+    <div className="read-state">
+      <p className="st-lead">The read couldn't be fetched.</p>
+      <p className="st-sub">{error}</p>
+      <button type="button" className="link" onClick={manualRefresh}>Try again</button>
+    </div>
+  ) : phase === 'drafting' ? (
+    <div className="read-state">
+      {pollExpired ? (
         <>
-          <div className="read">
-            <div className="col-text">
-              <p className="kicker">
-                Drafted from your code — click any line to correct it. Yellow is where we're unsure.
-              </p>
-
-              <p className="intent">
-                <span className="name">{appName}</span>
-                {objective ? (
-                  <>
-                    {' '}{renderClaim(objective)}.<span className="fn">{footnoteOf(objective)}</span>
-                  </>
-                ) : null}
-                {audience ? (
-                  <>
-                    {' '}It's for {renderClaim(audience)}<span className="fn">{footnoteOf(audience)}</span>—
-                  </>
-                ) : null}
-                {coreJob ? (
-                  <>
-                    {' '}and the one thing it can't get wrong is {renderClaim(coreJob)}.
-                    <span className="fn">{footnoteOf(coreJob)}</span>
-                  </>
-                ) : null}
-              </p>
-
-              {popClaim?.alternative ? (
-                <EditorPop
-                  key={popClaim.id}
-                  alternative={popClaim.alternative}
-                  saving={savingClaimId === popClaim.id}
-                  onSave={(optionId) => void handleCorrection(popClaim.id, { optionId })}
-                />
-              ) : null}
-
-              {claimNotice ? <p className="gentle-note">{claimNotice}</p> : null}
-            </div>
-
-            <Marginalia claims={orderedClaims} />
-          </div>
-
-          <div className="midrule"><span>So the next thing to build</span></div>
-
-          <div className="next">
-            <p className="lead">
-              Given that read, one thing stands between {appName} and its first real reader
-              <span className={flashShown ? 'flash show' : 'flash'}>— rewritten from your edit</span>
-            </p>
-            {hasNext ? (
-              <>
-                <h2 style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.title}</h2>
-                <p className="why" style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.why}</p>
-                {read.nextStale ? (
-                  <p className="stale-note">
-                    — the next step hasn't caught up to this correction yet.
-                  </p>
-                ) : null}
-                <PromptFrame
-                  next={read.next}
-                  faded={nextFaded}
-                  unlocking={unlocking}
-                  onUnlock={() => void handleUnlock()}
-                />
-              </>
-            ) : (
-              <p className="st-sub">The next thing hasn't been derived yet — correct a claim, or check back shortly.</p>
-            )}
-            {promptNotice ? <p className="gentle-note">{promptNotice}</p> : null}
-          </div>
+          <p className="st-lead">The read is taking longer than it should.</p>
+          <p className="st-sub">
+            The draft wasn't ready after a few minutes of checking. It may still
+            be on its way — or the analysis may not have finished.
+          </p>
+          <button type="button" className="link" onClick={manualRefresh}>Check again</button>
         </>
+      ) : (
+        <>
+          <p className="st-lead">The read is still being drafted…</p>
+          <p className="st-sub">
+            The repo is being read and set in type. This page checks again every
+            few seconds — the draft will appear on its own.
+          </p>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  // Spec: the prose read, then the jobs and guarantees it rests on.
+  const specBody = read ? (
+    <>
+      <div className="read">
+        <div className="col-text">
+          <p className="kicker">
+            {canEdit
+              ? "Drafted from your code — click any line to correct it. Yellow is where we're unsure."
+              : "Drafted from the code. Yellow is where we're unsure."}
+          </p>
+
+          <p className="intent">
+            <span className="name">{appName}</span>
+            {objective ? (
+              <>
+                {' '}{renderClaim(objective)}.<span className="fn">{footnoteOf(objective)}</span>
+              </>
+            ) : null}
+            {audience ? (
+              <>
+                {' '}It's for {renderClaim(audience)}<span className="fn">{footnoteOf(audience)}</span>—
+              </>
+            ) : null}
+            {coreJob ? (
+              <>
+                {' '}and the one thing it can't get wrong is {renderClaim(coreJob)}.
+                <span className="fn">{footnoteOf(coreJob)}</span>
+              </>
+            ) : null}
+          </p>
+
+          {popClaim?.alternative ? (
+            <EditorPop
+              key={popClaim.id}
+              alternative={popClaim.alternative}
+              saving={savingClaimId === popClaim.id}
+              onSave={(optionId) => void handleCorrection(popClaim.id, { optionId })}
+            />
+          ) : null}
+
+          {claimNotice ? <p className="gentle-note">{claimNotice}</p> : null}
+        </div>
+
+        <Marginalia claims={orderedClaims} />
+      </div>
+
+      <div className="midrule"><span>What it rests on</span></div>
+
+      {id ? (
+        <div className="read-panel v2-font-sans">
+          <div className="space-y-8">
+            <IntentSection projectId={id} readOnly={!canEdit} />
+            <MapSection projectId={id} readOnly={!canEdit} />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="midrule"><span>Then</span></div>
+      <div className="next">
+        <p className="lead">
+          The spec is only useful for what it lets you build next.
+        </p>
+        <button type="button" className="link" onClick={() => setTab('build')}>
+          Pick what to build →
+        </button>
+      </div>
+    </>
+  ) : null;
+
+  // Build: the derived next thing with its prompt, then the gap queue.
+  const buildBody = read ? (
+    <>
+      <div className="next">
+        <p className="lead">
+          Given the spec, one thing stands between {appName} and its first real reader
+          <span className={flashShown ? 'flash show' : 'flash'}>— rewritten from your edit</span>
+        </p>
+        {hasNext ? (
+          <>
+            <h2 style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.title}</h2>
+            <p className="why" style={{ opacity: nextFaded ? 0 : 1 }}>{read.next.why}</p>
+            {read.nextStale ? (
+              <p className="stale-note">
+                — the next step hasn't caught up to this correction yet.
+              </p>
+            ) : null}
+            <PromptFrame
+              next={read.next}
+              faded={nextFaded}
+              unlocking={unlocking}
+              signedIn={canEdit}
+              onSignIn={handleSignIn}
+              onUnlock={() => void handleUnlock()}
+            />
+          </>
+        ) : (
+          <p className="st-sub">The next thing hasn't been derived yet — correct a claim on the Spec tab, or check back shortly.</p>
+        )}
+        {promptNotice ? <p className="gentle-note">{promptNotice}</p> : null}
+      </div>
+
+      <div className="midrule"><span>And after that</span></div>
+
+      {id ? (
+        <div className="read-panel v2-font-sans">
+          <GapsSection projectId={id} readOnly={!canEdit} />
+        </div>
       ) : null}
     </>
-  );
+  ) : null;
 
   return (
     <div className="read-page">
@@ -391,7 +458,7 @@ export default function ReadPage() {
             a read of <span className="mono">{repoLabel ?? 'this project'}</span>
           </span>
         </div>
-        {phase === 'ready' && read && activeTab === 'read' ? (
+        {phase === 'ready' && read && activeTab === 'spec' ? (
           <div className="mh-right">
             {read.fileCount !== null ? `${read.fileCount} files · ` : ''}
             drafted {timeAgo(read.draftedAt)}
@@ -399,6 +466,18 @@ export default function ReadPage() {
         ) : null}
       </div>
       <div className="sheet"><hr className="toprule" /><hr className="topthin" /></div>
+
+      {!authLoading && !canEdit ? (
+        <div className="sheet">
+          <p className="visitor-note">
+            You're reading someone else's project.{' '}
+            <Link to="/" className="link">Scan your own repo →</Link>
+            {' '}or{' '}
+            <button type="button" className="link" onClick={handleSignIn}>sign in</button>
+            {' '}to edit this one.
+          </p>
+        </div>
+      ) : null}
 
       <div className="sheet">
         <nav className="read-tabs" role="tablist" aria-label="Project sections">
@@ -423,26 +502,31 @@ export default function ReadPage() {
       </div>
 
       <div className="sheet" role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
-        {activeTab === 'read' ? (
-          readBody
-        ) : id ? (
+        {activeTab === 'spec' ? (readState ?? specBody) : null}
+        {activeTab === 'build' ? (readState ?? buildBody) : null}
+        {id && activeTab === 'shipped' ? (
           <div className="read-panel v2-font-sans">
-            {activeTab === 'gaps' ? <GapsSection projectId={id} /> : null}
-            {activeTab === 'map' ? <MapSection projectId={id} /> : null}
-            {activeTab === 'context' ? <ContextSection projectId={id} /> : null}
-            {activeTab === 'shipped' ? <ShippedSection projectId={id} /> : null}
-            {activeTab === 'settings' ? <SettingsSection projectId={id} /> : null}
+            <ShippedSection projectId={id} readOnly={!canEdit} />
+          </div>
+        ) : null}
+        {id && activeTab === 'settings' ? (
+          <div className="read-panel v2-font-sans">
+            <SettingsSection projectId={id} readOnly={!canEdit} />
           </div>
         ) : null}
       </div>
 
-      {phase === 'ready' && activeTab === 'read' ? (
+      {phase === 'ready' && activeTab === 'spec' ? (
         <div className="footer">
           <hr className="fr" />
           <p>
-            Nothing here was typed by you from scratch — it was read from the repo and
-            set in type. Your job is only to correct it. Each correction is kept, and
-            the next read starts from what you've already settled.
+            {canEdit
+              ? 'Nothing here was typed by you from scratch — it was read from the repo and '
+                + 'set in type. Your job is only to correct it. Each correction is kept, and '
+                + 'the next read starts from what you\'ve already settled.'
+              : 'Nothing here was typed by hand — it was read from the repo and set in type. '
+                + 'The owner corrects it; each correction is kept, and the next read starts '
+                + 'from what they\'ve already settled.'}
           </p>
         </div>
       ) : null}

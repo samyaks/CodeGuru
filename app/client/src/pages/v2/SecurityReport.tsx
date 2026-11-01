@@ -358,7 +358,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
           <>
             {showAdminActions ? (
               <Link
-                to={`/read/${params.id}#gaps`}
+                to={`/read/${params.id}#build`}
                 className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
               >
                 ← Back to project
@@ -465,7 +465,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               <MetadataLabel>Top {Math.min(5, filteredTopRisks.length)} risks</MetadataLabel>
               {showAdminActions ? (
                 <Link
-                  to={`/read/${params.id}#gaps`}
+                  to={`/read/${params.id}#build`}
                   className="text-xs text-stone-500 hover:text-stone-900"
                 >
                   Triage in Gaps tab →
@@ -479,7 +479,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                     key={risk.id}
                     gap={risk}
                     fixHref={showAdminActions && data.projectId
-                      ? `/read/${data.projectId}?focus=${encodeURIComponent(risk.id)}#gaps`
+                      ? `/read/${data.projectId}?focus=${encodeURIComponent(risk.id)}#build`
                       : null}
                   />
                 ))}
@@ -529,7 +529,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                             key={g.id}
                             gap={g}
                             fixHref={showAdminActions && data.projectId
-                              ? `/read/${data.projectId}?focus=${encodeURIComponent(g.id)}#gaps`
+                              ? `/read/${data.projectId}?focus=${encodeURIComponent(g.id)}#build`
                               : null}
                           />
                         ))}

@@ -306,29 +306,33 @@ export function GapCard({
                 >
                   {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
                 </button>
-              ) : (
+              ) : onGetPrompt ? (
                 <button
                   type="button"
-                  onClick={() => onGetPrompt?.(gap.id)}
+                  onClick={() => onGetPrompt(gap.id)}
                   disabled={promptLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 text-white rounded-md text-sm font-medium transition-colors"
                 >
                   <Sparkles className="w-4 h-4" /> {promptLoading ? 'Generating…' : 'Get Cursor prompt'}
                 </button>
-              )}
+              ) : null}
               {/* `Mark committed` keeps `ml-auto` so it right-aligns on
                   desktop. On narrow viewports the wrap from `flex-wrap`
                   drops it to the next line where ml-auto effectively
                   becomes a no-op — still readable, just stacked. */}
-              <button
-                type="button"
-                onClick={() => onMarkCommitted?.(gap.id)}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium transition-colors ml-auto"
-              >
-                <GitCommit className="w-4 h-4" /> Mark committed
-              </button>
+              {onMarkCommitted ? (
+                <button
+                  type="button"
+                  onClick={() => onMarkCommitted(gap.id)}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium transition-colors ml-auto"
+                >
+                  <GitCommit className="w-4 h-4" /> Mark committed
+                </button>
+              ) : null}
             </div>
-            <p className="text-xs text-stone-500 italic">After you commit, Takeoff will re-scan the affected files and verify the gap is resolved.</p>
+            {onMarkCommitted ? (
+              <p className="text-xs text-stone-500 italic">After you commit, Takeoff will re-scan the affected files and verify the gap is resolved.</p>
+            ) : null}
           </div>
         ) : null}
 
@@ -385,24 +389,24 @@ export function GapCard({
                 </span>
               </div>
             </div>
-          ) : (
+          ) : onGetPrompt ? (
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={() => onGetPrompt?.(gap.id)}
+                onClick={() => onGetPrompt(gap.id)}
                 disabled={promptLoading}
                 className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 text-white rounded-md text-sm font-medium transition-colors"
               >
                 <Sparkles className="w-4 h-4" /> {promptLoading ? 'Generating…' : 'Get Cursor prompt'}
               </button>
               <span className="text-xs text-stone-500 italic">
-                We only call Claude if you ask — saves your tokens.
+                The prompt is written on request, so nothing is generated until you ask.
               </span>
             </div>
-          )
+          ) : null
         ) : null}
 
-        {isUntriaged && !refining && !isSynthetic ? (
+        {isUntriaged && !refining && !isSynthetic && (onAccept || onReject || onRefine) ? (
           /* Hierarchy: Accept is the primary action (the GapsSection
              copy says "Accept gaps to start working on them"), so it
              gets the solid black treatment. Reject and Refine are
@@ -410,34 +414,40 @@ export function GapCard({
              lands on Accept first. Padding stays consistent so the
              three are still recognizable as a button group. */
           <div className="flex items-center gap-1 flex-wrap">
-            <button
-              type="button"
-              onClick={() => onAccept?.(gap.id)}
-              className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
-            >
-              <Check className="w-4 h-4" /> Accept
-            </button>
-            <button
-              type="button"
-              onClick={() => onReject?.(gap.id)}
-              className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
-            >
-              <X className="w-4 h-4" /> Reject
-            </button>
-            <button
-              type="button"
-              onClick={() => setRefining(true)}
-              className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
-            >
-              <Wand2 className="w-4 h-4" /> Refine
-            </button>
+            {onAccept ? (
+              <button
+                type="button"
+                onClick={() => onAccept(gap.id)}
+                className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
+              >
+                <Check className="w-4 h-4" /> Accept
+              </button>
+            ) : null}
+            {onReject ? (
+              <button
+                type="button"
+                onClick={() => onReject(gap.id)}
+                className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
+              >
+                <X className="w-4 h-4" /> Reject
+              </button>
+            ) : null}
+            {onRefine ? (
+              <button
+                type="button"
+                onClick={() => setRefining(true)}
+                className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
+              >
+                <Wand2 className="w-4 h-4" /> Refine
+              </button>
+            ) : null}
           </div>
         ) : null}
 
-        {isRejected ? (
+        {isRejected && onRestore ? (
           <button
             type="button"
-            onClick={() => onRestore?.(gap.id)}
+            onClick={() => onRestore(gap.id)}
             className="text-xs text-stone-600 hover:text-stone-900 font-medium"
           >
             Restore this gap
