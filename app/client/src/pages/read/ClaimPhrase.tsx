@@ -25,6 +25,8 @@ interface ClaimPhraseProps {
   /** Free-text commit. Resolves false if the save failed (text reverts). */
   onCommitText: (text: string) => Promise<boolean>;
   saving: boolean;
+  /** Signed-out visitors: keep the yellow wash on uncertain claims, drop all editing affordances. */
+  readOnly?: boolean;
 }
 
 /**
@@ -32,8 +34,9 @@ interface ClaimPhraseProps {
  * - uncertain → `.editable` yellow wash; click opens the editor pop
  * - otherwise → `.etext`; click makes the phrase contenteditable in place,
  *   Enter/blur commits, Escape cancels
+ * - readOnly → plain text (uncertain claims keep the wash, no handlers)
  */
-export default function ClaimPhrase({ claim, onOpenPop, onCommitText, saving }: ClaimPhraseProps) {
+export default function ClaimPhrase({ claim, onOpenPop, onCommitText, saving, readOnly = false }: ClaimPhraseProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const [editing, setEditing] = useState(false);
   const origRef = useRef('');
@@ -50,6 +53,16 @@ export default function ClaimPhrase({ claim, onOpenPop, onCommitText, saving }: 
     sel?.removeAllRanges();
     sel?.addRange(range);
   }, [editing]);
+
+  // After all hooks: readOnly can flip once auth resolves, so the hook
+  // order above must not depend on it.
+  if (readOnly) {
+    return (
+      <span className={uncertain ? 'editable static' : undefined}>
+        {claim.text}
+      </span>
+    );
+  }
 
   function begin() {
     if (editing || saving) return;

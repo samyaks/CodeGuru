@@ -12,9 +12,11 @@ import {
 
 export interface ShippedSectionProps {
   projectId: string;
+  /** Signed-out / non-owner view: no sync or reopen controls. */
+  readOnly?: boolean;
 }
 
-export function ShippedSection({ projectId }: ShippedSectionProps) {
+export function ShippedSection({ projectId, readOnly = false }: ShippedSectionProps) {
   const [data, setData] = useState<V2ShippedResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
     setBusyId(itemId);
     try {
       await reopenShipped(projectId, itemId);
-      setToast('Reopened as a new gap. See the Gaps tab.');
+      setToast('Reopened as a new gap. See the Build tab.');
       await reload();
     } catch (err) {
       setToast(`Couldn't reopen: ${(err as Error).message}`);
@@ -130,16 +132,18 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
               Listening for commits
             </span>
-            <button
-              type="button"
-              onClick={onSync}
-              disabled={syncing}
-              title="Pull recent commits from GitHub and match them to your gaps"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-700 hover:text-stone-900 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Syncing…' : 'Sync recent commits'}
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                onClick={onSync}
+                disabled={syncing}
+                title="Pull recent commits from GitHub and match them to your gaps"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-700 hover:text-stone-900 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Syncing…' : 'Sync recent commits'}
+              </button>
+            ) : null}
           </span>
         ) : null}
       </div>
@@ -170,7 +174,9 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
           <EmptyState
             icon={GitCommit}
             title="Nothing matched a gap yet"
-            description="New commits matching an open gap will land here automatically. To pull in the last few commits from before today, click 'Sync recent commits' above."
+            description={readOnly
+              ? 'New commits matching an open gap will land here automatically.'
+              : "New commits matching an open gap will land here automatically. To pull in the last few commits from before today, click 'Sync recent commits' above."}
           />
         ) : (
           /* The Settings tab is where the GitHub integration lives —
@@ -203,7 +209,7 @@ export function ShippedSection({ projectId }: ShippedSectionProps) {
             </p>
           </div>
           {data.items.map((item) => (
-            <ShippedItem key={item.id} item={item} onReopenAsGap={onReopen} />
+            <ShippedItem key={item.id} item={item} onReopenAsGap={readOnly ? undefined : onReopen} />
           ))}
         </div>
       )}

@@ -15,9 +15,12 @@ export interface GapsSectionProps {
   projectId: string;
   /** Notified when a gap moves to 'shipped' so the parent can refresh shipped count. */
   onCommitted?: (gap: V2Gap) => void;
+  /** Signed-out / non-owner view: cards render without accept, reject,
+   *  refine, mark-committed or prompt-generation controls. */
+  readOnly?: boolean;
 }
 
-export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
+export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSectionProps) {
   const [groups, setGroups] = useState<{ broken: V2Gap[]; missing: V2Gap[]; infra: V2Gap[] }>({ broken: [], missing: [], infra: [] });
   const [personas, setPersonas] = useState<GapsPersona[]>([]);
   const [loading, setLoading] = useState(true);
@@ -274,7 +277,9 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
       <div>
         <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What's missing or broken</h3>
         <p className="text-stone-600 text-sm leading-relaxed">
-          Accept gaps to start working on them. The Cursor prompt opens inline — copy it, build, then mark committed. Takeoff will verify it landed.
+          {readOnly
+            ? 'Gaps found in the code, ranked by which jobs they block.'
+            : 'Accept a gap to start working on it. The prompt opens inline — copy it, build, then mark committed. Takeoff will verify it landed.'}
         </p>
       </div>
 
@@ -383,13 +388,13 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
               status={gap.status}
               copied={copiedId === gap.id}
               promptLoading={promptLoadingId === gap.id}
-              onAccept={onAccept}
-              onReject={onReject}
-              onRestore={onRestore}
-              onMarkCommitted={onMarkCommitted}
-              onRefine={onRefine}
+              onAccept={readOnly ? undefined : onAccept}
+              onReject={readOnly ? undefined : onReject}
+              onRestore={readOnly ? undefined : onRestore}
+              onMarkCommitted={readOnly ? undefined : onMarkCommitted}
+              onRefine={readOnly ? undefined : onRefine}
               onCopyPrompt={onCopyPrompt}
-              onGetPrompt={onGetPrompt}
+              onGetPrompt={readOnly ? undefined : onGetPrompt}
             />
           ))}
         </div>

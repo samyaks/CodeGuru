@@ -18,6 +18,9 @@ type Filter = 'candidate' | 'confirmed' | 'rejected';
 
 export interface IntentSectionProps {
   projectId: string;
+  /** Signed-out / non-owner view: statements render without confirm,
+   *  reject, edit, export or triage controls. */
+  readOnly?: boolean;
 }
 
 function filterStatements(stmts: IntentStatement[], filter: Filter): IntentStatement[] {
@@ -43,7 +46,7 @@ function triageKey(item: IntentTriageItem): string {
   return `${item.statementId}::${item.link.filePath}::${item.link.symbol ?? ''}`;
 }
 
-export function IntentSection({ projectId }: IntentSectionProps) {
+export function IntentSection({ projectId, readOnly = false }: IntentSectionProps) {
   const [intentData, setIntentData] = useState<IntentListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -440,22 +443,24 @@ export function IntentSection({ projectId }: IntentSectionProps) {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What must hold for your app to work</h3>
+          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What must hold for it to work</h3>
           <p className="text-stone-600 text-sm leading-relaxed max-w-2xl">
-            Takeoff found guarantee-level behaviors linked to your code. Broken items need fixing;
-            confirm jobs in the Map tab to inherit the rest. Confirmed guarantees become your living spec.
+            Guarantee-level behaviors found in the code, grouped under the job each one protects.
+            Broken items need fixing{readOnly ? '.' : '; confirming a job confirms the guarantees under it. Confirmed guarantees become the living spec.'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void onExportSpec()}
-          disabled={specBusy}
-          aria-label="Export living spec"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 disabled:opacity-50 transition-colors flex-shrink-0"
-        >
-          <Download className="w-3 h-3" />
-          {specBusy ? 'Exporting…' : 'Export living spec'}
-        </button>
+        {!readOnly ? (
+          <button
+            type="button"
+            onClick={() => void onExportSpec()}
+            disabled={specBusy}
+            aria-label="Export living spec"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 disabled:opacity-50 transition-colors flex-shrink-0"
+          >
+            <Download className="w-3 h-3" />
+            {specBusy ? 'Exporting…' : 'Export living spec'}
+          </button>
+        ) : null}
       </div>
 
       {usingMock ? (
@@ -534,7 +539,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
                 key={s.id}
                 statement={s}
                 busy={busyId === s.id}
-                onRestore={onRestore}
+                onRestore={readOnly ? undefined : onRestore}
               />
             ))}
           </div>
@@ -565,7 +570,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
                     subtitle={subtitle}
                     defaultOpen={filter === 'candidate' ? pending > 0 : true}
                     action={
-                      filter === 'candidate' && pending > 0 ? (
+                      !readOnly && filter === 'candidate' && pending > 0 ? (
                         <span
                           role="button"
                           tabIndex={0}
@@ -594,9 +599,9 @@ export function IntentSection({ projectId }: IntentSectionProps) {
                           statement={s}
                           busy={busyId === s.id || busyArea === job.id}
                           showLinkHealth
-                          onAccept={onAccept}
-                          onReject={onReject}
-                          onEdit={onEdit}
+                          onAccept={readOnly ? undefined : onAccept}
+                          onReject={readOnly ? undefined : onReject}
+                          onEdit={readOnly ? undefined : onEdit}
                         />
                       ))}
                     </div>
@@ -615,9 +620,9 @@ export function IntentSection({ projectId }: IntentSectionProps) {
                     statement={s}
                     busy={busyId === s.id}
                     showLinkHealth
-                    onAccept={onAccept}
-                    onReject={onReject}
-                    onEdit={onEdit}
+                    onAccept={readOnly ? undefined : onAccept}
+                    onReject={readOnly ? undefined : onReject}
+                    onEdit={readOnly ? undefined : onEdit}
                   />
                 ))}
               </div>
@@ -629,7 +634,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
       {/* Link triage (Phase 5): anchors reconciliation flagged as stale or
           gone. Rendered only when there's something to adjudicate, so a handled
           501 (or the dev mock) simply hides the surface. */}
-      {triage.length > 0 ? (
+      {!readOnly && triage.length > 0 ? (
         <AreaCollapsible
           title="Link health"
           subtitle={`${triage.length} ${triage.length === 1 ? 'link needs' : 'links need'} attention`}
@@ -653,7 +658,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
       {/* Persistent quick-restore drawer, shown while triaging so a mistaken
           reject is one click from coming back. Hidden on the dedicated
           Rejected view (it'd duplicate the list). */}
-      {filter !== 'rejected' && rejectedStatements.length > 0 ? (
+      {!readOnly && filter !== 'rejected' && rejectedStatements.length > 0 ? (
         <AreaCollapsible
           title="Rejected"
           subtitle={`${rejectedStatements.length} hidden`}

@@ -7,11 +7,9 @@ import { TakeoffAnnotate } from '@takeoff/annotate';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import AnalysisProgress from './pages/AnalysisProgress';
-import BuildStory from './pages/BuildStory';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
-import StyleGuideV2 from './pages/v2/StyleGuide';
 import ReadPage from './pages/read/ReadPage';
 import SecurityReportV2 from './pages/v2/SecurityReport';
 import MarketingLayout from './layouts/MarketingLayout';
@@ -34,10 +32,10 @@ function NavigateToRead() {
   return <Navigate to={`/read/${id}${hash}`} replace />;
 }
 
-// Old v1 ProductMap routes are killed in Phase 5; redirect to the Map tab.
-function NavigateToV2Map() {
+// Old v1 ProductMap routes are killed; personas and jobs live on the Spec tab.
+function NavigateToSpec() {
   const { id } = useParams();
-  return <Navigate to={`/read/${id}#map`} replace />;
+  return <Navigate to={`/read/${id}`} replace />;
 }
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -68,13 +66,13 @@ export default function App() {
             {/* Public story (no auth required) */}
             <Route path="/story/:slug" element={<ShareableStory />} />
 
-            {/* Projects — The Read is the default surface; other sections are tabs. */}
+            {/* Projects — The Read is the default surface; other sections are tabs.
+                Legacy routes (/map, /map/onboard, /story) resolve to it. */}
             <Route path="/projects/:id" element={<NavigateToRead />} />
-            {/* Phase 5: v1 ProductMap wizard is replaced by the Map tab. */}
-            <Route path="/projects/:id/map" element={<NavigateToV2Map />} />
-            <Route path="/projects/:id/map/onboard" element={<NavigateToV2Map />} />
-            <Route path="/projects/:id/story" element={<RequireAuth><BuildStory /></RequireAuth>} />
-            {/* The Read — GET is public; corrections/unlock handle auth themselves */}
+            <Route path="/projects/:id/map" element={<NavigateToSpec />} />
+            <Route path="/projects/:id/map/onboard" element={<NavigateToSpec />} />
+            <Route path="/projects/:id/story" element={<NavigateToRead />} />
+            {/* The Read — GET is public; writes handle auth themselves */}
             <Route path="/read/:id" element={<ReadPage />} />
 
             {/* Takeoff flow */}
@@ -82,8 +80,7 @@ export default function App() {
             <Route path="/takeoff/:id/report" element={<NavigateToRead />} />
             <Route path="/takeoff/:id/suggestions" element={<NavigateToRead />} />
 
-            {/* v2 (Takeoff) — additive routes, do not affect v1 */}
-            <Route path="/v2/style-guide" element={<StyleGuideV2 />} />
+            {/* Design-system review pages, dev builds only. */}
             {Design && (
               <Route path="/design" element={<Suspense fallback={null}><Design /></Suspense>} />
             )}

@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { ExternalLink, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import { MetadataLabel, EmptyState } from '../../components/v2';
 import { fetchProjectDetail, deleteProject, type ProjectWithEntries } from '../../services/api';
+import ContextSection from './ContextSection';
 
 export interface SettingsSectionProps {
   projectId: string;
+  /** Signed-out / non-owner view: no danger zone, no re-analyze. */
+  readOnly?: boolean;
 }
 
 function Row({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
@@ -24,7 +27,7 @@ function Row({ label, value, mono = false }: { label: string; value: string; mon
   );
 }
 
-export function SettingsSection({ projectId }: SettingsSectionProps) {
+export function SettingsSection({ projectId, readOnly = false }: SettingsSectionProps) {
   const navigate = useNavigate();
   const [project, setProject] = useState<ProjectWithEntries | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +109,9 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
       <div>
         <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">Settings</h3>
         <p className="text-stone-600 text-sm leading-relaxed">
-          Project metadata, build configuration, and the danger zone.
+          {readOnly
+            ? 'How this project is connected, and the context files it generates.'
+            : 'How this project is connected, the context files it generates, and the danger zone.'}
         </p>
       </div>
 
@@ -171,6 +176,9 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
         </div>
       ) : null}
 
+      <ContextSection projectId={projectId} readOnly={readOnly} />
+
+      {readOnly ? null : (
       <div className="bg-red-50 border border-red-200 rounded-lg p-5">
         <div className="flex items-start gap-2 mb-2">
           <AlertTriangle className="w-4 h-4 text-red-700 flex-shrink-0 mt-0.5" />
@@ -231,6 +239,7 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

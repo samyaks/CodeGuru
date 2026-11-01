@@ -64,13 +64,13 @@ function isFocusableGapId(id: string): boolean {
 
 function gapsHref(projectId: string, gapId?: string): string {
   if (gapId && isFocusableGapId(gapId)) {
-    return `/read/${projectId}?focus=${encodeURIComponent(gapId)}#gaps`;
+    return `/read/${projectId}?focus=${encodeURIComponent(gapId)}#build`;
   }
-  return `/read/${projectId}#gaps`;
+  return `/read/${projectId}#build`;
 }
 
-function mapHref(projectId: string): string {
-  return `/read/${projectId}#map`;
+function specHref(projectId: string): string {
+  return `/read/${projectId}#spec`;
 }
 
 function readHref(projectId: string): string {
@@ -155,10 +155,10 @@ export function ProjectCard({ project }: ProjectCardProps) {
           ) : (
             <div className={cx('type-body', styles.links)}>
               <Link to={gapsHref(project.id)} className={styles.link}>
-                {stillAnalyzing ? 'Open Gaps' : 'View gaps'}
+                {stillAnalyzing ? 'Open Build' : 'See what to build'}
               </Link>
-              <Link to={mapHref(project.id)} className={styles.link}>
-                See the map
+              <Link to={specHref(project.id)} className={styles.link}>
+                Read the spec
               </Link>
               <Link to={readHref(project.id)} className={styles.link}>
                 Read the app
@@ -167,7 +167,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
           )}
           {extraMissing > 0 && (
             <Link to={gapsHref(project.id)} className={cx('type-small', styles.link, styles.more)}>
-              +{extraMissing} more in Gaps
+              +{extraMissing} more in Build
             </Link>
           )}
         </div>
@@ -216,13 +216,13 @@ export function ProjectCard({ project }: ProjectCardProps) {
       </div>
 
       <div className={cx('type-small', styles.foot)}>
-        <Link to={mapHref(project.id)} className={styles.footLink}>
-          <Map size={14} aria-hidden="true" />
-          Product map →
+        <Link to={specHref(project.id)} className={styles.footLink}>
+          <BookOpen size={14} aria-hidden="true" />
+          Spec →
         </Link>
         <Link to={gapsHref(project.id)} className={styles.footLink}>
-          <BookOpen size={14} aria-hidden="true" />
-          Gaps →
+          <Map size={14} aria-hidden="true" />
+          Build →
         </Link>
       </div>
     </article>
