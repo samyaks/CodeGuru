@@ -89,7 +89,7 @@ Not triaged or ordered yet. Some may belong in Stage 2's UX kinks.
 - Replace "Confirm" on a job with "Challenge". Confirming a job also generates its invariants (`confirmJob` in `product-map.js`), so that needs a new trigger.
 - Adding a persona does not look for its jobs: `addPersona` in `product-map.js` only inserts the row.
 - Merge the Map and Context tabs.
-- Write a standard for how engineering and product stay in sync, and build the app around it. Needs a spec under `docs/specs/` first.
+- Write a standard for how engineering and product stay in sync, and build the app around it. Draft spec: [team-collaboration.md](docs/specs/team-collaboration.md) (2026-10-31), which also covers workspaces, the MCP server, PR checks and writing the spec into `AGENTS.md`.
 
 ## Open decisions
 
@@ -97,6 +97,7 @@ Not triaged or ordered yet. Some may belong in Stage 2's UX kinks.
 - **Name.** Jibe was chosen 2026-09-29 and reopened 2026-10-06. Code and site still say Takeoff.
 - **Free tier.** Must people sign in to scan? How many scans are free? Who gets Opus? (Not signed-out users, as of 2026-10-28.)
 - **MCP timing.** Before the public launch as the headline, or after as the first follow-up?
+- **Solo builders or teams?** The site aims at solo builders; [team-collaboration.md](docs/specs/team-collaboration.md) aims at teams running agents in parallel. Settling this decides whether workspaces come before Stage 3 and whether they are paid.
 
 ## Shipped
 
