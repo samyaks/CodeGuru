@@ -56,7 +56,7 @@ export default function UseCasePage() {
             <span className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center">
               <Icon className="w-4 h-4 text-emerald-600" />
             </span>
-            What Takeoff gives you
+            What Jibe gives you
           </h2>
           <div className="space-y-4">
             {config.outcomes.map((outcome) => (

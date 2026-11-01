@@ -75,10 +75,10 @@ const STEP_TEMPLATES = {
     priority: 5,
     why: 'No deployment configuration found. Your app can\'t be deployed to production without this.',
     buildContextFile(stack) {
-      return `## owner\n@your-team\n\n## purpose\nDeployment configuration. Defines how the app is built and deployed to production.\n\n## constraints\n- Must work with a single command or click\n- Build output must be deterministic\n- Environment variables must be configurable per environment\n- Health check endpoint required\n\n## decisions\n### Deploy via Takeoff\nOne-click deploy handles build detection, environment setup, and hosting.\n\n## status\nStage: not started — use Takeoff's Deploy button to set this up automatically`;
+      return `## owner\n@your-team\n\n## purpose\nDeployment configuration. Defines how the app is built and deployed to production.\n\n## constraints\n- Must work with a single command or click\n- Build output must be deterministic\n- Environment variables must be configurable per environment\n- Health check endpoint required\n\n## decisions\n### Deploy via Takeoff\nOne-click deploy handles build detection, environment setup, and hosting.\n\n## status\nStage: not started — use Takeoff, Jibe's one-click deploy, to set this up automatically`;
     },
     buildPrompt(stack) {
-      return `This app is ready to deploy. Use Takeoff's Deploy button to deploy automatically, or manually add:\n\n- Dockerfile or platform config (vercel.json, railway.toml, etc.)\n- Health check endpoint (GET /health returning 200)\n- Build command in package.json scripts\n- Start command for production\n\nTakeoff will auto-detect your ${stack.framework || 'app'} configuration.`;
+      return `This app is ready to deploy. Use Takeoff, Jibe's one-click deploy, to deploy automatically, or manually add:\n\n- Dockerfile or platform config (vercel.json, railway.toml, etc.)\n- Health check endpoint (GET /health returning 200)\n- Build command in package.json scripts\n- Start command for production\n\nTakeoff will auto-detect your ${stack.framework || 'app'} configuration.`;
     },
   },
 

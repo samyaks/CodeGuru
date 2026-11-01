@@ -254,7 +254,7 @@ export default function Landing() {
   return (
     <>
       <PageMeta
-        title="Takeoff — From vibe code to production"
+        title="Jibe — From vibe code to production"
         description="Analyze your GitHub repo, map it to user needs, and get AI context files to finish the last 40% of your app."
       />
 

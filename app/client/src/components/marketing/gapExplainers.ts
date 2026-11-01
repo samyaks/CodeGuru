@@ -35,7 +35,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Authentication is how your app knows who someone is. Without it, you cannot save user-specific data, protect routes, or control permissions — no matter how polished the UI looks.',
     whyItMatters:
-      'Vibe-coded apps often ship beautiful login screens that are not wired to anything. Takeoff checks for auth libraries (NextAuth, Clerk, Supabase Auth), session middleware, and protected API routes — not just UI components.',
+      'Vibe-coded apps often ship beautiful login screens that are not wired to anything. Jibe checks for auth libraries (NextAuth, Clerk, Supabase Auth), session middleware, and protected API routes — not just UI components.',
     signs: [
       'Login/signup pages exist but no auth library in package.json',
       'API routes have no session or token checks',
@@ -73,7 +73,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'If your app needs users, settings, content, or transactions, you need persistent storage. Mock data and in-memory arrays work for demos — not production.',
     whyItMatters:
-      'AI tools often generate UI with hardcoded sample data. Takeoff detects ORMs (Prisma, Drizzle), database clients, schema files, and migrations to tell you whether persistence is real or cosmetic.',
+      'AI tools often generate UI with hardcoded sample data. Jibe detects ORMs (Prisma, Drizzle), database clients, schema files, and migrations to tell you whether persistence is real or cosmetic.',
     signs: [
       'No ORM or database client in dependencies',
       'Data resets on every page refresh or deploy',
@@ -111,7 +111,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Deployment configuration is the bridge between your codebase and a URL users can visit. Without it, shipping means manual steps every time — or never shipping at all.',
     whyItMatters:
-      'Takeoff looks for vercel.json, netlify.toml, Dockerfile, docker-compose, GitHub Actions deploy workflows, and platform-specific configs. A repo can be feature-complete and still have no path to production.',
+      'Jibe looks for vercel.json, netlify.toml, Dockerfile, docker-compose, GitHub Actions deploy workflows, and platform-specific configs. A repo can be feature-complete and still have no path to production.',
     signs: [
       'No CI/CD pipeline or deploy workflow in .github/',
       'No hosting platform config (Vercel, Netlify, Railway, Fly.io)',
@@ -144,7 +144,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Environment variables hold API keys, database URLs, and auth secrets. Without a documented .env.example, every new developer (and every deploy) is a guessing game.',
     whyItMatters:
-      'Takeoff flags repos with no .env.example or env.example file. This is one of the fastest wins for production readiness — and one of the most commonly skipped in vibe-coded projects.',
+      'Jibe flags repos with no .env.example or env.example file. This is one of the fastest wins for production readiness — and one of the most commonly skipped in vibe-coded projects.',
     signs: [
       'No .env.example or env.example in the repo',
       'Secrets hardcoded in source files',
@@ -177,7 +177,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Automated tests catch regressions before users do. Vibe-coded apps often have zero test coverage — which is fine for a hackathon, risky for anything users depend on.',
     whyItMatters:
-      'Takeoff detects test runners (Jest, Vitest, Playwright, Cypress), test files, and CI test steps. Even a handful of integration tests on critical paths dramatically reduces production surprises.',
+      'Jibe detects test runners (Jest, Vitest, Playwright, Cypress), test files, and CI test steps. Even a handful of integration tests on critical paths dramatically reduces production surprises.',
     signs: [
       'No test script in package.json',
       'No __tests__/, tests/, or *.test.* files',
@@ -210,7 +210,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Unhandled errors crash your app or leak stack traces to users. Structured error handling — boundaries, global handlers, consistent API error shapes — is what separates demos from products.',
     whyItMatters:
-      'Takeoff looks for error boundaries in React, global Express error middleware, try/catch patterns in API routes, and structured error response formats.',
+      'Jibe looks for error boundaries in React, global Express error middleware, try/catch patterns in API routes, and structured error response formats.',
     signs: [
       'API routes return 500 with raw error messages',
       'No React error boundary wrapping the app',
@@ -243,7 +243,7 @@ export const GAP_EXPLAINERS: GapExplainer[] = [
     summary:
       'Permissions control who can see, edit, or delete what. Admin panels, team features, and multi-tenant apps all need role-based access — not just a login wall.',
     whyItMatters:
-      'Takeoff checks for role definitions, authorization middleware, and row-level access patterns. Auth without permissions is like a building with a front door but no locks on individual rooms.',
+      'Jibe checks for role definitions, authorization middleware, and row-level access patterns. Auth without permissions is like a building with a front door but no locks on individual rooms.',
     signs: [
       'Logged-in users can access any other user\'s data',
       'Admin routes have no role check',

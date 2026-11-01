@@ -153,7 +153,7 @@ export function SettingsSection({ projectId }: SettingsSectionProps) {
         <div className="bg-white border border-stone-200 rounded-lg p-5">
           <MetadataLabel className="mb-3">GitHub integration</MetadataLabel>
           <p className="text-xs text-stone-500 mb-2">
-            Takeoff listens to push events on{' '}
+            Jibe listens to push events on{' '}
             <span className="font-mono text-stone-700">{project.branch || 'main'}</span> and
             matches each commit to your open gaps.
           </p>

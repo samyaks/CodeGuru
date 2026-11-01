@@ -15,7 +15,7 @@ export default function Features() {
         eyebrow="Features"
         headline="Everything you need to"
         headlineAccent="finish the last 40%."
-        subhead="Takeoff reads your real codebase and turns it into actionable maps, scores, and context — so you stop guessing and start shipping."
+        subhead="Jibe reads your real codebase and turns it into actionable maps, scores, and context — so you stop guessing and start shipping."
       />
 
       <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 mb-20">

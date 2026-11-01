@@ -7,7 +7,7 @@ export interface HeaderProps {
   backTo?: string;
   /** Page title rendered next to the brand mark. In `app` variant it's
    *  appended after a "/" separator; in `workspace` variant it replaces
-   *  the "Takeoff / AI in the loop" wordmark so the page name takes the
+   *  the "Jibe / AI in the loop" wordmark so the page name takes the
    *  prominent slot (matches the v2 SecurityReport / Project chrome). */
   title?: string;
   /** Optional subtitle rendered under the title in the `workspace`
@@ -22,7 +22,7 @@ export interface HeaderProps {
    *  like Back / Share / Re-analyze on report surfaces. */
   actions?: React.ReactNode;
   /** Visual variant:
-   *  - `'app'` (default): legacy v1 chrome — Rocket icon, "Takeoff v0.1"
+   *  - `'app'` (default): legacy v1 chrome — Rocket icon, "Jibe v0.1"
    *    pill, semantic color tokens. Keep for marketing / list surfaces.
    *  - `'workspace'`: v2 chrome — stone-900 Zap square, stone palette,
    *    white/80 backdrop. Use for product workspace surfaces (project
@@ -54,7 +54,7 @@ export default function Header({
             )}
             <Link
               to="/"
-              aria-label="Takeoff home"
+              aria-label="Jibe home"
               className="flex items-center gap-3 min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 rounded"
             >
               <div className="w-9 h-9 bg-stone-900 rounded flex items-center justify-center flex-shrink-0">
@@ -62,7 +62,7 @@ export default function Header({
               </div>
               {!title && (
                 <div className="min-w-0">
-                  <h1 className="text-lg font-bold text-stone-900 tracking-tight">Takeoff</h1>
+                  <h1 className="text-lg font-bold text-stone-900 tracking-tight">Jibe</h1>
                   <p className="text-xs text-stone-500">AI in the loop</p>
                 </div>
               )}
@@ -115,7 +115,7 @@ export default function Header({
           <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center shrink-0">
             <Rocket size={17} className="text-white -rotate-45" />
           </div>
-          <span className="text-xl font-extrabold tracking-tighter text-text">Takeoff</span>
+          <span className="text-xl font-extrabold tracking-tighter text-text">Jibe</span>
           <span className="hidden sm:inline px-2 py-0.5 rounded-md bg-surface-2 text-text-faint text-xs font-medium">
             v0.1
           </span>

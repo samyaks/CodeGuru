@@ -328,7 +328,7 @@ export function GapCard({
                 <GitCommit className="w-4 h-4" /> Mark committed
               </button>
             </div>
-            <p className="text-xs text-stone-500 italic">After you commit, Takeoff will re-scan the affected files and verify the gap is resolved.</p>
+            <p className="text-xs text-stone-500 italic">After you commit, Jibe will re-scan the affected files and verify the gap is resolved.</p>
           </div>
         ) : null}
 
@@ -381,7 +381,7 @@ export function GapCard({
                   {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
                 </button>
                 <span className="text-xs text-stone-500 italic">
-                  Build it, push, and Takeoff will detect the entity is built — this gap will disappear.
+                  Build it, push, and Jibe will detect the entity is built — this gap will disappear.
                 </span>
               </div>
             </div>

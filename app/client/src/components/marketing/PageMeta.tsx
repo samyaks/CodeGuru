@@ -7,7 +7,7 @@ interface PageMetaProps {
 
 export default function PageMeta({ title, description }: PageMetaProps) {
   useEffect(() => {
-    document.title = title.includes('Takeoff') ? title : `${title} — Takeoff`;
+    document.title = title.includes('Jibe') ? title : `${title} — Jibe`;
 
     if (description) {
       let el = document.querySelector<HTMLMetaElement>('meta[name="description"]');

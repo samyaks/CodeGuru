@@ -32,7 +32,7 @@ export default function Pricing() {
     <div className="px-6 py-16 sm:py-24">
       <PageMeta
         title="Pricing"
-        description="Takeoff is free during early access. Pro plans for teams coming soon."
+        description="Jibe is free during early access. Pro plans for teams coming soon."
       />
 
       <MarketingPageHero

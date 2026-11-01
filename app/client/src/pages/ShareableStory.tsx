@@ -74,7 +74,7 @@ function useOgMeta(story: PublicStoryData | null) {
 
     const tags: Record<string, string> = {
       'og:title': `${owner}/${repo} — Build Story`,
-      'og:description': story.social_summary || 'See how this app was built and deployed with Takeoff',
+      'og:description': story.social_summary || 'See how this app was built and deployed with Jibe',
       'og:type': 'article',
       'og:url': window.location.href,
     };
@@ -93,7 +93,7 @@ function useOgMeta(story: PublicStoryData | null) {
 
     return () => {
       cleanup.forEach((el) => el.remove());
-      document.title = 'Takeoff';
+      document.title = 'Jibe';
     };
   }, [story]);
 }
@@ -189,7 +189,7 @@ export default function ShareableStory() {
             to="/"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand-hov transition-colors"
           >
-            Go to Takeoff
+            Go to Jibe
           </Link>
         </main>
       </div>
@@ -316,7 +316,7 @@ export default function ShareableStory() {
           <p className="text-sm text-text-muted">
             Built and deployed with{' '}
             <Link to="/" className="text-brand hover:text-brand-hov transition-colors font-medium">
-              Takeoff
+              Jibe
             </Link>
           </p>
           <Link
@@ -337,9 +337,9 @@ function StoryHeader() {
     <header className="flex items-center justify-between px-6 py-4 border-b border-line">
       <Link to="/" className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-lg bg-brand-tint border border-brand-tint-border flex items-center justify-center font-bold text-sm text-brand">
-          T
+          J
         </div>
-        <span className="font-semibold text-lg text-text">Takeoff</span>
+        <span className="font-semibold text-lg text-text">Jibe</span>
       </Link>
     </header>
   );

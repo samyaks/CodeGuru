@@ -429,7 +429,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
       <EmptyState
         icon={Target}
         title="No guarantees captured yet"
-        description="Once Takeoff analyzes your codebase, things that must hold for your app to work will show up here — with what's broken highlighted first."
+        description="Once Jibe analyzes your codebase, things that must hold for your app to work will show up here — with what's broken highlighted first."
       />
     );
   }
@@ -442,7 +442,7 @@ export function IntentSection({ projectId }: IntentSectionProps) {
         <div>
           <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What must hold for your app to work</h3>
           <p className="text-stone-600 text-sm leading-relaxed max-w-2xl">
-            Takeoff found guarantee-level behaviors linked to your code. Broken items need fixing;
+            Jibe found guarantee-level behaviors linked to your code. Broken items need fixing;
             confirm jobs in the Map tab to inherit the rest. Confirmed guarantees become your living spec.
           </p>
         </div>

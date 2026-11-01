@@ -186,7 +186,7 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
     try {
       const updated = await markGapCommitted(projectId, id);
       replaceGap({ ...updated, status: 'shipped' });
-      setToast('Marked as committed. Takeoff will verify after your next push.');
+      setToast('Marked as committed. Jibe will verify after your next push.');
       onCommitted?.(updated);
     } catch (err) {
       setToast(`Couldn't mark committed: ${(err as Error).message}`);
@@ -274,7 +274,7 @@ export function GapsSection({ projectId, onCommitted }: GapsSectionProps) {
       <div>
         <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What's missing or broken</h3>
         <p className="text-stone-600 text-sm leading-relaxed">
-          Accept gaps to start working on them. The Cursor prompt opens inline — copy it, build, then mark committed. Takeoff will verify it landed.
+          Accept gaps to start working on them. The Cursor prompt opens inline — copy it, build, then mark committed. Jibe will verify it landed.
         </p>
       </div>
 
