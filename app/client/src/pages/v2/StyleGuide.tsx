@@ -5,9 +5,9 @@ import {
 } from 'lucide-react';
 import {
   Card, MetadataLabel, Badge, TabBar, ProgressBar, EmptyState,
-  PersonaCard, ProjectCard, GapCard, ShippedItem,
+  PersonaCard, ProjectCard, GapCard, ShippedItem, RecentCommitCard,
 } from '../../components/v2';
-import type { GapData, ShippedItemData } from '../../components/v2';
+import type { GapData, ShippedItemData, RecentCommitData } from '../../components/v2';
 import type { DashboardProject } from '../../services/api';
 
 // Throwaway QA route. Renders every v2 component in its main states so we can
@@ -160,6 +160,46 @@ const SAMPLE_DASHBOARD_PROJECT_EMPTY: DashboardProject = {
   last_commit: null,
 };
 
+const SAMPLE_RECENT_COMMITS: RecentCommitData[] = [
+  {
+    sha: '3d3d39b9abcdef',
+    shortSha: '3d3d39b',
+    title: 'feat: add zod validation across API routes',
+    summary: 'Request schemas now guard every API route so bad input fails cleanly instead of crashing the app.',
+    summaryTitle: 'Zod on every route',
+    summarySource: 'build_story',
+    author: 'Sam',
+    authorLogin: 'samyaks',
+    date: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    url: 'https://github.com/example/repo/commit/3d3d39b9abcdef',
+    matchedGap: true,
+    verification: 'verified',
+  },
+  {
+    sha: 'a4f9c2deadbeef',
+    shortSha: 'a4f9c2d',
+    title: 'fix: validate env vars at startup',
+    summary: 'Hardened boot so missing secrets fail fast with a clear error.',
+    summarySource: 'ai_review',
+    author: 'Sam',
+    authorLogin: 'samyaks',
+    date: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
+    matchedGap: true,
+    verification: 'partial',
+  },
+  {
+    sha: 'd3d39b9cafe000',
+    shortSha: 'd3d39b9',
+    title: 'chore: bump deps',
+    summary: 'chore: bump deps',
+    summarySource: 'commit_title',
+    author: 'Sam',
+    date: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    matchedGap: false,
+    verification: null,
+  },
+];
+
 const SAMPLE_SHIPPED: ShippedItemData[] = [
   {
     id: 's1',
@@ -298,6 +338,14 @@ export default function StyleGuide() {
                 onMarkCommitted={(id) => setGapStatuses((s) => ({ ...s, [id]: 'shipped' }))}
                 onCopyPrompt={() => {}}
               />
+            ))}
+          </div>
+        </Section>
+
+        <Section title="RecentCommitCard">
+          <div className="grid gap-3 lg:grid-cols-3">
+            {SAMPLE_RECENT_COMMITS.map((commit) => (
+              <RecentCommitCard key={commit.sha} commit={commit} />
             ))}
           </div>
         </Section>
