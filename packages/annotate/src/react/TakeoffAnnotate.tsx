@@ -78,15 +78,18 @@ export default function TakeoffAnnotate({
     }
   }, []);
 
-  // Sync session to URL on change
+  // Keep a real review in the address bar. A normal visit stays clean, so the
+  // session strip doesn't cover the page or replace the tab hash.
   useEffect(() => {
+    if (mode === "clean") return;
     writeSessionToURL(session);
-  }, [session]);
+  }, [session, mode]);
 
-  // On mount: if URL contains a session, switch to review mode
+  // A shared link that already has pins opens in review. An empty session
+  // does not — that was popping the feedback bar on every page.
   useEffect(() => {
     const urlSession = readSessionFromURL();
-    if (urlSession) {
+    if (urlSession && urlSession.pins.length > 0) {
       setMode("review");
     }
   }, []);
