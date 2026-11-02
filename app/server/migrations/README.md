@@ -79,11 +79,7 @@ Postgres, not ANSI SQL.
 - `025` / `026` — reserved by PR #28 (GitHub App access, processed pushes).
 - `027_waitlist_and_funnel.sql` — `waitlist` (unique on lower(email)) and
   `funnel_events` (closed event set in `lib/telemetry.js`).
-- `028_intent_slices.sql` — **reserved for the intent loop (Agent B)**. Do not
-  take this number. Shape: `intent_slices` (one row per slice; JSONB for
-  `source`, `existing`, `guardrails`, `protected_paths`, `acceptance_criteria`,
-  `sync`, `staging`, `pushes`; partial unique index on `project_id` where
-  `status IN ('active','verifying')`) and `slice_events` (`slice_id` →
-  `intent_slices` cascade, `kind` from `SLICE_EVENT_KINDS` in
-  `lib/slice-types.js`, JSONB `metadata`). Contract:
-  `docs/specs/intent-driven-building.md`.
+- `028_intent_slices.sql` — intent loop V1: `intent_slices` (one row per
+  slice, JSONB sub-objects mirroring `lib/slice-types.js`, partial unique
+  index = one open slice per project) and `slice_events` (the verification
+  log; `kind` from `SLICE_EVENT_KINDS`). Owned by `lib/slice-store.js`.
