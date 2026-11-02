@@ -568,7 +568,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
                     key={`${filter}-${job.id}`}
                     title={job.title}
                     subtitle={subtitle}
-                    defaultOpen={filter === 'candidate' ? pending > 0 : true}
+                    defaultOpen={false}
                     action={
                       !readOnly && filter === 'candidate' && pending > 0 ? (
                         <span
