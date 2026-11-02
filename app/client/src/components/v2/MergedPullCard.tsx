@@ -4,6 +4,8 @@ export interface MergedPullData {
   number: number;
   title: string;
   summary?: string | null;
+  /** 'github' uses the pull request description. 'generated' was written because that description didn't say what changed. */
+  summarySource?: 'github' | 'commits' | 'generated' | null;
   author?: string | null;
   authorAvatar?: string | null;
   mergedAt?: string | null;
@@ -67,6 +69,10 @@ export function MergedPullCard({ pull }: MergedPullCardProps) {
             <p className="text-sm text-ink-muted leading-relaxed mt-1">{pull.summary}</p>
           ) : null}
           <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-2">
+            {pull.summarySource === 'github' ? <span>From the pull request</span> : null}
+            {pull.summarySource === 'commits' ? <span>From the commits</span> : null}
+            {pull.summarySource === 'generated' ? <span>Generated</span> : null}
+            {pull.summarySource && (pull.author || pull.mergedAt) ? <span>·</span> : null}
             {pull.authorAvatar ? (
               <img src={pull.authorAvatar} alt="" className="w-4 h-4 rounded-full" />
             ) : null}

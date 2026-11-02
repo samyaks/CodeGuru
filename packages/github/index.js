@@ -62,6 +62,17 @@ async function fetchPRDiff(owner, repo, prNumber) {
   return res.text();
 }
 
+async function fetchPullCommits(owner, repo, prNumber) {
+  const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=10`);
+  const commits = await res.json();
+  if (!Array.isArray(commits)) return [];
+  return commits.map((c) => ({
+    sha: c.sha,
+    message: c.commit?.message || '',
+    title: (c.commit?.message || '').split('\n')[0].trim(),
+  }));
+}
+
 async function fetchPRFiles(owner, repo, prNumber) {
   const res = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`);
   return res.json();
@@ -269,6 +280,7 @@ module.exports = {
   parseRepoUrl,
   parsePRUrl,
   fetchPullRequest,
+  fetchPullCommits,
   fetchPRDiff,
   fetchPRFiles,
   fetchRepoTree,
