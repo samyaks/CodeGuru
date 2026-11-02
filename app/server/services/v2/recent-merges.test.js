@@ -31,13 +31,68 @@ test('selectMergedPulls titles a pull with a blank title', () => {
   assert.equal(out[0].summary, null);
 });
 
-test('pullSummary uses the first real line and clamps it', () => {
+test('pullSummary uses a real description and skips issue-only lines', () => {
+  const { isUsefulSummary } = require('./recent-merges');
   assert.equal(pullSummary(null), null);
-  assert.equal(pullSummary('<!-- hide -->\n\nShips the login fix.'), 'Ships the login fix.');
+  assert.equal(pullSummary('<!-- hide -->\n\nShips the login fix so guests can save work.'), 'Ships the login fix so guests can save work.');
+  assert.equal(pullSummary('Fixes #55'), null);
+  assert.equal(pullSummary('- [x] added tests'), null);
+  assert.equal(isUsefulSummary('Fixes #55 by keeping acronyms intact.'), true);
   const long = 'x'.repeat(200);
   const summary = pullSummary(long);
   assert.ok(summary.endsWith('…'));
   assert.ok(summary.length < long.length);
+});
+
+test('ensureSummaries keeps a GitHub summary and generates the rest', async () => {
+  const { ensureSummaries } = require('./recent-merges');
+  const pulls = [
+    { number: 1, title: 'Add login', summary: 'Guests can now sign in with email.', summarySource: 'github' },
+    { number: 2, title: 'Quiet logs', summary: null, summarySource: null },
+  ];
+  const out = await ensureSummaries(pulls, {
+    owner: 'o',
+    repo: 'r',
+    generate: async (notes) => {
+      assert.deepEqual(notes.map((n) => n.number), [2]);
+      return { 2: 'Log lines no longer fill the screen while the app runs.' };
+    },
+    commitsFor: async () => [{ title: 'wip' }],
+  });
+  assert.equal(out[0].summarySource, 'github');
+  assert.equal(out[1].summary, 'Log lines no longer fill the screen while the app runs.');
+  assert.equal(out[1].summarySource, 'generated');
+});
+
+test('ensureSummaries prefers commit messages over generation', async () => {
+  const { ensureSummaries } = require('./recent-merges');
+  let called = false;
+  const out = await ensureSummaries(
+    [{ number: 4, title: 'Release', summary: null }],
+    {
+      owner: 'o',
+      repo: 'commit-repo',
+      generate: async () => { called = true; return {}; },
+      commitsFor: async () => [{ title: 'Keep original characters while slugifying.' }],
+    },
+  );
+  assert.equal(called, false);
+  assert.equal(out[0].summary, 'Keep original characters while slugifying.');
+  assert.equal(out[0].summarySource, 'commits');
+});
+
+test('ensureSummaries falls back when generation fails', async () => {
+  const { ensureSummaries } = require('./recent-merges');
+  const out = await ensureSummaries(
+    [{ number: 9, title: 'Fix the counter', summary: null }],
+    {
+      owner: 'o',
+      repo: 'fallback-repo',
+      generate: async () => { throw new Error('no key'); },
+    },
+  );
+  assert.equal(out[0].summary, 'Landed Fix the counter.');
+  assert.equal(out[0].summarySource, 'generated');
 });
 
 test('selectMergedPulls ignores a non-array', () => {
