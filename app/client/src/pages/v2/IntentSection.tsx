@@ -431,8 +431,8 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
     return (
       <EmptyState
         icon={Target}
-        title="No guarantees captured yet"
-        description="Once Takeoff analyzes your codebase, things that must hold for your app to work will show up here — with what's broken highlighted first."
+        title="No guarantees found in this code yet"
+        description="The scan didn't find behaviors it could pin to specific files — common for very small repos or ones that are mostly UI. They'll appear here after the next scan once there's more backend to read."
       />
     );
   }

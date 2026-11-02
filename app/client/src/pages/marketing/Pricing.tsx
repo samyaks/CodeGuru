@@ -6,26 +6,25 @@ import CtaBand from '../../components/marketing/CtaBand';
 import FaqAccordion from '../../components/marketing/FaqAccordion';
 import { PRICING_TIERS, MARKETING_FAQ } from '../../components/marketing/marketingContent';
 import { useAuth } from '../../hooks/useAuth';
+import { joinWaitlist, track } from '../../services/telemetry';
 
 export default function Pricing() {
   const { login } = useAuth();
   const [waitlistEmail, setWaitlistEmail] = useState('');
   const [waitlistSent, setWaitlistSent] = useState(false);
+  const [waitlistBusy, setWaitlistBusy] = useState(false);
+  const [waitlistError, setWaitlistError] = useState<string | null>(null);
 
-  function handleWaitlist(e: React.FormEvent) {
+  async function handleWaitlist(e: React.FormEvent) {
     e.preventDefault();
-    if (!waitlistEmail.trim()) return;
-    // No backend yet — store locally so the UX feels real during early access.
-    try {
-      const existing = JSON.parse(localStorage.getItem('takeoff_waitlist') || '[]');
-      if (!existing.includes(waitlistEmail.trim())) {
-        existing.push(waitlistEmail.trim());
-        localStorage.setItem('takeoff_waitlist', JSON.stringify(existing));
-      }
-    } catch {
-      /* ignore storage errors */
-    }
-    setWaitlistSent(true);
+    const email = waitlistEmail.trim();
+    if (!email || waitlistBusy) return;
+    setWaitlistBusy(true);
+    setWaitlistError(null);
+    const result = await joinWaitlist(email, 'pricing');
+    setWaitlistBusy(false);
+    if (result.ok) setWaitlistSent(true);
+    else setWaitlistError(result.error ?? "That didn't go through. Try again.");
   }
 
   return (
@@ -105,7 +104,7 @@ export default function Pricing() {
             {tier.highlighted ? (
               <button
                 type="button"
-                onClick={() => login('github')}
+                onClick={() => { track('sign_in_clicked', { metadata: { source: 'pricing' } }); login('github'); }}
                 className="w-full inline-flex items-center justify-center bg-stone-50 text-stone-900 hover:bg-stone-200 transition-colors rounded px-5 py-2.5 text-sm font-medium"
               >
                 {tier.cta}
@@ -126,10 +125,14 @@ export default function Pricing() {
                 />
                 <button
                   type="submit"
-                  className="w-full inline-flex items-center justify-center bg-stone-900 text-stone-50 hover:bg-stone-800 transition-colors rounded px-5 py-2.5 text-sm font-medium"
+                  disabled={waitlistBusy}
+                  className="w-full inline-flex items-center justify-center bg-stone-900 text-stone-50 hover:bg-stone-800 disabled:bg-stone-400 transition-colors rounded px-5 py-2.5 text-sm font-medium"
                 >
-                  {tier.cta}
+                  {waitlistBusy ? 'Adding you…' : tier.cta}
                 </button>
+                {waitlistError ? (
+                  <p className="text-xs text-red-600 text-center" role="alert">{waitlistError}</p>
+                ) : null}
               </form>
             )}
           </div>

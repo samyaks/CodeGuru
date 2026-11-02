@@ -20,6 +20,7 @@ import CtaBand from '../components/marketing/CtaBand';
 import { MARKETING_FAQ, STACK_LOGOS } from '../components/marketing/marketingContent';
 import { useAuth } from '../hooks/useAuth';
 import { startTakeoff, startTakeoffUpload, fetchMyRepos, GitHubRepo } from '../services/api';
+import { track } from '../services/telemetry';
 
 const EXAMPLES = [
   { label: 'shadcn/taxonomy', url: 'https://github.com/shadcn-ui/taxonomy' },
@@ -80,6 +81,10 @@ export default function Landing() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    track('landing_viewed', { once: true });
+  }, []);
+
+  useEffect(() => {
     if (user && mode === 'connect') setMode('picker');
   }, [user, mode]);
 
@@ -127,6 +132,7 @@ export default function Landing() {
     setError(null);
     try {
       const { projectId } = await startTakeoff(url);
+      track('scan_started', { projectId, metadata: { source: 'url' } });
       navigate(`/takeoff/${projectId}`);
     } catch (err: any) {
       setError(err.message || 'Failed to start analysis');
@@ -214,6 +220,7 @@ export default function Landing() {
         selectedFiles,
         uploadProjectName || 'My Project',
       );
+      track('scan_started', { projectId, metadata: { source: 'upload', files: selectedFiles.length } });
       navigate(`/takeoff/${projectId}`);
     } catch (err: any) {
       setError(err.message || 'Upload failed');
@@ -241,13 +248,13 @@ export default function Landing() {
     },
     {
       icon: <CheckCircle2 className="w-4 h-4 text-stone-900" />,
-      title: 'Readiness Score',
-      body: 'Weighted by real user impact, not just technical completeness.',
+      title: 'The Read',
+      body: 'A plain-English spec drafted from your code: what it does, who it is for, what it cannot get wrong.',
     },
     {
       icon: <Rocket className="w-4 h-4 text-stone-900 -rotate-45" />,
-      title: 'One-Click Deploy',
-      body: 'From analysis to live URL. Env vars set automatically.',
+      title: 'The Next Thing',
+      body: 'One gap to build next, with the exact prompt for Cursor or Claude Code.',
     },
   ];
 
@@ -289,7 +296,7 @@ export default function Landing() {
           {mode === 'connect' && (
             <div className="flex flex-col items-center gap-4">
               <PrimaryButton
-                onClick={() => login('github')}
+                onClick={() => { track('sign_in_clicked', { metadata: { source: 'landing' } }); login('github'); }}
                 className="w-full max-w-[320px] !py-3 !text-base"
               >
                 <Github className="w-4 h-4" />
@@ -363,7 +370,7 @@ export default function Landing() {
                         <p className="text-stone-600">GitHub access needs to be refreshed.</p>
                         <button
                           type="button"
-                          onClick={() => login('github')}
+                          onClick={() => { track('sign_in_clicked', { metadata: { source: 'landing' } }); login('github'); }}
                           className="text-stone-900 hover:text-stone-700 underline underline-offset-2 transition-colors"
                         >
                           Sign in again to load your repos
@@ -379,14 +386,23 @@ export default function Landing() {
                           key={repo.full_name}
                           type="button"
                           onClick={() => selectRepo(repo)}
-                          disabled={loading}
-                          className="w-full text-left px-4 py-3 hover:bg-stone-50 border-b border-stone-100 last:border-b-0 transition-colors disabled:opacity-50 group"
+                          // Private repos can't be read yet: scans use a
+                          // server token, not the user's. Show them so the
+                          // list looks complete, but don't let a click start
+                          // a scan that fails minutes later.
+                          disabled={loading || repo.private}
+                          title={repo.private ? 'Private repos need the GitHub App, which is in progress.' : undefined}
+                          className="w-full text-left px-4 py-3 hover:bg-stone-50 border-b border-stone-100 last:border-b-0 transition-colors disabled:opacity-50 disabled:hover:bg-transparent group"
                         >
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-sm text-stone-900 group-hover:text-stone-700 transition-colors truncate">
                               {repo.full_name}
                             </span>
-                            {repo.private && <Lock className="w-3 h-3 text-stone-400 shrink-0" />}
+                            {repo.private && (
+                              <span className="flex items-center gap-1 text-[11px] text-stone-400 shrink-0">
+                                <Lock className="w-3 h-3" /> private · soon
+                              </span>
+                            )}
                             {repo.stargazers_count > 0 && (
                               <span className="flex items-center gap-0.5 text-[11px] text-stone-500 shrink-0">
                                 <Star className="w-2.5 h-2.5" /> {repo.stargazers_count}

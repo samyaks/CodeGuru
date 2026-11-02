@@ -19,8 +19,6 @@ export type { EmptyStateProps } from './EmptyState';
 export { PersonaCard } from './PersonaCard';
 export type { PersonaCardProps, PersonaCardData } from './PersonaCard';
 
-export { ProjectCard } from './ProjectCard';
-export type { ProjectCardProps } from './ProjectCard';
 
 export { GapCard } from './GapCard';
 export type {

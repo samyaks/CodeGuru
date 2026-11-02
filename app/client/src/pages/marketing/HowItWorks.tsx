@@ -8,7 +8,7 @@ export default function HowItWorks() {
     <div className="px-6 py-16 sm:py-24">
       <PageMeta
         title="How it works"
-        description="Connect your GitHub repo, get a readiness map in under two minutes, and ship with AI context files and gap-fix prompts."
+        description="Paste a repo URL, get a plain-English read of what is built in a few minutes, and copy the prompt for the next thing to build into Cursor or Claude Code."
       />
 
       <MarketingPageHero

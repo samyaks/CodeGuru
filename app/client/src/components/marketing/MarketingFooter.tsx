@@ -54,7 +54,7 @@ export default function MarketingFooter() {
         </div>
         <div className="mt-10 pt-6 border-t border-stone-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-stone-500">
           <span>&copy; {new Date().getFullYear()} Takeoff</span>
-          <span>Reads ~30 key files via GitHub API — never clones your repo</span>
+          <span>Reads your repo through the GitHub API — never clones it</span>
         </div>
       </div>
     </footer>

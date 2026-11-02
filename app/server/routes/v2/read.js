@@ -11,7 +11,8 @@ const { applyCorrection } = require('../../services/read/cascade');
 
 // "The Read" router — the prose read of a project: three slotted claims
 // (objective / audience / core_job) plus the derived "next thing to build".
-// The builder prompt is gated behind a Pro stub (`project_reads.read_unlocked`).
+// The builder prompt is gated on sign-in (`project_reads.read_unlocked`, flipped
+// by POST /unlock, which requires a user). There is no paid tier.
 // Mirrors the conventions in routes/v2/intent.js.
 
 const router = express.Router({ mergeParams: true });
@@ -88,7 +89,7 @@ async function buildReadPayload(project) {
       title: readRow.next_title || null,
       why: readRow.next_why || null,
       category: readRow.next_category || null,
-      // The builder prompt is the Pro-gated artifact.
+      // The builder prompt is the sign-in-gated artifact.
       prompt: gated ? null : (readRow.next_prompt || null),
       gated,
     },
@@ -125,8 +126,9 @@ router.patch('/claims/:claimId', requireUser, writeLimit, asyncHandler(async (re
   res.json(payload);
 }));
 
-// POST /unlock -> Pro stub: flip read_unlocked so the builder prompt is
-// returned. No billing — just the flag.
+// POST /unlock -> flip read_unlocked so the builder prompt is returned.
+// Sign-in is the only gate; the client calls this automatically for
+// signed-in readers and shows "Sign in with GitHub" otherwise.
 router.post('/unlock', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
   const updated = await projectReads.setUnlocked(project.id, true);

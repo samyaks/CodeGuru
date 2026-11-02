@@ -4,8 +4,7 @@ import { cx } from '../../components/takeoff/status';
 import type { DashboardProject } from '../../services/api';
 import styles from './ProjectCard.module.css';
 
-// The dashboard's project card in the Takeoff design system. The older
-// components/v2/ProjectCard stays for the v2 style guide.
+// The dashboard's project card in the Takeoff design system.
 
 // Where a project is in the pipeline, in plain words. This is not a
 // Cleared / Holding / Grounded status, so it is shown as a neutral chip.

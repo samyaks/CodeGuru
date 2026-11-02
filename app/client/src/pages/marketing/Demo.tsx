@@ -10,14 +10,14 @@ export default function Demo() {
     <div className="px-6 py-16 sm:py-24">
       <PageMeta
         title="Demo"
-        description="See what Takeoff finds when it analyzes a real open-source repo — readiness score, gaps, product map, and security scan."
+        description="See what Takeoff finds when it analyzes a real open-source repo — the read, product map, ranked gaps, and security scan."
       />
 
       <MarketingPageHero
         eyebrow="Live demo"
         headline="See what Takeoff"
         headlineAccent="finds in your repo."
-        subhead="This is a sample report from shadcn-ui/taxonomy — readiness breakdown, product map, and top gaps. Analyze your own repo to get the real thing."
+        subhead="This is a sample report from shadcn-ui/taxonomy — product map and top gaps. Analyze your own repo to get the real thing."
       />
 
       <div className="max-w-5xl mx-auto mb-16">
@@ -49,7 +49,7 @@ export default function Demo() {
 
       <div className="max-w-3xl mx-auto">
         <CtaBand
-          headline="Get your own report in under 2 minutes"
+          headline="Get your own read in a few minutes"
           subhead="Paste a public GitHub URL or connect your account — no install required."
         />
       </div>

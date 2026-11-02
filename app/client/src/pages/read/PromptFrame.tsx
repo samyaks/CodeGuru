@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ReadNext } from '../../services/readApi';
+import { track } from '../../services/telemetry';
 
 // The real prompt is never sent while gated, so the blurred body is a
 // plausible stand-in — fake mono lines, same as blurring the frame body.
@@ -10,6 +11,7 @@ const PLACEHOLDER_PROMPT =
   '3. Turn on the rule so each person reads only their own rows.';
 
 interface PromptFrameProps {
+  projectId: string;
   next: ReadNext;
   faded: boolean;
   unlocking: boolean;
@@ -26,7 +28,7 @@ interface PromptFrameProps {
  * parent auto-unlocks; the button here is the manual fallback).
  */
 export default function PromptFrame({
-  next, faded, unlocking, signedIn, onSignIn, onUnlock,
+  projectId, next, faded, unlocking, signedIn, onSignIn, onUnlock,
 }: PromptFrameProps) {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -35,6 +37,7 @@ export default function PromptFrame({
     if (!next.prompt) return;
     try {
       await navigator.clipboard.writeText(next.prompt);
+      track('prompt_copied', { projectId, metadata: { source: 'next-thing' } });
       setCopied(true);
       if (copyTimer.current) clearTimeout(copyTimer.current);
       copyTimer.current = setTimeout(() => setCopied(false), 1400);

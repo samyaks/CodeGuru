@@ -27,17 +27,17 @@ export const MARKETING_FEATURES: MarketingFeature[] = [
   },
   {
     icon: CheckCircle2,
-    title: 'Readiness Score',
-    body: 'Weighted by real user impact, not just technical completeness.',
+    title: 'The Read',
+    body: 'A plain-English spec drafted from your code — what it does, who it is for, what it cannot get wrong.',
     detail:
-      'A single score that reflects how close you are to shipping something people can actually use. Auth, database, deployment, and permissions all factor in — weighted by how much they matter to your users.',
+      'Takeoff writes the spec your repo implies: objective, audience, and the one job it must not break, each tied to the files it came from. You correct it in place; every correction is kept and the next read starts from what you settled.',
   },
   {
     icon: Rocket,
-    title: 'One-Click Deploy',
-    body: 'From analysis to live URL. Env vars set automatically.',
+    title: 'The Next Thing',
+    body: 'One thing to build next, with the exact prompt for Cursor or Claude Code.',
     detail:
-      'When your gaps are closed, Takeoff helps you get to a live URL faster — with deployment guidance and environment configuration surfaced from your actual codebase.',
+      'Given the spec, Takeoff picks the single gap that stands between your app and its first real user, explains why, and writes the prompt for your builder — scoped to your files, your stack, and the rules it must not break.',
   },
   {
     icon: Shield,
@@ -71,22 +71,22 @@ export const MARKETING_FAQ: FaqItem[] = [
   {
     question: 'Do you clone or store my source code?',
     answer:
-      'No. Takeoff reads up to ~30 key files via the GitHub API — package manifests, configs, routes, auth files, and similar. We never clone your repo and do not persist full source code.',
+      'We never clone your repo. Takeoff reads files through the GitHub API, prioritising the ones that describe the app — manifests, configs, routes, auth, schema — and skipping build output and vendored code. A typical scan reads a few hundred files. We keep what we need to track changes between scans; you can delete a project and its data at any time.',
   },
   {
     question: 'Can I analyze a private repo?',
     answer:
-      'Yes. Connect GitHub with OAuth and pick any repo you have access to. Public repos can be analyzed by pasting a URL — no account required.',
+      'Not yet. Today Takeoff reads public repos by URL — no account required — or a folder you upload. Private-repo access through a GitHub App is in progress; sign in and we will tell you when it lands.',
   },
   {
     question: 'What stacks do you support?',
     answer:
-      'Any JavaScript/TypeScript, Python, Go, or Rust repo on GitHub. We detect Next.js, Vite, Express, Supabase, Prisma, and dozens of other frameworks automatically from your files.',
+      'JavaScript and TypeScript repos get the deepest read — Next.js, Vite, Express, Supabase, Prisma and similar are detected from your files. Python, Go, and Rust repos are read structurally with less depth for now.',
   },
   {
     question: 'How is this different from a linter or CI check?',
     answer:
-      'Linters catch syntax and style. Takeoff maps your codebase to user needs, scores shipping readiness, and generates AI context — the stuff vibe coders get stuck on after the UI looks done.',
+      'Linters catch syntax and style. Takeoff reads what the app is for, maps the code to the jobs your users need done, and tells you the one thing to build next — the part vibe coders get stuck on after the UI looks done.',
   },
   {
     question: 'Is Takeoff free during early access?',
@@ -138,10 +138,6 @@ export const USE_CASES: UseCaseConfig[] = [
         body: 'Scoped to your files and stack. Paste, run, ship.',
       },
     ],
-    quote: {
-      text: 'I finally stopped re-explaining my repo to ChatGPT every session.',
-      attribution: 'Early access user',
-    },
   },
   {
     slug: 'pms',
@@ -155,13 +151,13 @@ export const USE_CASES: UseCaseConfig[] = [
     pains: [
       'Hard to verify backend completeness without reading code',
       'Demo UI hides missing auth, permissions, and error handling',
-      'No shared view of readiness across stakeholders',
+      'No shared, evidence-backed view of what is actually built',
       'Security risks discovered too late',
     ],
     outcomes: [
       {
-        title: 'Readiness score you can share',
-        body: 'One number backed by concrete gaps — not gut feel or story points.',
+        title: 'A spec drafted from the code, not the deck',
+        body: 'What the repo actually does, who it serves, and which jobs are built — with a file trail for every claim.',
       },
       {
         title: 'Product map from real code',
@@ -172,10 +168,6 @@ export const USE_CASES: UseCaseConfig[] = [
         body: 'Share a redacted report with leadership before go-live.',
       },
     ],
-    quote: {
-      text: 'It is the first tool that shows me the gap between the demo and production.',
-      attribution: 'PM, early access',
-    },
   },
   {
     slug: 'agencies',
@@ -183,9 +175,9 @@ export const USE_CASES: UseCaseConfig[] = [
     icon: Briefcase,
     eyebrow: 'For agencies & consultants',
     headline: 'Audit client repos',
-    headlineAccent: 'in two minutes.',
+    headlineAccent: 'before you quote.',
     subhead:
-      'Before you quote a build or hand off a project, run Takeoff on the repo. Get a readiness report, security scan, and gap list you can share with the client — no manual code review required.',
+      'Before you quote a build or hand off a project, run Takeoff on the repo. Get a plain-English read of what is built, a security scan, and a ranked gap list you can share with the client — no manual code review required.',
     pains: [
       'Discovery calls without visibility into codebase quality',
       'Surprise infra debt after project kickoff',
@@ -195,7 +187,7 @@ export const USE_CASES: UseCaseConfig[] = [
     outcomes: [
       {
         title: 'Fast technical due diligence',
-        body: 'Analyze any public repo by URL. Connect GitHub for private client repos.',
+        body: 'Analyze any public repo by URL, or upload a folder for repos you cannot share. Private-repo access via GitHub App is coming.',
       },
       {
         title: 'Shareable security reports',
@@ -206,10 +198,6 @@ export const USE_CASES: UseCaseConfig[] = [
         body: 'Gaps with effort estimates become your statement of work.',
       },
     ],
-    quote: {
-      text: 'We use it in every discovery call now. Saves hours of manual review.',
-      attribution: 'Agency founder, early access',
-    },
   },
 ];
 
@@ -217,17 +205,17 @@ export const HOW_IT_WORKS_STEPS = [
   {
     step: '1',
     title: 'Connect your repo',
-    body: 'Sign in with GitHub, paste a public repo URL, or upload a folder. No clone, no install — we read key files via the GitHub API.',
+    body: 'Paste a public repo URL or upload a folder. No clone, no install — we read the files that describe your app through the GitHub API.',
   },
   {
     step: '2',
-    title: 'Get your readiness map',
-    body: 'Takeoff analyzes your stack, maps features to user jobs, scores gaps by impact, and runs a security scan — usually in under two minutes.',
+    title: 'Read the spec it finds',
+    body: 'Takeoff drafts what your app is for, maps the code to user jobs, ranks the gaps, and runs a security scan. Most repos take two to three minutes.',
   },
   {
     step: '3',
-    title: 'Ship with AI context',
-    body: 'Download .context.md files, copy gap-fix prompts into Cursor or Claude Code, and close the last 40% with grounded instructions instead of guesswork.',
+    title: 'Build the next thing',
+    body: 'Copy the prompt for the one gap that matters most into Cursor or Claude Code. Push, and Takeoff re-reads the affected files to check it landed.',
   },
 ];
 
@@ -238,12 +226,12 @@ export const PRICING_TIERS = [
     period: 'while in beta',
     description: 'Full product access for solo builders and small teams.',
     features: [
-      'Unlimited public repo analysis',
-      'Private repos via GitHub OAuth',
-      'Product map & readiness score',
-      'Security report & gap prompts',
+      'Public repo analysis by URL, or folder upload',
+      'The Read: a spec drafted from your code',
+      'Product map, ranked gaps, and the next thing to build',
+      'Builder prompts for Cursor and Claude Code',
+      'Security report with shareable links',
       '.context.md generation',
-      'Shareable build stories',
     ],
     cta: 'Start analyzing',
     highlighted: true,
