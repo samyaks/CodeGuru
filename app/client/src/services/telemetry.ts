@@ -13,7 +13,12 @@ export type FunnelEvent =
   | 'prompt_loaded'
   | 'prompt_copied'
   | 'sign_in_clicked'
-  | 'waitlist_joined';
+  | 'waitlist_joined'
+  // Intent loop (docs/specs/intent-driven-building.md).
+  | 'slice_activated'
+  | 'slice_synced'
+  | 'slice_verified'
+  | 'slice_abandoned';
 
 interface QueuedEvent {
   event: FunnelEvent;

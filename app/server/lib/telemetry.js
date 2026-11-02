@@ -18,6 +18,12 @@ const FUNNEL_EVENTS = new Set([
   'prompt_copied',
   'sign_in_clicked',
   'waitlist_joined',
+  // Intent loop (docs/specs/intent-driven-building.md). prompt_copied carries
+  // metadata.source = 'slice' when copied from the slice card.
+  'slice_activated',
+  'slice_synced',
+  'slice_verified',
+  'slice_abandoned',
 ]);
 
 const MAX_EVENTS_PER_BATCH = 20;
