@@ -545,6 +545,7 @@ function PersonaEditor({
 }: PersonaEditorProps) {
   const [showAddJob, setShowAddJob] = useState(false);
   const personaIsBusy = busyId === persona.id;
+  const notBuiltCount = persona.jobs.filter((job) => job.missingCount > 0).length;
 
   return (
     <div
@@ -563,6 +564,11 @@ function PersonaEditor({
             <p className="font-semibold text-ink truncate">{persona.name}</p>
             <p className="text-xs text-ink-muted">
               {persona.jobs.length} job{persona.jobs.length === 1 ? '' : 's'} to be done
+              {notBuiltCount > 0 ? (
+                <span className="text-holding font-medium">
+                  {' '}· {notBuiltCount} not built
+                </span>
+              ) : null}
             </p>
           </div>
         </button>
@@ -678,8 +684,16 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
   const totalNeeds = job.needs.length;
   const hasNeeds = totalNeeds > 0;
 
+  const notBuilt = job.missingCount > 0;
+
   return (
-    <div className="rounded-md border border-line bg-paper-sunk/50 hover:border-line transition-colors">
+    <div
+      className={`rounded-md border transition-colors ${
+        notBuilt
+          ? 'border-holding bg-holding-soft'
+          : 'border-line bg-paper-sunk/50'
+      }`}
+    >
       <div className="flex items-center gap-2 p-2 text-sm">
         {readOnly ? (
           <span className="text-[11px] uppercase tracking-wide font-medium border border-line rounded px-1.5 py-0.5 bg-paper-raised text-ink-muted">
@@ -707,6 +721,11 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
           aria-expanded={hasNeeds ? expanded : undefined}
         >
           <span className="flex-1 min-w-0 text-ink truncate">{job.title}</span>
+          {notBuilt ? (
+            <span className="text-[10px] uppercase tracking-wider font-medium text-holding whitespace-nowrap">
+              Not built
+            </span>
+          ) : null}
           {job.invariantTotal > 0 ? (
             <span className="text-[10px] text-ink-muted whitespace-nowrap">
               {job.invariantTotal} guarantees
@@ -767,7 +786,7 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
               <span className="text-holding">{job.partialCount} partial</span>
             ) : null}
             {job.missingCount > 0 ? (
-              <span className="text-orange-700">{job.missingCount} not built yet</span>
+              <span className="text-holding font-medium">{job.missingCount} not built yet</span>
             ) : null}
           </p>
         ) : (
@@ -797,17 +816,17 @@ function NeedRow({ need }: { need: JobNeed }) {
       : need.status === 'partial'
         ? 'text-holding'
         : 'text-ink-muted';
-  const labelTone = need.status === 'missing' ? 'text-ink-muted' : 'text-ink';
+  const labelTone = need.status === 'missing' ? 'text-ink font-medium' : 'text-ink';
 
   return (
-    <li className="flex items-center gap-2 text-xs">
+    <li className={`flex items-center gap-2 text-xs ${need.status === 'missing' ? 'rounded bg-paper-raised px-1.5 py-1' : ''}`}>
       <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${tone}`} aria-hidden />
       <span className={`flex-1 min-w-0 truncate ${labelTone}`}>{need.label}</span>
       {need.module ? (
         <span className="text-[10px] text-ink-muted truncate max-w-[40%]">· {need.module}</span>
       ) : null}
       {need.status === 'missing' ? (
-        <span className="text-[10px] uppercase tracking-wider text-orange-600 font-medium">
+        <span className="text-[10px] uppercase tracking-wider text-holding font-medium">
           not built
         </span>
       ) : need.status === 'partial' ? (

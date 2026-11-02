@@ -444,8 +444,8 @@ export default function ReadPage() {
       {id ? (
         <div className="read-panel v2-font-sans">
           <div className="space-y-8">
-            <IntentSection projectId={id} readOnly={!canEdit} />
             <MapSection projectId={id} readOnly={!canEdit} />
+            <IntentSection projectId={id} readOnly={!canEdit} />
           </div>
         </div>
       ) : null}
