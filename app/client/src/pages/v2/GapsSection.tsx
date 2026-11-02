@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { track } from '../../services/telemetry';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle, RefreshCw, Shield } from 'lucide-react';
 import { GapCard, EmptyState } from '../../components/v2';
@@ -216,6 +217,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
     if (!gap?.prompt) return;
     try {
       await navigator.clipboard.writeText(gap.prompt);
+      track('prompt_copied', { projectId, metadata: { source: 'gap', gapId: id } });
       setCopiedId(id);
       window.setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
     } catch {
@@ -492,7 +494,7 @@ function emptyTitle(filter: Filter): string {
 
 function emptyDesc(filter: Filter): string {
   if (filter === 'rejected') return 'Nothing to restore here.';
-  if (filter === 'all') return 'Run analysis again to refresh.';
+  if (filter === 'all') return 'The last scan turned up nothing to fix. New gaps appear here after the next scan.';
   return 'Switch filters to see other gaps.';
 }
 

@@ -31,6 +31,7 @@ const {
 } = require('./routes/v2/security-shares');
 const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
+const { waitlistRouter, eventsRouter } = require('./routes/telemetry');
 const { createRateLimit } = require('./lib/rate-limit');
 const { getDb, closeDb } = require('./lib/db');
 const { requestLogger } = require('./lib/logger');
@@ -143,6 +144,10 @@ app.get('/auth/github/reconnect', reconnectRateLimit, (req, res) => {
 if (supabase) {
   app.use('/api/analyze', optionalAuth(supabase), analyzeRoutes);
   app.use('/api/takeoff', optionalAuth(supabase), takeoffRoutes);
+  // Public: waitlist + first-party funnel events. optionalAuth only so
+  // signed-in visitors' rows carry a user_id.
+  app.use('/api/waitlist', optionalAuth(supabase), waitlistRouter);
+  app.use('/api/events', optionalAuth(supabase), eventsRouter);
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
   app.use('/api/projects', optionalAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
@@ -161,6 +166,8 @@ if (supabase) {
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/takeoff', takeoffRoutes);
+  app.use('/api/waitlist', waitlistRouter);
+  app.use('/api/events', eventsRouter);
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });

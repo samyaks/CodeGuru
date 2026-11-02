@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { fetchProjectDetail, type ProjectWithEntries } from '../../services/api';
+import { fetchProjectDetail, reanalyzeProject, type ProjectWithEntries } from '../../services/api';
 import {
   fetchRead, correctClaim, unlockRead,
   type ReadPayload, type ReadClaim, type ReadClaimSlot, type ClaimCorrection,
@@ -16,6 +16,7 @@ import ClaimPhrase from './ClaimPhrase';
 import EditorPop from './EditorPop';
 import Marginalia from './Marginalia';
 import PromptFrame from './PromptFrame';
+import { track } from '../../services/telemetry';
 import './read.css';
 
 // "The Read" — the manuscript page, now also the project shell. Four tabs:
@@ -173,8 +174,9 @@ export default function ReadPage() {
 
   // Drafting poll: every ~5s, up to a few minutes, then go quiet and
   // leave a manual "check again" link.
+  const scanFailed = project?.status === 'failed';
   useEffect(() => {
-    if (phase !== 'drafting' || pollExpired) return;
+    if (phase !== 'drafting' || pollExpired || scanFailed) return;
     if (pollAttemptsRef.current >= POLL_MAX_ATTEMPTS) {
       setPollExpired(true);
       return;
@@ -184,7 +186,26 @@ export default function ReadPage() {
       void load({ silent: true });
     }, POLL_INTERVAL_MS);
     return () => clearTimeout(t);
-  }, [phase, pollExpired, pollTick, load]);
+  }, [phase, pollExpired, pollTick, load, scanFailed]);
+
+  // Failed scans have nothing to lose, so retry skips the re-analyze
+  // confirmation modal. Uploaded folders can't be re-run (no source to
+  // fetch), so they only get the "scan another repo" path.
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const canRetry = !!project && !String(project.repo_url ?? '').startsWith('local://');
+  const retryScan = useCallback(async () => {
+    if (!id || retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await reanalyzeProject(id);
+      navigate(`/takeoff/${id}`, { replace: true });
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : "The scan couldn't be restarted.");
+      setRetrying(false);
+    }
+  }, [id, retrying, navigate]);
 
   const manualRefresh = useCallback(() => {
     pollAttemptsRef.current = 0;
@@ -239,6 +260,7 @@ export default function ReadPage() {
     setPromptNotice(null);
     try {
       setRead(await unlockRead(id));
+      track('prompt_loaded', { projectId: id });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setPromptNotice('Sign in to see the prompt.');
@@ -260,7 +282,23 @@ export default function ReadPage() {
     void handleUnlock();
   }, [id, user, authLoading, read?.next.gated, handleUnlock]);
 
-  const handleSignIn = useCallback(() => login('github'), [login]);
+  const handleSignIn = useCallback(() => {
+    track('sign_in_clicked', { projectId: id ?? null, metadata: { source: 'read' } });
+    login('github');
+  }, [login, id]);
+
+  // Funnel: record the first view of Spec and Build per project. Fires once
+  // the read is actually on screen, not on the loading state.
+  const viewedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!id || phase !== 'ready') return;
+    const ev = activeTab === 'spec' ? 'read_viewed' : activeTab === 'build' ? 'build_viewed' : null;
+    if (!ev) return;
+    const key = `${id}:${ev}`;
+    if (viewedRef.current.has(key)) return;
+    viewedRef.current.add(key);
+    track(ev, { projectId: id, metadata: { signedIn: canEdit } });
+  }, [id, phase, activeTab, canEdit]);
 
   const repoLabel = project ? `${project.owner}/${project.repo}` : null;
   const appName = useMemo(() => {
@@ -305,7 +343,24 @@ export default function ReadPage() {
 
   // Loading / drafting / error states are shared by the Spec and Build tabs,
   // since both are drawn from the same read payload.
-  const readState = phase === 'loading' ? (
+  const readState = scanFailed && phase !== 'ready' ? (
+    <div className="read-state">
+      <p className="st-lead">The scan didn't finish.</p>
+      <p className="st-sub">
+        {project?.error
+          ? project.error
+          : 'Something went wrong while reading the repo, so there is no read to show yet.'}
+      </p>
+      {canEdit && canRetry ? (
+        <button type="button" className="link" disabled={retrying} onClick={() => void retryScan()}>
+          {retrying ? 'Restarting…' : 'Try the scan again'}
+        </button>
+      ) : null}
+      {canEdit && canRetry ? ' · ' : null}
+      <Link to="/" className="link">Scan another repo →</Link>
+      {retryError ? <p className="gentle-note">{retryError}</p> : null}
+    </div>
+  ) : phase === 'loading' ? (
     <div className="read-state">
       <p className="st-lead">Fetching the read…</p>
     </div>
@@ -425,6 +480,7 @@ export default function ReadPage() {
               </p>
             ) : null}
             <PromptFrame
+              projectId={id ?? ''}
               next={read.next}
               faded={nextFaded}
               unlocking={unlocking}
@@ -434,7 +490,11 @@ export default function ReadPage() {
             />
           </>
         ) : (
-          <p className="st-sub">The next thing hasn't been derived yet — correct a claim on the Spec tab, or check back shortly.</p>
+          <p className="st-sub">
+            {canEdit
+              ? "The next thing hasn't been derived yet — correct a claim on the Spec tab, or check back shortly."
+              : "The next thing hasn't been derived for this project yet. Check back shortly."}
+          </p>
         )}
         {promptNotice ? <p className="gentle-note">{promptNotice}</p> : null}
       </div>

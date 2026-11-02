@@ -25,6 +25,7 @@ const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { recordServerEvent } = require('../lib/telemetry');
 const { seedFromAnalysis } = require('../lib/auto-entries');
 const { checkProjectAccess } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
@@ -239,6 +240,7 @@ async function runTakeoff(id, repoUrl) {
     } catch (updateErr) {
       console.error(`Failed to mark deployment ${id} as failed:`, updateErr.message);
     }
+    void recordServerEvent('scan_failed', { projectId: id, metadata: { error: String(err.message).slice(0, 200) } });
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'takeoff_failed', projectId: id, repoUrl, error: err.message, timestamp: new Date().toISOString() }));
     tTotal.end({ ok: false, error: err.message });
@@ -295,6 +297,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
     } catch (updateErr) {
       console.error(`Failed to mark deployment ${id} as failed:`, updateErr.message);
     }
+    void recordServerEvent('scan_failed', { projectId: id, userId: userId || null, metadata: { error: String(err.message).slice(0, 200) } });
     broadcast(id, { type: 'error', error: err.message });
     console.log(JSON.stringify({ event: 'upload_analysis_failed', projectId: id, projectName, error: err.message, timestamp: new Date().toISOString() }));
     tTotal.end({ ok: false, error: err.message });
@@ -516,6 +519,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     updated_at: new Date().toISOString(),
   });
   tStage3.end({ steps: Array.isArray(planSteps) ? planSteps.length : null });
+  void recordServerEvent('scan_ready', { projectId: id, userId: userId || null });
 
   broadcast(id, {
     type: 'complete',

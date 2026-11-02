@@ -9,6 +9,7 @@
     "migrate": "node server/lib/migrate.js",
     "migrate:force": "FORCE_MIGRATE=1 node server/lib/migrate.js",
     "test": "node --test \"server/**/*.test.js\"",
+    "report:funnel": "node server/scripts/funnel-report.js",
     "audit:self": "node server/scripts/audit-self.js",
     "audit:self:strict": "node server/scripts/audit-self.js --strict"
   },

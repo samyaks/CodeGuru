@@ -8,7 +8,7 @@ export default function Features() {
     <div className="px-6 py-16 sm:py-24">
       <PageMeta
         title="Features"
-        description="Product map, readiness score, security reports, and AI context files — everything you need to ship your vibe-coded app."
+        description="The read, product map, ranked gaps, builder prompts, security reports, and AI context files — everything you need to ship your vibe-coded app."
       />
 
       <MarketingPageHero

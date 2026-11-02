@@ -29,7 +29,7 @@ function ReadinessRow({
 }
 
 export default function DemoPreview() {
-  const { repo, framework, description, readinessScore, securityScore, readinessCategories, gaps, personas } =
+  const { repo, framework, description, securityScore, readinessCategories, gaps, personas } =
     DEMO_PROJECT;
 
   return (
@@ -51,8 +51,8 @@ export default function DemoPreview() {
             </div>
             <div className="flex items-center gap-6">
               <div className="text-center">
-                <p className="text-xs text-stone-500 mb-1">Readiness</p>
-                <p className="text-3xl font-bold text-stone-900 tabular-nums v2-font-serif">{readinessScore}</p>
+                <p className="text-xs text-stone-500 mb-1">Open gaps</p>
+                <p className="text-3xl font-bold text-stone-900 tabular-nums v2-font-serif">{gaps.length}</p>
               </div>
               <div className="text-center">
                 <p className="text-xs text-stone-500 mb-1 flex items-center gap-1 justify-center">
@@ -67,7 +67,7 @@ export default function DemoPreview() {
         <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-stone-100">
           {/* Readiness breakdown */}
           <div className="px-6 py-6">
-            <h4 className="text-sm font-semibold text-stone-900 mb-4">Readiness breakdown</h4>
+            <h4 className="text-sm font-semibold text-stone-900 mb-4">What the code covers</h4>
             <div className="space-y-1">
               {readinessCategories.map((cat) => (
                 <ReadinessRow key={cat.label} {...cat} />
