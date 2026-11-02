@@ -8,10 +8,10 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const VARIANT_CLASSES: Record<CardVariant, string> = {
-  default: 'bg-white border border-stone-200',
-  hover: 'bg-white border border-stone-200 hover:border-stone-300 transition-colors',
-  active: 'bg-white border border-stone-300 shadow-sm',
-  subtle: 'bg-stone-50 border border-stone-200',
+  default: 'bg-paper-raised border border-line',
+  hover: 'bg-paper-raised border border-line hover:border-line-strong transition-colors',
+  active: 'bg-paper-raised border border-line-strong shadow-sm',
+  subtle: 'bg-paper-sunk border border-line',
 };
 
 export function Card({ variant = 'default', className = '', children, ...rest }: CardProps) {

@@ -29,6 +29,9 @@ export type {
 export { ShippedItem } from './ShippedItem';
 export type { ShippedItemProps, ShippedItemData, Verification } from './ShippedItem';
 
+export { MergedPullCard } from './MergedPullCard';
+export type { MergedPullCardProps, MergedPullData } from './MergedPullCard';
+
 export { RecentCommitCard } from './RecentCommitCard';
 export type {
   RecentCommitCardProps,

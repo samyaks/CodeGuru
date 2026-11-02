@@ -20,7 +20,7 @@ export interface TabBarProps {
 
 export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps) {
   return (
-    <div className={`border-b border-stone-200 ${className}`.trim()}>
+    <div className={`border-b border-line ${className}`.trim()}>
       {/* `overflow-x-auto` lets the 5-tab v2 workspace bar scroll
           horizontally below ~640px instead of clipping or forcing a
           page-level horizontal scroll. The negative margin / matching
@@ -49,8 +49,8 @@ export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps
               onClick={() => onChange(tab.id)}
               className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-sm font-medium border-b-2 transition-all -mb-px whitespace-nowrap flex-shrink-0 ${
                 isActive
-                  ? 'border-stone-900 text-stone-900'
-                  : 'border-transparent text-stone-500 hover:text-stone-900'
+                  ? 'border-ink text-ink'
+                  : 'border-transparent text-ink-muted hover:text-ink'
               }`}
             >
               {Icon ? <Icon className="w-4 h-4" /> : null}
@@ -60,13 +60,13 @@ export function TabBar({ tabs, activeId, onChange, className = '' }: TabBarProps
                   className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
                     isActive
                       ? tab.badgeColor === 'emerald'
-                        ? 'bg-emerald-500 text-white'
+                        ? 'bg-cleared text-paper'
                         : tab.badgeColor === 'red'
-                          ? 'bg-red-600 text-white'
-                          : 'bg-stone-900 text-white'
+                          ? 'bg-grounded text-paper'
+                          : 'bg-night text-on-night'
                       : tab.badgeColor === 'red'
-                        ? 'bg-red-50 text-red-700'
-                        : 'bg-stone-100 text-stone-600'
+                        ? 'bg-grounded-soft text-grounded'
+                        : 'bg-paper-sunk text-ink-muted'
                   }`}
                 >
                   {tab.badge}

@@ -20,15 +20,15 @@ export interface BadgeProps {
 }
 
 const VARIANT_STYLES: Record<BadgeVariant, string> = {
-  broken: 'bg-red-50 text-red-600',
-  missing: 'bg-amber-50 text-amber-700',
-  infra: 'bg-stone-100 text-stone-700',
-  verified: 'bg-emerald-50 text-emerald-600',
-  partial: 'bg-amber-50 text-amber-700',
-  pending: 'bg-stone-100 text-stone-600',
-  'in-progress': 'bg-amber-100 text-amber-800',
-  rejected: 'bg-stone-100 text-stone-600',
-  neutral: 'bg-stone-100 text-stone-600',
+  broken: 'bg-grounded-soft text-grounded',
+  missing: 'bg-holding-soft text-holding',
+  infra: 'bg-paper-sunk text-ink',
+  verified: 'bg-cleared-soft text-cleared',
+  partial: 'bg-holding-soft text-holding',
+  pending: 'bg-paper-sunk text-ink-muted',
+  'in-progress': 'bg-holding-soft text-holding',
+  rejected: 'bg-paper-sunk text-ink-muted',
+  neutral: 'bg-paper-sunk text-ink-muted',
 };
 
 export function Badge({ variant, icon: Icon, children, className = '' }: BadgeProps) {

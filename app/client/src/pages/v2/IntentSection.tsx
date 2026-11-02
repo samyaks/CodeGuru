@@ -30,9 +30,9 @@ function filterStatements(stmts: IntentStatement[], filter: Filter): IntentState
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
-  high: 'bg-rose-50 text-rose-700 border-rose-200',
-  medium: 'bg-amber-50 text-amber-700 border-amber-200',
-  low: 'bg-stone-100 text-stone-500 border-stone-200',
+  high: 'bg-grounded-soft text-grounded border-grounded',
+  medium: 'bg-holding-soft text-holding border-holding',
+  low: 'bg-paper-sunk text-ink-muted border-line',
 };
 
 // Edited links come back from the form without a health status; until Phase 5
@@ -404,7 +404,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
   }, [intentData, filter]);
 
   if (loading && !intentData) {
-    return <div className="text-sm text-stone-500">Loading intent…</div>;
+    return <div className="text-sm text-ink-muted">Loading intent…</div>;
   }
 
   if (error) {
@@ -417,7 +417,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
           <button
             type="button"
             onClick={() => void reload()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
             Retry
@@ -443,8 +443,8 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What must hold for it to work</h3>
-          <p className="text-stone-600 text-sm leading-relaxed max-w-2xl">
+          <h3 className="text-2xl font-bold text-ink mb-2 v2-font-serif">What must hold for it to work</h3>
+          <p className="text-ink-muted text-sm leading-relaxed max-w-2xl">
             Guarantee-level behaviors found in the code, grouped under the job each one protects.
             Broken items need fixing{readOnly ? '.' : '; confirming a job confirms the guarantees under it. Confirmed guarantees become the living spec.'}
           </p>
@@ -455,7 +455,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
             onClick={() => void onExportSpec()}
             disabled={specBusy}
             aria-label="Export living spec"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 disabled:opacity-50 transition-colors flex-shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk disabled:opacity-50 transition-colors flex-shrink-0"
           >
             <Download className="w-3 h-3" />
             {specBusy ? 'Exporting…' : 'Export living spec'}
@@ -466,14 +466,14 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
       {usingMock ? (
         /* Dev-only banner: makes it obvious the review flow is running on the
            bundled fixture because the backend isn't wired yet. */
-        <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-holding bg-holding-soft border border-holding rounded-md px-3 py-2">
           <Sparkles className="w-3.5 h-3.5 flex-shrink-0" aria-hidden />
           <span>Preview data — the intent backend isn't implemented yet, so this is a local mock.</span>
         </div>
       ) : null}
 
       {gaps.length > 0 && !driftDismissed ? (
-        <div className="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2.5">
+        <div className="flex items-start gap-2 text-sm text-holding bg-holding-soft border border-holding rounded-md px-3 py-2.5">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" aria-hidden />
           <div className="flex-1 min-w-0">
             <span>
@@ -483,7 +483,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
             <button
               type="button"
               onClick={() => setFilter('confirmed')}
-              className="font-medium underline underline-offset-2 hover:text-amber-900"
+              className="font-medium underline underline-offset-2 hover:text-holding"
             >
               Review confirmed
             </button>
@@ -492,25 +492,25 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
             type="button"
             onClick={() => setDriftDismissed(true)}
             aria-label="Dismiss drift notice"
-            className="text-amber-500 hover:text-amber-800 transition-colors flex-shrink-0"
+            className="text-holding hover:text-holding transition-colors flex-shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       ) : null}
 
-      <div className="bg-white border border-stone-200 rounded-lg p-5">
+      <div className="bg-paper-raised border border-line rounded-lg p-5">
         <div className="flex items-baseline justify-between gap-3 mb-2">
-          <p className="text-sm text-stone-700">
-            <span className="font-semibold text-stone-900">{totals.total}</span>{' '}
+          <p className="text-sm text-ink">
+            <span className="font-semibold text-ink">{totals.total}</span>{' '}
             {totals.total === 1 ? 'guarantee' : 'guarantees'} across{' '}
-            <span className="font-semibold text-stone-900">{totals.jobCount}</span>{' '}
+            <span className="font-semibold text-ink">{totals.jobCount}</span>{' '}
             {totals.jobCount === 1 ? 'job' : 'jobs'} —{' '}
-            <span className="font-semibold text-emerald-700">{totals.holds}</span> hold,{' '}
-            <span className="font-semibold text-rose-700">{totals.broken}</span> broken —{' '}
-            <span className="font-semibold text-stone-900">{totals.confirmed}</span> confirmed
+            <span className="font-semibold text-cleared">{totals.holds}</span> hold,{' '}
+            <span className="font-semibold text-grounded">{totals.broken}</span> broken —{' '}
+            <span className="font-semibold text-ink">{totals.confirmed}</span> confirmed
           </p>
-          <span className="text-xs font-semibold text-stone-700">{confirmPct}%</span>
+          <span className="text-xs font-semibold text-ink">{confirmPct}%</span>
         </div>
         <ProgressBar value={confirmPct} label="Intent confirmed" />
       </div>
@@ -582,8 +582,8 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
                           }}
                           className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border transition-colors ${
                             busyArea === job.id
-                              ? 'border-stone-200 text-stone-400'
-                              : 'border-stone-300 text-stone-700 hover:bg-stone-100 cursor-pointer'
+                              ? 'border-line text-ink-muted'
+                              : 'border-line-strong text-ink hover:bg-paper-sunk cursor-pointer'
                           }`}
                         >
                           <CheckCheck className="w-3 h-3" />
@@ -680,7 +680,7 @@ export function IntentSection({ projectId, readOnly = false }: IntentSectionProp
       {toast ? (
         <div
           role="status"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-night text-on-night text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
         >
           {toast}
         </div>
@@ -697,10 +697,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-        active ? 'bg-stone-900 text-white' : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+        active ? 'bg-night text-on-night' : 'bg-paper-raised border border-line text-ink hover:border-line-strong'
       }`}
     >
-      {children} <span className={active ? 'text-stone-300' : 'text-stone-400'}>{count}</span>
+      {children} <span className={active ? 'text-ink-muted' : 'text-ink-muted'}>{count}</span>
     </button>
   );
 }
@@ -721,13 +721,13 @@ function TriageRow({
   const isRelink = link.linkStatus === 'needs_relink';
   const anchor = link.symbol ? `${link.filePath} \u00b7 ${link.symbol}` : link.filePath;
   return (
-    <div className="border border-stone-200 rounded-lg p-3.5 bg-white">
+    <div className="border border-line rounded-lg p-3.5 bg-paper-raised">
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span
           className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium inline-flex items-center gap-1 ${
             isRelink
-              ? 'bg-amber-50 text-amber-700 border-amber-200'
-              : 'bg-red-50 text-red-600 border-red-200'
+              ? 'bg-holding-soft text-holding border-holding'
+              : 'bg-grounded-soft text-grounded border-grounded'
           }`}
         >
           {isRelink ? (
@@ -738,23 +738,23 @@ function TriageRow({
           {isRelink ? 'Needs relink' : 'Broken link'}
         </span>
         {item.featureArea ? (
-          <span className="text-[10px] uppercase tracking-wider text-stone-400">{item.featureArea}</span>
+          <span className="text-[10px] uppercase tracking-wider text-ink-muted">{item.featureArea}</span>
         ) : null}
       </div>
 
-      <p className="text-sm text-stone-800 leading-relaxed v2-font-serif mb-2">{item.statementText}</p>
+      <p className="text-sm text-ink leading-relaxed v2-font-serif mb-2">{item.statementText}</p>
 
       <div className="flex flex-wrap items-center gap-1.5 mb-3">
         <code
-          className="text-xs px-2 py-1 rounded border font-mono bg-stone-50 border-stone-200 text-stone-700"
+          className="text-xs px-2 py-1 rounded border font-mono bg-paper-sunk border-line text-ink"
           title={anchor}
         >
-          <span className="text-stone-500">{link.filePath}</span>
-          {link.symbol ? <span className="text-stone-400"> · </span> : null}
+          <span className="text-ink-muted">{link.filePath}</span>
+          {link.symbol ? <span className="text-ink-muted"> · </span> : null}
           {link.symbol ? <span>{link.symbol}</span> : null}
         </code>
         {isRelink && link.suggestedSymbol ? (
-          <span className="text-xs text-amber-700 font-mono">{`\u2192 ${link.suggestedSymbol}`}</span>
+          <span className="text-xs text-holding font-mono">{`\u2192 ${link.suggestedSymbol}`}</span>
         ) : null}
       </div>
 
@@ -766,7 +766,7 @@ function TriageRow({
               onClick={() => onAcceptRelink(item)}
               disabled={busy}
               aria-label={link.suggestedSymbol ? `Relink to ${link.suggestedSymbol}` : 'Accept relink'}
-              className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 bg-night hover:bg-night disabled:bg-line-strong text-on-night rounded-md text-sm font-medium transition-colors"
             >
               <Wrench className="w-4 h-4" />
               {link.suggestedSymbol ? `Relink \u2192 ${link.suggestedSymbol}` : 'Accept relink'}
@@ -776,7 +776,7 @@ function TriageRow({
               onClick={() => onMarkBroken(item)}
               disabled={busy}
               aria-label="Mark link broken"
-              className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-red-600 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-ink-muted hover:text-grounded hover:bg-paper-sunk disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
             >
               <Unlink className="w-4 h-4" /> Mark broken
             </button>
@@ -788,7 +788,7 @@ function TriageRow({
               onClick={() => onMarkBroken(item)}
               disabled={busy}
               aria-label="Confirm link broken"
-              className="flex items-center gap-2 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 bg-night hover:bg-night disabled:bg-line-strong text-on-night rounded-md text-sm font-medium transition-colors"
             >
               <Unlink className="w-4 h-4" /> Mark broken
             </button>
@@ -797,7 +797,7 @@ function TriageRow({
               onClick={() => onDismiss(item)}
               disabled={busy}
               aria-label="Dismiss broken link"
-              className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-ink-muted hover:text-ink hover:bg-paper-sunk disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
             >
               <X className="w-4 h-4" /> Dismiss
             </button>
@@ -822,8 +822,8 @@ function AreaCollapsible({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-      <div className="w-full px-5 py-3.5 flex items-start gap-3 hover:bg-stone-50 transition-colors">
+    <div className="bg-paper-raised border border-line rounded-lg overflow-hidden">
+      <div className="w-full px-5 py-3.5 flex items-start gap-3 hover:bg-paper-sunk transition-colors">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -831,19 +831,19 @@ function AreaCollapsible({
           className="flex items-start gap-3 text-left flex-1 min-w-0"
         >
           {open ? (
-            <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0 mt-0.5" />
+            <ChevronDown className="w-4 h-4 text-ink-muted flex-shrink-0 mt-0.5" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0 mt-0.5" />
+            <ChevronRight className="w-4 h-4 text-ink-muted flex-shrink-0 mt-0.5" />
           )}
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-stone-900">{title}</span>
+              <span className="text-sm font-semibold text-ink">{title}</span>
               {subtitle ? (
-                <span className="text-xs text-stone-500 truncate">{subtitle}</span>
+                <span className="text-xs text-ink-muted truncate">{subtitle}</span>
               ) : null}
             </span>
             {summary ? (
-              <span className="block text-xs text-stone-500 mt-0.5 leading-snug">{summary}</span>
+              <span className="block text-xs text-ink-muted mt-0.5 leading-snug">{summary}</span>
             ) : null}
           </span>
         </button>
@@ -859,11 +859,11 @@ function PersonaHeader({ name, emoji, confirmed }: { name: string; emoji: string
   return (
     <div className="flex items-center gap-2 pt-1">
       <span className="text-lg leading-none" aria-hidden>{emoji || '\u{1F464}'}</span>
-      <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">{name}</h4>
+      <h4 className="text-xs font-bold uppercase tracking-wider text-ink">{name}</h4>
       {confirmed ? (
-        <span className="text-[10px] uppercase tracking-wider text-emerald-700 font-medium">Confirmed</span>
+        <span className="text-[10px] uppercase tracking-wider text-cleared font-medium">Confirmed</span>
       ) : (
-        <span className="text-[10px] uppercase tracking-wider text-stone-400 font-medium">Draft</span>
+        <span className="text-[10px] uppercase tracking-wider text-ink-muted font-medium">Draft</span>
       )}
     </div>
   );
@@ -875,8 +875,8 @@ function JobHeader({
 }: { title: string; priority: 'high' | 'medium' | 'low' | null }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <Target className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" aria-hidden />
-      <span className="text-sm font-semibold text-stone-800 v2-font-serif">{title}</span>
+      <Target className="w-3.5 h-3.5 text-ink-muted flex-shrink-0" aria-hidden />
+      <span className="text-sm font-semibold text-ink v2-font-serif">{title}</span>
       {priority ? (
         <span
           className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium ${

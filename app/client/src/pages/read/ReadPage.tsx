@@ -510,7 +510,7 @@ export default function ReadPage() {
   ) : null;
 
   return (
-    <div className="read-page">
+    <div className="takeoff read-page" data-theme="light">
       <div className="masthead">
         <div className="mh-left">
           <Link to="/dashboard" className="wordmark">Takeoff</Link>

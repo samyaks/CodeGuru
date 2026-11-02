@@ -144,6 +144,9 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.takeoff .v2-font-sans { font-family: var(--font-sans); }
+.takeoff .v2-font-serif { font-family: var(--font-serif); }
+
 .takeoff :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

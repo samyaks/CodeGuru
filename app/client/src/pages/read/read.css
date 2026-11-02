@@ -2,22 +2,22 @@
    Every selector is scoped under .read-page so nothing leaks into the app. */
 
 .read-page {
-  --paper: #F5F3EC;          /* cool-warm manuscript paper */
-  --paper-2: #EFECE2;
-  --ink: #211E19;            /* warm near-black */
-  --ink-soft: #6B655A;       /* margin ink */
-  --ink-faint: #9A9184;
-  --rule: #DAD6C9;
-  --rule-soft: #E4E0D5;
-  --mark: #A32F26;           /* editor's red pen */
-  --mark-soft: #C86A5F;
-  --wash: #F6E7A8;           /* highlighter, uncertain phrases */
-  --wash-deep: #EFD97E;
-  --settled: #33302A;
+  /* Aliases onto the light design tokens. Do not redefine --paper/--ink/--line;
+     those come from .takeoff so cards using bg-paper stay in the same theme. */
+  --paper-2: var(--paper-sunk);
+  --ink-soft: var(--ink-muted);
+  --ink-faint: var(--ink-muted);
+  --rule: var(--line);
+  --rule-soft: var(--line);
+  --mark: var(--beacon);
+  --mark-soft: var(--beacon);
+  --wash: var(--holding-soft);
+  --wash-deep: var(--holding-soft);
+  --settled: var(--ink);
 
   background: var(--paper);
   color: var(--ink);
-  font-family: 'Newsreader', Georgia, serif;
+  font-family: var(--font-serif), 'Newsreader', Georgia, serif;
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
@@ -29,7 +29,7 @@
 /* masthead */
 .read-page .masthead { max-width: 1100px; margin: 0 auto; padding: 26px 40px 0; display: flex; align-items: baseline; justify-content: space-between; }
 .read-page .mh-left { display: flex; align-items: baseline; gap: 14px; }
-.read-page .wordmark { font-family: 'IBM Plex Mono'; font-weight: 500; letter-spacing: .34em; font-size: 12px; text-transform: uppercase; color: var(--ink); text-decoration: none; }
+.read-page .wordmark { font-family: var(--font-serif), 'Newsreader', Georgia, serif; font-weight: 500; font-size: 22px; letter-spacing: -0.01em; text-transform: none; color: var(--ink); text-decoration: none; }
 .read-page .dateline { font-style: italic; font-size: 14px; color: var(--ink-soft); }
 .read-page .dateline .mono { font-style: normal; font-size: 12.5px; color: var(--ink); }
 .read-page .mh-right { font-size: 12.5px; color: var(--ink-faint); font-style: italic; }
@@ -61,7 +61,8 @@
 /* workspace sections (gaps/map/…) keep their sans UI inside the paper shell */
 .read-page .read-panel {
   padding: 28px 0 56px;
-  color: #1c1917;
+  color: var(--ink);
+  font-family: var(--font-sans);
   /* re-enable app-like interaction affordances the manuscript page softens */
   line-height: 1.5;
 }

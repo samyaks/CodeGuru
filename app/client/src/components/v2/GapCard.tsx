@@ -93,9 +93,9 @@ const CATEGORY_META: Record<GapCategory, {
   icon: typeof AlertOctagon;
   border: string;
 }> = {
-  broken: { label: 'Broken', icon: AlertOctagon, border: 'border-red-200' },
-  missing: { label: 'Missing Functionality', icon: Wrench, border: 'border-amber-200' },
-  infra: { label: 'Missing Infrastructure', icon: Server, border: 'border-stone-300' },
+  broken: { label: 'Broken', icon: AlertOctagon, border: 'border-grounded' },
+  missing: { label: 'Missing Functionality', icon: Wrench, border: 'border-holding' },
+  infra: { label: 'Missing Infrastructure', icon: Server, border: 'border-line-strong' },
 };
 
 // Severity colors for the Shield badge. Matches the spec exactly:
@@ -106,10 +106,10 @@ const SECURITY_SEVERITY_META: Record<SecuritySeverity, {
   label: string;
   shieldClass: string;
 }> = {
-  critical: { label: 'Critical', shieldClass: 'bg-red-50 text-red-600 border-red-200' },
-  high:     { label: 'High',     shieldClass: 'bg-red-50 text-red-500 border-red-100' },
-  medium:   { label: 'Medium',   shieldClass: 'bg-amber-50 text-amber-700 border-amber-200' },
-  low:      { label: 'Low',      shieldClass: 'bg-stone-100 text-stone-600 border-stone-200' },
+  critical: { label: 'Critical', shieldClass: 'bg-grounded-soft text-grounded border-grounded' },
+  high:     { label: 'High',     shieldClass: 'bg-grounded-soft text-grounded border-grounded' },
+  medium:   { label: 'Medium',   shieldClass: 'bg-holding-soft text-holding border-holding' },
+  low:      { label: 'Low',      shieldClass: 'bg-paper-sunk text-ink-muted border-line' },
 };
 
 function cweUrl(cweId: string): string {
@@ -152,11 +152,11 @@ export function GapCard({
   const [refineText, setRefineText] = useState('');
 
   const ringClass = isSynthetic
-    ? 'border-stone-300 border-dashed'
+    ? 'border-line-strong border-dashed'
     : isInProgress
-      ? 'border-amber-300 ring-2 ring-amber-100'
+      ? 'border-holding ring-2 ring-holding-soft'
       : isRejected
-        ? 'border-stone-200 opacity-60'
+        ? 'border-line opacity-60'
         : meta.border;
 
   return (
@@ -167,7 +167,7 @@ export function GapCard({
          and toggles `data-focused` so we can ring it briefly. */
       id={`gap-${gap.id}`}
       data-gap-id={gap.id}
-      className={`bg-white border ${ringClass} rounded-lg overflow-hidden transition-all hover:shadow-sm data-[focused=true]:ring-2 data-[focused=true]:ring-amber-400 data-[focused=true]:ring-offset-2 ${className}`.trim()}
+      className={`bg-paper-raised border ${ringClass} rounded-lg overflow-hidden transition-all hover:shadow-sm data-[focused=true]:ring-2 data-[focused=true]:ring-amber-400 data-[focused=true]:ring-offset-2 ${className}`.trim()}
     >
       <div className="p-5">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -186,7 +186,7 @@ export function GapCard({
               href={cweUrl(gap.cweId)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[11px] font-mono text-stone-500 hover:text-stone-800 underline-offset-2 hover:underline"
+              className="text-[11px] font-mono text-ink-muted hover:text-ink underline-offset-2 hover:underline"
               title="View this CWE on MITRE"
             >
               {gap.cweId}
@@ -194,7 +194,7 @@ export function GapCard({
             </a>
           ) : null}
           {isSynthetic ? (
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-stone-500 bg-stone-100 border border-stone-200 rounded-full px-2 py-0.5">
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold text-ink-muted bg-paper-sunk border border-line rounded-full px-2 py-0.5">
               <Sparkles className="w-2.5 h-2.5" /> From Map
             </span>
           ) : null}
@@ -206,26 +206,26 @@ export function GapCard({
           ) : null}
           {gap.effort ? (
             <>
-              <span className="text-xs text-stone-500">·</span>
-              <span className="text-xs text-stone-500">{gap.effort} effort</span>
+              <span className="text-xs text-ink-muted">·</span>
+              <span className="text-xs text-ink-muted">{gap.effort} effort</span>
             </>
           ) : null}
           {typeof gap.files === 'number' && !(Array.isArray(gap.evidence) && gap.evidence.length > 0) ? (
             <>
-              <span className="text-xs text-stone-500">·</span>
-              <span className="text-xs text-stone-500">{gap.files} files</span>
+              <span className="text-xs text-ink-muted">·</span>
+              <span className="text-xs text-ink-muted">{gap.files} files</span>
             </>
           ) : null}
           {typeof gap.completion === 'number' ? (
             <>
-              <span className="text-xs text-stone-500">·</span>
-              <span className="text-xs text-stone-500">{gap.completion}% built</span>
+              <span className="text-xs text-ink-muted">·</span>
+              <span className="text-xs text-ink-muted">{gap.completion}% built</span>
             </>
           ) : null}
         </div>
 
-        <h4 className="font-semibold text-stone-900 mb-1.5">{gap.title}</h4>
-        <p className="text-sm text-stone-600 leading-relaxed mb-3">{gap.description}</p>
+        <h4 className="font-semibold text-ink mb-1.5">{gap.title}</h4>
+        <p className="text-sm text-ink-muted leading-relaxed mb-3">{gap.description}</p>
 
         {Array.isArray(gap.evidence) && gap.evidence.length > 0 ? (
           <div className="mb-3 space-y-1">
@@ -233,58 +233,58 @@ export function GapCard({
               <div
                 key={`${e.file}:${e.line ?? ''}:${i}`}
                 title={e.reason ?? undefined}
-                className="flex items-start gap-1.5 text-[11px] font-mono text-stone-500"
+                className="flex items-start gap-1.5 text-[11px] font-mono text-ink-muted"
               >
-                <FileCode className="w-3 h-3 mt-0.5 flex-shrink-0 text-stone-400" aria-hidden />
-                <span className="text-stone-700">{e.file}{typeof e.line === 'number' ? `:${e.line}` : ''}</span>
+                <FileCode className="w-3 h-3 mt-0.5 flex-shrink-0 text-ink-muted" aria-hidden />
+                <span className="text-ink">{e.file}{typeof e.line === 'number' ? `:${e.line}` : ''}</span>
               </div>
             ))}
             {gap.evidence.length > 5 ? (
-              <p className="text-[11px] text-stone-400 pl-4">+{gap.evidence.length - 5} more</p>
+              <p className="text-[11px] text-ink-muted pl-4">+{gap.evidence.length - 5} more</p>
             ) : null}
           </div>
         ) : null}
 
         {affectedJobs.length > 0 ? (
           <div className="flex items-start gap-2 text-xs mb-4">
-            <Users className="w-3 h-3 text-stone-400 mt-0.5 flex-shrink-0" />
+            <Users className="w-3 h-3 text-ink-muted mt-0.5 flex-shrink-0" />
             <div className="flex flex-wrap gap-1.5">
               {affectedJobs.map((j) => (
                 <span
                   key={`${j.personaId ?? 'no-persona'}-${j.jobId}`}
                   title={j.reason ?? `Blocks "${j.jobTitle}"`}
-                  className="inline-flex items-center gap-1 bg-stone-100 border border-stone-200 rounded-full px-2 py-0.5 text-stone-700"
+                  className="inline-flex items-center gap-1 bg-paper-sunk border border-line rounded-full px-2 py-0.5 text-ink"
                 >
                   <span aria-hidden>{j.personaEmoji || '👤'}</span>
                   <span className="font-medium">{j.personaName || 'Persona'}</span>
-                  <span className="text-stone-400">·</span>
-                  <span className="text-stone-600">{j.jobTitle}</span>
+                  <span className="text-ink-muted">·</span>
+                  <span className="text-ink-muted">{j.jobTitle}</span>
                 </span>
               ))}
             </div>
           </div>
         ) : gap.affects && gap.affects.length > 0 ? (
-          <div className="flex items-center gap-2 text-xs text-stone-500 mb-4">
+          <div className="flex items-center gap-2 text-xs text-ink-muted mb-4">
             <Users className="w-3 h-3" />
             <span>Blocks: {gap.affects.join(', ')}</span>
           </div>
         ) : null}
         {gap.required_for && gap.required_for.length > 0 && affectedJobs.length === 0 ? (
-          <div className="flex items-center gap-2 text-xs text-stone-500 mb-4">
+          <div className="flex items-center gap-2 text-xs text-ink-muted mb-4">
             <Briefcase className="w-3 h-3" />
             <span>Required for: {gap.required_for.join(' · ')}</span>
           </div>
         ) : null}
 
         {isInProgress ? (
-          <div className="mt-4 pt-4 border-t border-stone-100 space-y-3">
+          <div className="mt-4 pt-4 border-t border-line space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-widest text-stone-500 font-semibold">Cursor prompt</p>
+              <p className="text-xs uppercase tracking-widest text-ink-muted font-semibold">Cursor prompt</p>
               {gap.prompt ? (
                 <button
                   type="button"
                   onClick={() => setExpanded((x) => !x)}
-                  className="text-xs text-stone-600 hover:text-stone-900 flex items-center gap-1"
+                  className="text-xs text-ink-muted hover:text-ink flex items-center gap-1"
                 >
                   {expanded ? <>Hide <ChevronUp className="w-3 h-3" /></> : <>Show <ChevronDown className="w-3 h-3" /></>}
                 </button>
@@ -292,8 +292,8 @@ export function GapCard({
             </div>
 
             {expanded && gap.prompt ? (
-              <div className="bg-stone-900 rounded-md p-4 max-h-60 overflow-y-auto">
-                <pre className="text-xs text-stone-300 whitespace-pre-wrap font-mono leading-relaxed">{gap.prompt}</pre>
+              <div className="bg-night rounded-md p-4 max-h-60 overflow-y-auto">
+                <pre className="text-xs text-ink-muted whitespace-pre-wrap font-mono leading-relaxed">{gap.prompt}</pre>
               </div>
             ) : null}
 
@@ -302,7 +302,7 @@ export function GapCard({
                 <button
                   type="button"
                   onClick={() => onCopyPrompt?.(gap.id)}
-                  className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-night hover:bg-night text-on-night rounded-md text-sm font-medium transition-colors"
                 >
                   {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
                 </button>
@@ -311,7 +311,7 @@ export function GapCard({
                   type="button"
                   onClick={() => onGetPrompt(gap.id)}
                   disabled={promptLoading}
-                  className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 text-white rounded-md text-sm font-medium transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-night hover:bg-night disabled:bg-line-strong text-on-night rounded-md text-sm font-medium transition-colors"
                 >
                   <Sparkles className="w-4 h-4" /> {promptLoading ? 'Generating…' : 'Get Cursor prompt'}
                 </button>
@@ -324,33 +324,33 @@ export function GapCard({
                 <button
                   type="button"
                   onClick={() => onMarkCommitted(gap.id)}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium transition-colors ml-auto"
+                  className="flex items-center gap-2 px-4 py-2 bg-cleared hover:bg-cleared text-paper rounded-md text-sm font-medium transition-colors ml-auto"
                 >
                   <GitCommit className="w-4 h-4" /> Mark committed
                 </button>
               ) : null}
             </div>
             {onMarkCommitted ? (
-              <p className="text-xs text-stone-500 italic">After you commit, Takeoff will re-scan the affected files and verify the gap is resolved.</p>
+              <p className="text-xs text-ink-muted italic">After you commit, Takeoff will re-scan the affected files and verify the gap is resolved.</p>
             ) : null}
           </div>
         ) : null}
 
         {refining && isUntriaged ? (
-          <div className="mt-4 p-3 bg-stone-50 border border-stone-200 rounded-md">
-            <p className="text-xs text-stone-600 mb-2 font-medium">How should we reshape this gap?</p>
+          <div className="mt-4 p-3 bg-paper-sunk border border-line rounded-md">
+            <p className="text-xs text-ink-muted mb-2 font-medium">How should we reshape this gap?</p>
             <textarea
               value={refineText}
               onChange={(e) => setRefineText(e.target.value)}
               placeholder="e.g. 'Scope smaller — just protect /api/auth endpoints first'"
-              className="w-full px-3 py-2 text-sm border border-stone-300 rounded focus:outline-none focus:border-stone-900 mb-2 resize-none"
+              className="w-full px-3 py-2 text-sm border border-line-strong rounded focus:outline-none focus:border-line-strong mb-2 resize-none"
               rows={2}
             />
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => { setRefining(false); setRefineText(''); }}
-                className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5"
+                className="text-xs text-ink-muted hover:text-ink px-3 py-1.5"
               >
                 Cancel
               </button>
@@ -362,7 +362,7 @@ export function GapCard({
                   setRefineText('');
                 }}
                 disabled={!refineText.trim()}
-                className="text-xs bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white px-3 py-1.5 rounded font-medium"
+                className="text-xs bg-night hover:bg-night disabled:bg-line-strong text-on-night px-3 py-1.5 rounded font-medium"
               >
                 Regenerate
               </button>
@@ -373,18 +373,18 @@ export function GapCard({
         {isUntriaged && !refining && isSynthetic ? (
           gap.prompt ? (
             <div className="mt-2 space-y-3">
-              <div className="bg-stone-900 rounded-md p-4 max-h-60 overflow-y-auto">
-                <pre className="text-xs text-stone-300 whitespace-pre-wrap font-mono leading-relaxed">{gap.prompt}</pre>
+              <div className="bg-night rounded-md p-4 max-h-60 overflow-y-auto">
+                <pre className="text-xs text-ink-muted whitespace-pre-wrap font-mono leading-relaxed">{gap.prompt}</pre>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => onCopyPrompt?.(gap.id)}
-                  className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-night hover:bg-night text-on-night rounded-md text-sm font-medium transition-colors"
                 >
                   {copied ? (<><CheckCircle className="w-4 h-4" /> Copied</>) : (<><Copy className="w-4 h-4" /> Copy prompt</>)}
                 </button>
-                <span className="text-xs text-stone-500 italic">
+                <span className="text-xs text-ink-muted italic">
                   Build it, push, and Takeoff will detect the entity is built — this gap will disappear.
                 </span>
               </div>
@@ -395,11 +395,11 @@ export function GapCard({
                 type="button"
                 onClick={() => onGetPrompt(gap.id)}
                 disabled={promptLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 text-white rounded-md text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-night hover:bg-night disabled:bg-line-strong text-on-night rounded-md text-sm font-medium transition-colors"
               >
                 <Sparkles className="w-4 h-4" /> {promptLoading ? 'Generating…' : 'Get Cursor prompt'}
               </button>
-              <span className="text-xs text-stone-500 italic">
+              <span className="text-xs text-ink-muted italic">
                 The prompt is written on request, so nothing is generated until you ask.
               </span>
             </div>
@@ -418,7 +418,7 @@ export function GapCard({
               <button
                 type="button"
                 onClick={() => onAccept(gap.id)}
-                className="flex items-center gap-2 px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-md text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-night hover:bg-night text-on-night rounded-md text-sm font-medium transition-colors"
               >
                 <Check className="w-4 h-4" /> Accept
               </button>
@@ -427,7 +427,7 @@ export function GapCard({
               <button
                 type="button"
                 onClick={() => onReject(gap.id)}
-                className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-ink-muted hover:text-ink hover:bg-paper-sunk rounded-md text-sm font-medium transition-colors"
               >
                 <X className="w-4 h-4" /> Reject
               </button>
@@ -436,7 +436,7 @@ export function GapCard({
               <button
                 type="button"
                 onClick={() => setRefining(true)}
-                className="flex items-center gap-2 px-3 py-2 text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-md text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-3 py-2 text-ink-muted hover:text-ink hover:bg-paper-sunk rounded-md text-sm font-medium transition-colors"
               >
                 <Wand2 className="w-4 h-4" /> Refine
               </button>
@@ -448,7 +448,7 @@ export function GapCard({
           <button
             type="button"
             onClick={() => onRestore(gap.id)}
-            className="text-xs text-stone-600 hover:text-stone-900 font-medium"
+            className="text-xs text-ink-muted hover:text-ink font-medium"
           >
             Restore this gap
           </button>

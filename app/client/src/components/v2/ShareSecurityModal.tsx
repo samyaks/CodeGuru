@@ -146,22 +146,22 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
       className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
     >
       <div
-        className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-night/40 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden
       />
-      <div className="relative bg-white border border-stone-200 rounded-lg shadow-xl w-full max-w-lg max-h-full overflow-y-auto">
+      <div className="relative bg-paper-raised border border-line rounded-lg shadow-xl w-full max-w-lg max-h-full overflow-y-auto">
         {/* Header */}
-        <div className="flex items-start justify-between p-5 border-b border-stone-100">
+        <div className="flex items-start justify-between p-5 border-b border-line">
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded bg-stone-900 text-white flex items-center justify-center flex-shrink-0">
+            <div className="w-9 h-9 rounded bg-night text-on-night flex items-center justify-center flex-shrink-0">
               <Shield className="w-4 h-4" strokeWidth={2.5} aria-hidden />
             </div>
             <div>
-              <h2 id="share-security-title" className="text-base font-bold text-stone-900 tracking-tight">
+              <h2 id="share-security-title" className="text-base font-bold text-ink tracking-tight">
                 Share security report
               </h2>
-              <p className="text-xs text-stone-500 mt-0.5">
+              <p className="text-xs text-ink-muted mt-0.5">
                 Anyone with the link can view this report — no login required.
               </p>
             </div>
@@ -170,14 +170,14 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-stone-400 hover:text-stone-700 transition-colors p-1 -m-1"
+            className="text-ink-muted hover:text-ink transition-colors p-1 -m-1"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Create form */}
-        <div className="p-5 border-b border-stone-100 space-y-3">
+        <div className="p-5 border-b border-line space-y-3">
           <label className="flex items-start gap-2 cursor-pointer text-sm select-none">
             <input
               type="checkbox"
@@ -186,11 +186,11 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
               className="mt-0.5"
             />
             <span>
-              <span className="text-stone-900 font-medium inline-flex items-center gap-1.5">
-                <EyeOff className="w-3.5 h-3.5 text-stone-500" aria-hidden />
+              <span className="text-ink font-medium inline-flex items-center gap-1.5">
+                <EyeOff className="w-3.5 h-3.5 text-ink-muted" aria-hidden />
                 Redact repo URL and owner
               </span>
-              <span className="block text-xs text-stone-500 mt-0.5">
+              <span className="block text-xs text-ink-muted mt-0.5">
                 Hides the project name, repo URL, and description on the shared page.
                 Detectors and severities still appear.
               </span>
@@ -200,7 +200,7 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
             type="button"
             onClick={handleCreate}
             disabled={createLoading}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 disabled:cursor-not-allowed rounded transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-on-night bg-night hover:bg-night disabled:bg-line-strong disabled:cursor-not-allowed rounded transition-colors"
           >
             {createLoading
               ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden />
@@ -208,7 +208,7 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
             Generate new link
           </button>
           {createError ? (
-            <p className="flex items-start gap-1.5 text-xs text-red-600">
+            <p className="flex items-start gap-1.5 text-xs text-grounded">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden />
               {createError}
             </p>
@@ -217,21 +217,21 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
 
         {/* Active links list */}
         <div className="p-5">
-          <p className="text-xs uppercase tracking-widest text-stone-500 mb-3">
+          <p className="text-xs uppercase tracking-widest text-ink-muted mb-3">
             Active links {sharesView.length > 0 ? `(${sharesView.length})` : ''}
           </p>
           {listLoading ? (
-            <p className="text-sm text-stone-500 inline-flex items-center gap-1.5">
+            <p className="text-sm text-ink-muted inline-flex items-center gap-1.5">
               <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
               Loading…
             </p>
           ) : listError ? (
-            <p className="flex items-start gap-1.5 text-xs text-red-600">
+            <p className="flex items-start gap-1.5 text-xs text-grounded">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden />
               {listError}
             </p>
           ) : sharesView.length === 0 ? (
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-ink-muted">
               No active share links. Generate one above to share this report.
             </p>
           ) : (
@@ -243,21 +243,21 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
                 return (
                   <li
                     key={s.slug}
-                    className="border border-stone-200 rounded-md px-3 py-2.5 bg-stone-50"
+                    className="border border-line rounded-md px-3 py-2.5 bg-paper-sunk"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <Link2 className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" aria-hidden />
-                      <span className="text-xs text-stone-700 font-mono truncate flex-1 min-w-0">
+                      <Link2 className="w-3.5 h-3.5 text-ink-muted flex-shrink-0" aria-hidden />
+                      <span className="text-xs text-ink font-mono truncate flex-1 min-w-0">
                         {url}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleCopy(s.slug)}
                         aria-label="Copy link"
-                        className="text-stone-500 hover:text-stone-900 transition-colors p-1 -m-1"
+                        className="text-ink-muted hover:text-ink transition-colors p-1 -m-1"
                       >
                         {copied ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600" aria-hidden />
+                          <Check className="w-3.5 h-3.5 text-cleared" aria-hidden />
                         ) : (
                           <Copy className="w-3.5 h-3.5" aria-hidden />
                         )}
@@ -267,17 +267,17 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
                         onClick={() => handleRevoke(s.slug)}
                         disabled={revoking}
                         aria-label="Revoke link"
-                        className="text-stone-500 hover:text-red-600 disabled:text-stone-300 transition-colors p-1 -m-1"
+                        className="text-ink-muted hover:text-grounded disabled:text-ink-muted transition-colors p-1 -m-1"
                       >
                         {revoking
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />
                           : <Trash2 className="w-3.5 h-3.5" aria-hidden />}
                       </button>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-stone-500 mt-1.5 ml-5">
+                    <div className="flex items-center gap-2 text-[11px] text-ink-muted mt-1.5 ml-5">
                       <span>Created {formatCreatedAt(s.createdAt)}</span>
                       {s.redactRepo ? (
-                        <span className="inline-flex items-center gap-1 text-amber-700">
+                        <span className="inline-flex items-center gap-1 text-holding">
                           <EyeOff className="w-3 h-3" aria-hidden />
                           Redacted
                         </span>
@@ -291,7 +291,7 @@ export function ShareSecurityModal({ open, onClose, projectId }: ShareSecurityMo
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-stone-100 bg-stone-50 text-[11px] text-stone-500">
+        <div className="px-5 py-3 border-t border-line bg-paper-sunk text-[11px] text-ink-muted">
           Revoked links return a "no longer active" page immediately and cannot be re-issued.
         </div>
       </div>

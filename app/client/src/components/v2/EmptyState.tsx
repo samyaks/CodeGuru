@@ -12,12 +12,12 @@ export interface EmptyStateProps {
 export function EmptyState({ icon: Icon, title, description, action, className = '' }: EmptyStateProps) {
   return (
     <div
-      className={`bg-white border border-stone-200 rounded-lg p-8 text-center ${className}`.trim()}
+      className={`bg-paper-raised border border-line rounded-lg p-8 text-center ${className}`.trim()}
     >
-      {Icon ? <Icon className="w-8 h-8 text-stone-400 mx-auto mb-3" /> : null}
-      <p className="font-semibold text-stone-900 mb-1">{title}</p>
+      {Icon ? <Icon className="w-8 h-8 text-ink-muted mx-auto mb-3" /> : null}
+      <p className="font-semibold text-ink mb-1">{title}</p>
       {description ? (
-        <p className="text-sm text-stone-600">{description}</p>
+        <p className="text-sm text-ink-muted">{description}</p>
       ) : null}
       {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
     </div>

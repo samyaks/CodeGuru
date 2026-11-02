@@ -37,8 +37,8 @@ const CONTEXT_FILE_TYPE_LABEL: Record<ContextFile['type'], string> = {
 // are regenerated documentation for paths that already exist, so they're
 // purely informational.
 const CONTEXT_FILE_TYPE_PILL: Record<ContextFile['type'], string> = {
-  existing: 'bg-stone-100 text-stone-600 border-stone-200',
-  gap: 'bg-amber-50 text-amber-700 border-amber-200',
+  existing: 'bg-paper-sunk text-ink-muted border-line',
+  gap: 'bg-holding-soft text-holding border-holding',
 };
 
 function sortContextFiles(files: ContextFile[]): ContextFile[] {
@@ -105,21 +105,21 @@ function Collapsible({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
+    <div className="bg-paper-raised border border-line rounded-lg overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full px-5 py-3.5 flex items-center gap-3 text-left hover:bg-stone-50 transition-colors"
+        className="w-full px-5 py-3.5 flex items-center gap-3 text-left hover:bg-paper-sunk transition-colors"
       >
         {open ? (
-          <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0" />
+          <ChevronDown className="w-4 h-4 text-ink-muted flex-shrink-0" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0" />
+          <ChevronRight className="w-4 h-4 text-ink-muted flex-shrink-0" />
         )}
-        <span className="text-sm font-semibold text-stone-900">{title}</span>
+        <span className="text-sm font-semibold text-ink">{title}</span>
         {subtitle ? (
-          <span className="text-xs text-stone-500 truncate">{subtitle}</span>
+          <span className="text-xs text-ink-muted truncate">{subtitle}</span>
         ) : null}
       </button>
       {open ? <div className="px-5 pb-5">{children}</div> : null}
@@ -149,13 +149,13 @@ function ContextFileRow({ file }: { file: ContextFile }) {
   };
 
   return (
-    <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
+    <div className="bg-paper-raised border border-line rounded-lg overflow-hidden">
       {/* Below sm: stack path/pill/tokens above Copy/Download so the
           row doesn't crush the path to a few characters. Above sm:
           keep the original single-line layout. The button group
           right-aligns on mobile via `self-end` to avoid full-width
           buttons that would shout louder than the path itself. */}
-      <div className="w-full px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 hover:bg-stone-50 transition-colors">
+      <div className="w-full px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 hover:bg-paper-sunk transition-colors">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -163,18 +163,18 @@ function ContextFileRow({ file }: { file: ContextFile }) {
           className="flex items-center gap-2 flex-1 min-w-0 text-left flex-wrap sm:flex-nowrap"
         >
           {open ? (
-            <ChevronDown className="w-4 h-4 text-stone-500 flex-shrink-0" />
+            <ChevronDown className="w-4 h-4 text-ink-muted flex-shrink-0" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-stone-500 flex-shrink-0" />
+            <ChevronRight className="w-4 h-4 text-ink-muted flex-shrink-0" />
           )}
-          <FileText className="w-4 h-4 text-stone-400 flex-shrink-0" />
-          <code className="text-xs font-mono text-stone-800 truncate min-w-0 flex-1 sm:flex-initial">{file.path}</code>
+          <FileText className="w-4 h-4 text-ink-muted flex-shrink-0" />
+          <code className="text-xs font-mono text-ink truncate min-w-0 flex-1 sm:flex-initial">{file.path}</code>
           <span
             className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium flex-shrink-0 ${CONTEXT_FILE_TYPE_PILL[file.type]}`}
           >
             {CONTEXT_FILE_TYPE_LABEL[file.type]}
           </span>
-          <span className="text-[11px] text-stone-400 flex-shrink-0">
+          <span className="text-[11px] text-ink-muted flex-shrink-0">
             ~{tokenEstimate.toLocaleString()} tokens
           </span>
         </button>
@@ -182,7 +182,7 @@ function ContextFileRow({ file }: { file: ContextFile }) {
           <button
             type="button"
             onClick={onCopy}
-            className="text-xs px-2 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+            className="text-xs px-2 py-1 rounded border border-line text-ink hover:bg-paper-sunk transition-colors inline-flex items-center gap-1"
             aria-label={`Copy ${file.path}`}
           >
             <Copy className="w-3 h-3" />
@@ -191,7 +191,7 @@ function ContextFileRow({ file }: { file: ContextFile }) {
           <button
             type="button"
             onClick={onDownload}
-            className="text-xs px-2 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+            className="text-xs px-2 py-1 rounded border border-line text-ink hover:bg-paper-sunk transition-colors inline-flex items-center gap-1"
             aria-label={`Download ${file.path}`}
           >
             <Download className="w-3 h-3" />
@@ -200,7 +200,7 @@ function ContextFileRow({ file }: { file: ContextFile }) {
         </div>
       </div>
       {open ? (
-        <pre className="text-xs text-stone-700 font-mono whitespace-pre-wrap bg-stone-50 border-t border-stone-200 px-4 py-3 max-h-80 overflow-y-auto">
+        <pre className="text-xs text-ink font-mono whitespace-pre-wrap bg-paper-sunk border-t border-line px-4 py-3 max-h-80 overflow-y-auto">
           {file.content}
         </pre>
       ) : null}
@@ -240,20 +240,20 @@ function ContextFilesCard({
   };
 
   return (
-    <div className="bg-white border border-stone-200 rounded-lg p-5">
+    <div className="bg-paper-raised border border-line rounded-lg p-5">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <MetadataLabel>AI-ready context files</MetadataLabel>
-        <span className="text-[11px] px-1.5 py-0.5 rounded bg-stone-900 text-white font-medium">
+        <span className="text-[11px] px-1.5 py-0.5 rounded bg-night text-on-night font-medium">
           {ordered.length}
         </span>
-        <p className="text-xs text-stone-500 flex-1 min-w-[12rem]">
+        <p className="text-xs text-ink-muted flex-1 min-w-[12rem]">
           Commit these alongside your code so Cursor / Claude reads them as it works.
         </p>
         <div className="flex items-center gap-1 ml-auto">
           <button
             type="button"
             onClick={onCopyAll}
-            className="text-xs px-2.5 py-1 rounded border border-stone-200 text-stone-700 hover:bg-stone-100 transition-colors inline-flex items-center gap-1"
+            className="text-xs px-2.5 py-1 rounded border border-line text-ink hover:bg-paper-sunk transition-colors inline-flex items-center gap-1"
           >
             <Copy className="w-3 h-3" />
             {copyAllLabel}
@@ -261,7 +261,7 @@ function ContextFilesCard({
           <button
             type="button"
             onClick={onDownloadAll}
-            className="text-xs px-2.5 py-1 rounded border border-stone-900 bg-stone-900 text-white hover:bg-stone-800 transition-colors inline-flex items-center gap-1"
+            className="text-xs px-2.5 py-1 rounded border border-ink bg-night text-on-night hover:bg-night transition-colors inline-flex items-center gap-1"
           >
             <Download className="w-3 h-3" />
             Download all
@@ -315,7 +315,7 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
   }, [projectId]);
 
   if (loading && !project) {
-    return <div className="text-sm text-stone-500">Loading context…</div>;
+    return <div className="text-sm text-ink-muted">Loading context…</div>;
   }
   if (error || !project) {
     return (
@@ -326,7 +326,7 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
           <button
             type="button"
             onClick={() => void reload()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
             Retry
@@ -358,7 +358,7 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
     <div className="space-y-6">
       <div>
         <MetadataLabel className="mb-1">Repo &amp; context</MetadataLabel>
-        <p className="text-stone-600 text-sm leading-relaxed">
+        <p className="text-ink-muted text-sm leading-relaxed">
           Context files for Cursor and Claude Code, the stack we detected, and the shape of the repo.
         </p>
       </div>
@@ -388,7 +388,7 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
               <button
                 type="button"
                 onClick={() => setReanalyzeModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-stone-900 rounded hover:bg-stone-800 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-on-night bg-night rounded hover:bg-night transition-colors"
               >
                 <RefreshCw className="w-3 h-3" />
                 Re-analyze
@@ -398,16 +398,16 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
         />
       )}
 
-      <div className="bg-white border border-stone-200 rounded-lg p-5">
+      <div className="bg-paper-raised border border-line rounded-lg p-5">
         <MetadataLabel className="mb-3">Tech stack</MetadataLabel>
         {stack.length === 0 ? (
-          <p className="text-xs text-stone-500">Stack details unavailable.</p>
+          <p className="text-xs text-ink-muted">Stack details unavailable.</p>
         ) : (
           <div className="space-y-2 text-sm">
             {stack.map(([k, v]) => (
               <div key={k} className="flex justify-between">
-                <span className="text-stone-500">{k}</span>
-                <span className="font-medium text-stone-900">{v}</span>
+                <span className="text-ink-muted">{k}</span>
+                <span className="font-medium text-ink">{v}</span>
               </div>
             ))}
           </div>
@@ -424,14 +424,14 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
           <div className="space-y-3">
             {(structure.entryPoints ?? []).length > 0 ? (
               <div>
-                <h4 className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">
+                <h4 className="text-[11px] uppercase tracking-wider text-ink-muted mb-1.5">
                   Entry points
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.entryPoints.map((f) => (
                     <code
                       key={f}
-                      className="text-xs px-2 py-1 rounded bg-emerald-50 border border-emerald-100 text-emerald-800 font-mono"
+                      className="text-xs px-2 py-1 rounded bg-cleared-soft border border-cleared text-cleared font-mono"
                     >
                       {f}
                     </code>
@@ -441,14 +441,14 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
             ) : null}
             {(structure.routeFiles ?? []).length > 0 ? (
               <div>
-                <h4 className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">
+                <h4 className="text-[11px] uppercase tracking-wider text-ink-muted mb-1.5">
                   Routes / API
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.routeFiles.map((f) => (
                     <code
                       key={f}
-                      className="text-xs px-2 py-1 rounded bg-stone-50 border border-stone-200 text-stone-700 font-mono"
+                      className="text-xs px-2 py-1 rounded bg-paper-sunk border border-line text-ink font-mono"
                     >
                       {f}
                     </code>
@@ -458,14 +458,14 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
             ) : null}
             {(structure.configFiles ?? []).length > 0 ? (
               <div>
-                <h4 className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">
+                <h4 className="text-[11px] uppercase tracking-wider text-ink-muted mb-1.5">
                   Config files
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {structure.configFiles.map((f) => (
                     <code
                       key={f}
-                      className="text-xs px-2 py-1 rounded bg-stone-50 border border-stone-200 text-stone-600 font-mono"
+                      className="text-xs px-2 py-1 rounded bg-paper-sunk border border-line text-ink-muted font-mono"
                     >
                       {f}
                     </code>
@@ -479,10 +479,10 @@ export function ContextSection({ projectId, readOnly = false }: ContextSectionPr
 
       {fileTree.length > 0 ? (
         <Collapsible title="File tree" subtitle={`${fileTree.length} file${fileTree.length === 1 ? '' : 's'}`}>
-          <div className="max-h-64 overflow-y-auto rounded bg-stone-50 border border-stone-200 p-3 space-y-0.5">
+          <div className="max-h-64 overflow-y-auto rounded bg-paper-sunk border border-line p-3 space-y-0.5">
             {fileTree.map((f) => (
-              <div key={f} className="text-xs text-stone-600 font-mono truncate">
-                <FolderTree className="inline w-3 h-3 text-stone-300 mr-1" />
+              <div key={f} className="text-xs text-ink-muted font-mono truncate">
+                <FolderTree className="inline w-3 h-3 text-ink-muted mr-1" />
                 {f}
               </div>
             ))}

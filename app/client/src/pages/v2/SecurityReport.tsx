@@ -56,10 +56,10 @@ function verdictFor(score: number): { headline: string; tone: 'good' | 'okay' | 
 }
 
 const VERDICT_COLOR: Record<'good' | 'okay' | 'warn' | 'bad', string> = {
-  good: 'text-emerald-600',
-  okay: 'text-stone-600',
-  warn: 'text-amber-700',
-  bad:  'text-red-600',
+  good: 'text-cleared',
+  okay: 'text-ink-muted',
+  warn: 'text-holding',
+  bad:  'text-grounded',
 };
 
 const SEVERITY_TILES: Array<{
@@ -70,10 +70,10 @@ const SEVERITY_TILES: Array<{
   border: string;
   ring: string;
 }> = [
-  { key: 'critical', label: 'Critical', bg: 'bg-red-50',    text: 'text-red-700',    border: 'border-red-200',   ring: 'ring-red-300' },
-  { key: 'high',     label: 'High',     bg: 'bg-red-50',    text: 'text-red-600',    border: 'border-red-100',   ring: 'ring-red-200' },
-  { key: 'medium',   label: 'Medium',   bg: 'bg-amber-50',  text: 'text-amber-800',  border: 'border-amber-200', ring: 'ring-amber-300' },
-  { key: 'low',      label: 'Low',      bg: 'bg-stone-100', text: 'text-stone-700',  border: 'border-stone-200', ring: 'ring-stone-300' },
+  { key: 'critical', label: 'Critical', bg: 'bg-grounded-soft',    text: 'text-grounded',    border: 'border-grounded',   ring: 'ring-grounded' },
+  { key: 'high',     label: 'High',     bg: 'bg-grounded-soft',    text: 'text-grounded',    border: 'border-grounded',   ring: 'ring-grounded' },
+  { key: 'medium',   label: 'Medium',   bg: 'bg-holding-soft',  text: 'text-holding',  border: 'border-holding', ring: 'ring-holding' },
+  { key: 'low',      label: 'Low',      bg: 'bg-paper-sunk', text: 'text-ink',  border: 'border-line', ring: 'ring-line-strong' },
 ];
 
 function severityRank(s: SecuritySeverity | null | undefined): number {
@@ -88,10 +88,10 @@ function severityRank(s: SecuritySeverity | null | undefined): number {
 
 function severityToneClass(s: SecuritySeverity): string {
   switch (s) {
-    case 'critical': return 'text-red-700';
-    case 'high':     return 'text-red-500';
-    case 'medium':   return 'text-amber-700';
-    case 'low':      return 'text-stone-500';
+    case 'critical': return 'text-grounded';
+    case 'high':     return 'text-grounded';
+    case 'medium':   return 'text-holding';
+    case 'low':      return 'text-ink-muted';
   }
 }
 
@@ -284,8 +284,8 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
 
   if (loading || (mode === 'owner' && pendingStatus)) {
     return (
-      <div className="min-h-screen bg-stone-50 v2-font-sans flex items-center justify-center">
-        <div className="text-stone-500 text-sm">Loading security report…</div>
+      <div className="takeoff min-h-screen bg-paper v2-font-sans flex items-center justify-center" data-theme="light">
+        <div className="text-ink-muted text-sm">Loading security report…</div>
       </div>
     );
   }
@@ -293,7 +293,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
   if (error || !data) {
     const isGone = errorCode === 410;
     return (
-      <div className="min-h-screen bg-stone-50 v2-font-sans flex items-center justify-center px-6">
+      <div className="takeoff min-h-screen bg-paper v2-font-sans flex items-center justify-center px-6" data-theme="light">
         <EmptyState
           icon={Shield}
           title={isGone ? 'This share link is no longer active' : "Couldn't load this security report"}
@@ -307,7 +307,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
             <button
               type="button"
               onClick={reload}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
             >
               <RefreshCw className="w-3 h-3" />
               Retry
@@ -338,28 +338,16 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
   const showShareButton  = !isShared && !!auth.user;
 
   return (
-    <div className="min-h-screen bg-stone-50 v2-font-sans">
+    <div className="takeoff min-h-screen bg-paper v2-font-sans" data-theme="light">
       <Header
-        variant="workspace"
-        title={data.projectName}
-        subtitle={
-          <>
-            <Shield className="w-3 h-3" aria-hidden />
-            Security Report · {formatLastAnalyzed(data.lastAnalyzed)}
-            {data.redacted ? (
-              <span className="inline-flex items-center gap-1 text-amber-700 ml-2">
-                <EyeOff className="w-3 h-3" aria-hidden />
-                Redacted
-              </span>
-            ) : null}
-          </>
-        }
+        variant="takeoff"
+        backTo={showAdminActions ? `/read/${params.id}#build` : undefined}
         actions={
           <>
             {showAdminActions ? (
               <Link
                 to={`/read/${params.id}#build`}
-                className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5 rounded border border-stone-200 hover:border-stone-400 transition-colors"
+                className="text-xs text-ink-muted hover:text-ink px-3 py-1.5 rounded border border-line hover:border-line-strong transition-colors"
               >
                 ← Back to project
               </Link>
@@ -368,7 +356,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               <button
                 type="button"
                 onClick={() => setShareModalOpen(true)}
-                className="text-xs text-stone-700 bg-white hover:bg-stone-50 border border-stone-300 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+                className="text-xs text-ink bg-paper-raised hover:bg-paper-sunk border border-line-strong px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
               >
                 <Share2 className="w-3 h-3" aria-hidden />
                 Share
@@ -378,7 +366,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               <button
                 type="button"
                 onClick={reAnalyze}
-                className="text-xs text-white bg-stone-900 hover:bg-stone-800 px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
+                className="text-xs text-on-night bg-night hover:bg-night px-3 py-1.5 rounded inline-flex items-center gap-1.5 transition-colors"
               >
                 <RefreshCw className="w-3 h-3" aria-hidden />
                 Re-analyze
@@ -392,28 +380,33 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
 
         {/* ── Score hero ─────────────────────────────────────────── */}
         <section className="text-center">
-          <p className="text-xs uppercase tracking-widest text-stone-500 mb-3">Security Score</p>
+          <p className="type-eyebrow text-ink-muted mb-2">{data.projectName}</p>
+          <p className="text-xs uppercase tracking-widest text-ink-muted mb-3">
+            Security score
+            {data.redacted ? ' · redacted' : ''}
+            {data.lastAnalyzed ? ` · ${formatLastAnalyzed(data.lastAnalyzed)}` : ''}
+          </p>
           {typeof data.score === 'number' ? (
             <>
               <div className="inline-flex items-baseline gap-2">
-                <span className="text-7xl font-bold text-stone-900 tracking-tight tabular-nums v2-font-serif">
+                <span className="text-7xl font-bold text-ink tracking-tight tabular-nums v2-font-serif">
                   {data.score}
                 </span>
-                <span className="text-2xl text-stone-400 font-light">/ 100</span>
+                <span className="text-2xl text-ink-muted font-light">/ 100</span>
               </div>
               {verdict ? (
                 <p className={`mt-3 text-base font-medium ${VERDICT_COLOR[verdict.tone]}`}>
                   {verdict.headline}
                 </p>
               ) : null}
-              <p className="mt-2 text-xs text-stone-500">
+              <p className="mt-2 text-xs text-ink-muted">
                 {totalUnaddressed === 0
                   ? 'No unaddressed findings.'
                   : `${totalUnaddressed} unaddressed ${totalUnaddressed === 1 ? 'finding' : 'findings'}.`}
               </p>
             </>
           ) : (
-            <p className="text-stone-500 text-sm">No security score yet.</p>
+            <p className="text-ink-muted text-sm">No security score yet.</p>
           )}
         </section>
 
@@ -445,12 +438,12 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
             })}
           </div>
           {severityFilter ? (
-            <p className="text-xs text-stone-500 mt-2">
+            <p className="text-xs text-ink-muted mt-2">
               Filtered to {severityFilter}.{' '}
               <button
                 type="button"
                 onClick={() => setSeverityFilter(null)}
-                className="underline hover:text-stone-700"
+                className="underline hover:text-ink"
               >
                 Clear filter
               </button>
@@ -466,14 +459,14 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
               {showAdminActions ? (
                 <Link
                   to={`/read/${params.id}#build`}
-                  className="text-xs text-stone-500 hover:text-stone-900"
+                  className="text-xs text-ink-muted hover:text-ink"
                 >
                   Triage in Gaps tab →
                 </Link>
               ) : null}
             </div>
-            <div className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-              <ul className="divide-y divide-stone-100">
+            <div className="bg-paper-raised border border-line rounded-lg overflow-hidden">
+              <ul className="divide-y divide-line">
                 {filteredTopRisks.map((risk) => (
                   <CompactRiskRow
                     key={risk.id}
@@ -504,7 +497,7 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                     : data.allSecurityGaps.broken.length + data.allSecurityGaps.missing.length + data.allSecurityGaps.infra.length}
                 )
               </MetadataLabel>
-              <span className="text-stone-400 group-hover:text-stone-700 transition-colors">
+              <span className="text-ink-muted group-hover:text-ink transition-colors">
                 {allOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
               </span>
             </button>
@@ -516,14 +509,14 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
                   const cm = categoryMeta(cat);
                   const CatIcon = cm.icon;
                   return (
-                    <div key={cat} className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-stone-100 bg-stone-50">
-                        <CatIcon className="w-3.5 h-3.5 text-stone-500" aria-hidden />
-                        <p className="text-xs uppercase tracking-wider font-semibold text-stone-700">
-                          {cm.label} <span className="text-stone-400 font-normal">· {items.length}</span>
+                    <div key={cat} className="bg-paper-raised border border-line rounded-lg overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-line bg-paper-sunk">
+                        <CatIcon className="w-3.5 h-3.5 text-ink-muted" aria-hidden />
+                        <p className="text-xs uppercase tracking-wider font-semibold text-ink">
+                          {cm.label} <span className="text-ink-muted font-normal">· {items.length}</span>
                         </p>
                       </div>
-                      <ul className="divide-y divide-stone-100">
+                      <ul className="divide-y divide-line">
                         {items.map((g) => (
                           <CompactRiskRow
                             key={g.id}
@@ -545,28 +538,28 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
         {/* ── Detected by ────────────────────────────────────────── */}
         <section>
           <MetadataLabel className="mb-3">Detected by</MetadataLabel>
-          <div className="bg-white border border-stone-200 rounded-lg p-5">
+          <div className="bg-paper-raised border border-line rounded-lg p-5">
             {detectors.length === 0 ? (
-              <p className="text-sm text-stone-500">
+              <p className="text-sm text-ink-muted">
                 No detectors registered. This shouldn't happen in production —
                 please re-run analysis or contact support.
               </p>
             ) : (
               <>
-                <p className="text-xs text-stone-500 mb-3">
+                <p className="text-xs text-ink-muted mb-3">
                   This report ran {detectors.length} security detector{detectors.length === 1 ? '' : 's'} against
                   the codebase. Each looks for a specific class of issue, with conservative
                   patterns to keep false positives low.
                 </p>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
                   {detectors.map((d) => (
-                    <li key={d} className="text-xs text-stone-700 inline-flex items-center gap-1.5">
-                      <FileText className="w-3 h-3 text-stone-400" aria-hidden />
+                    <li key={d} className="text-xs text-ink inline-flex items-center gap-1.5">
+                      <FileText className="w-3 h-3 text-ink-muted" aria-hidden />
                       <span className="font-mono">{d}</span>
                     </li>
                   ))}
                 </ul>
-                <p className="text-[11px] text-stone-400 mt-3">
+                <p className="text-[11px] text-ink-muted mt-3">
                   Last analyzed: {formatLastAnalyzed(data.lastAnalyzed)}
                 </p>
               </>
@@ -578,10 +571,10 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
         {totalUnaddressed === 0
           && (data.allSecurityGaps.broken.length + data.allSecurityGaps.missing.length + data.allSecurityGaps.infra.length) === 0
           ? (
-          <section className="bg-emerald-50 border border-emerald-100 rounded-lg p-6 text-center">
-            <Shield className="w-8 h-8 text-emerald-600 mx-auto mb-2" aria-hidden />
-            <p className="font-semibold text-stone-900">No security gaps detected</p>
-            <p className="text-sm text-stone-600 mt-1">
+          <section className="bg-cleared-soft border border-cleared rounded-lg p-6 text-center">
+            <Shield className="w-8 h-8 text-cleared mx-auto mb-2" aria-hidden />
+            <p className="font-semibold text-ink">No security gaps detected</p>
+            <p className="text-sm text-ink-muted mt-1">
               All {detectors.length} detector{detectors.length === 1 ? '' : 's'} ran clean.
               {showAdminActions ? ' Re-analyze after each material change to keep this badge honest.' : null}
             </p>
@@ -590,14 +583,14 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
 
         {/* ── Shared-only footer CTA ─────────────────────────────── */}
         {isShared ? (
-          <section className="border-t border-stone-200 pt-8 mt-8 text-center">
-            <p className="text-sm text-stone-700">
+          <section className="border-t border-line pt-8 mt-8 text-center">
+            <p className="text-sm text-ink">
               This report was generated by Takeoff.
             </p>
-            <p className="text-sm text-stone-500 mt-1">Want to audit your own app?</p>
+            <p className="text-sm text-ink-muted mt-1">Want to audit your own app?</p>
             <a
               href="/"
-              className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-stone-900 hover:text-stone-700"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-ink hover:text-ink"
             >
               Get a security report <ArrowRight className="w-3.5 h-3.5" aria-hidden />
             </a>
@@ -637,22 +630,22 @@ export default function SecurityReport({ mode = 'owner' }: SecurityReportProps =
 // dead links to the auth-gated Gaps tab.
 function CompactRiskRow({ gap, fixHref }: { gap: V2Gap; fixHref: string | null }) {
   const sev = gap.securitySeverity;
-  const sevTone = sev ? severityToneClass(sev) : 'text-stone-500';
+  const sevTone = sev ? severityToneClass(sev) : 'text-ink-muted';
   const filesCount = typeof gap.files === 'number' && gap.files > 0 ? gap.files : null;
   const titleEl = fixHref
     ? (
-      <Link to={fixHref} className="block text-sm font-medium text-stone-900 hover:text-stone-700">
+      <Link to={fixHref} className="block text-sm font-medium text-ink hover:text-ink">
         {gap.title}
       </Link>
     )
-    : <span className="block text-sm font-medium text-stone-900">{gap.title}</span>;
+    : <span className="block text-sm font-medium text-ink">{gap.title}</span>;
   return (
-    <li className="px-4 py-3 hover:bg-stone-50 transition-colors">
+    <li className="px-4 py-3 hover:bg-paper-sunk transition-colors">
       <div className="flex items-start gap-3">
         <Shield className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${sevTone}`} aria-hidden />
         <div className="flex-1 min-w-0">
           {titleEl}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-stone-500 mt-0.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-ink-muted mt-0.5">
             {sev ? <span className={`font-semibold ${sevTone}`}>{sev}</span> : null}
             {gap.cweId ? <span className="font-mono">{gap.cweId}</span> : null}
             {gap.securityDetector ? <span className="font-mono">{gap.securityDetector}</span> : null}
@@ -663,7 +656,7 @@ function CompactRiskRow({ gap, fixHref }: { gap: V2Gap; fixHref: string | null }
           <Link
             to={fixHref}
             aria-label="Open in Gaps tab"
-            className="text-stone-400 hover:text-stone-700 flex-shrink-0 mt-0.5"
+            className="text-ink-muted hover:text-ink flex-shrink-0 mt-0.5"
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </Link>

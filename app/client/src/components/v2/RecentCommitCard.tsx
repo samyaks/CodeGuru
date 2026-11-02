@@ -73,17 +73,17 @@ export function RecentCommitCard({ commit, className = '' }: RecentCommitCardPro
 
   return (
     <article
-      className={`bg-white border border-stone-200 rounded-lg p-4 ${className}`.trim()}
+      className={`bg-paper-raised border border-line rounded-lg p-4 ${className}`.trim()}
     >
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 font-mono text-xs text-stone-700 bg-stone-50 border border-stone-200 px-1.5 py-0.5 rounded">
-            <GitCommit className="w-3 h-3 text-stone-500" />
+          <span className="inline-flex items-center gap-1.5 font-mono text-xs text-ink bg-paper-sunk border border-line px-1.5 py-0.5 rounded">
+            <GitCommit className="w-3 h-3 text-ink-muted" />
             {commit.shortSha}
           </span>
           {badge ? <Badge variant={badge.variant}>{badge.label}</Badge> : null}
           {sourceHint ? (
-            <span className="text-[11px] text-stone-500">{sourceHint}</span>
+            <span className="text-[11px] text-ink-muted">{sourceHint}</span>
           ) : null}
         </div>
         {commit.url ? (
@@ -91,7 +91,7 @@ export function RecentCommitCard({ commit, className = '' }: RecentCommitCardPro
             href={commit.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1 rounded text-stone-400 hover:text-stone-700 transition-colors flex-shrink-0"
+            className="p-1 rounded text-ink-muted hover:text-ink transition-colors flex-shrink-0"
             title="Open in GitHub"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -99,16 +99,16 @@ export function RecentCommitCard({ commit, className = '' }: RecentCommitCardPro
         ) : null}
       </div>
 
-      <h4 className="font-semibold text-stone-900 text-sm mb-1 leading-snug">{heading}</h4>
+      <h4 className="font-semibold text-ink text-sm mb-1 leading-snug">{heading}</h4>
       {showTitleUnderHeading ? (
-        <p className="text-xs text-stone-500 mb-2 truncate" title={commit.title}>
+        <p className="text-xs text-ink-muted mb-2 truncate" title={commit.title}>
           {commit.title}
         </p>
       ) : null}
 
-      <p className="text-sm text-stone-600 leading-relaxed mb-3">{commit.summary}</p>
+      <p className="text-sm text-ink-muted leading-relaxed mb-3">{commit.summary}</p>
 
-      <div className="flex items-center gap-2 text-[11px] text-stone-500">
+      <div className="flex items-center gap-2 text-[11px] text-ink-muted">
         {commit.authorAvatar ? (
           <img
             src={commit.authorAvatar}
@@ -117,7 +117,7 @@ export function RecentCommitCard({ commit, className = '' }: RecentCommitCardPro
           />
         ) : null}
         {who ? <span>{who}</span> : null}
-        {who && commit.date ? <span className="text-stone-300">·</span> : null}
+        {who && commit.date ? <span className="text-ink-muted">·</span> : null}
         {commit.date ? <span>{timeAgo(commit.date)}</span> : null}
       </div>
     </article>

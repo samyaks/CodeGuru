@@ -79,21 +79,21 @@ export function ReanalyzeModal({
       className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
     >
       <div
-        className="absolute inset-0 bg-stone-900/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-night/40 backdrop-blur-sm"
         onClick={submitting ? undefined : onClose}
         aria-hidden
       />
-      <div className="relative bg-white border border-stone-200 rounded-lg shadow-xl w-full max-w-md max-h-full overflow-y-auto">
-        <div className="flex items-start justify-between p-5 border-b border-stone-100">
+      <div className="relative bg-paper-raised border border-line rounded-lg shadow-xl w-full max-w-md max-h-full overflow-y-auto">
+        <div className="flex items-start justify-between p-5 border-b border-line">
           <div className="flex items-start gap-3 min-w-0">
-            <div className="w-9 h-9 rounded bg-stone-900 text-white flex items-center justify-center flex-shrink-0">
+            <div className="w-9 h-9 rounded bg-night text-on-night flex items-center justify-center flex-shrink-0">
               <RefreshCw className="w-4 h-4" strokeWidth={2.5} aria-hidden />
             </div>
             <div className="min-w-0">
-              <h2 id="reanalyze-title" className="text-base font-bold text-stone-900 tracking-tight">
+              <h2 id="reanalyze-title" className="text-base font-bold text-ink tracking-tight">
                 Re-analyze this project?
               </h2>
-              <p className="text-xs text-stone-500 mt-0.5 truncate" title={projectLabel}>
+              <p className="text-xs text-ink-muted mt-0.5 truncate" title={projectLabel}>
                 {projectLabel}
               </p>
             </div>
@@ -103,23 +103,23 @@ export function ReanalyzeModal({
             onClick={onClose}
             disabled={submitting}
             aria-label="Close"
-            className="text-stone-400 hover:text-stone-700 transition-colors p-1 -m-1 disabled:opacity-50"
+            className="text-ink-muted hover:text-ink transition-colors p-1 -m-1 disabled:opacity-50"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <div className="p-5 space-y-4 text-sm">
-          <p className="text-stone-700 leading-relaxed">
+          <p className="text-ink leading-relaxed">
             We&rsquo;ll re-scan the repo and refresh the readiness score, stack detection,
             security report, gaps, and AI-ready context files.
           </p>
 
-          <div className="bg-stone-50 border border-stone-200 rounded-md p-3 space-y-2">
-            <p className="text-xs uppercase tracking-wider font-semibold text-stone-700">
+          <div className="bg-paper-sunk border border-line rounded-md p-3 space-y-2">
+            <p className="text-xs uppercase tracking-wider font-semibold text-ink">
               Your work is preserved
             </p>
-            <ul className="text-xs text-stone-600 space-y-1 list-disc list-inside marker:text-stone-400">
+            <ul className="text-xs text-ink-muted space-y-1 list-disc list-inside marker:text-ink-muted">
               <li>Gap triage (accepted, rejected, in progress, shipped)</li>
               <li>Reject reasons and refined prompts</li>
               <li>Shipped commits and their gap links</li>
@@ -128,31 +128,31 @@ export function ReanalyzeModal({
             </ul>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-md p-3 space-y-2">
-            <p className="text-xs uppercase tracking-wider font-semibold text-amber-800 inline-flex items-center gap-1.5">
+          <div className="bg-holding-soft border border-holding rounded-md p-3 space-y-2">
+            <p className="text-xs uppercase tracking-wider font-semibold text-holding inline-flex items-center gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5" aria-hidden />
               Resets
             </p>
-            <ul className="text-xs text-amber-800 space-y-1 list-disc list-inside marker:text-amber-500">
+            <ul className="text-xs text-holding space-y-1 list-disc list-inside marker:text-holding">
               <li>Plan-step checkoffs (the plan is regenerated)</li>
               <li>AI-ready context files (regenerated from the new analysis)</li>
             </ul>
           </div>
 
           {error ? (
-            <p className="flex items-start gap-1.5 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2.5 py-2">
+            <p className="flex items-start gap-1.5 text-xs text-grounded bg-grounded-soft border border-grounded rounded px-2.5 py-2">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden />
               <span>{error}</span>
             </p>
           ) : null}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-stone-100 bg-stone-50/50">
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-line bg-paper-sunk/50">
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="px-3 py-1.5 text-sm font-medium text-stone-700 hover:text-stone-900 rounded transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-sm font-medium text-ink hover:text-ink rounded transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
@@ -160,7 +160,7 @@ export function ReanalyzeModal({
             type="button"
             onClick={handleConfirm}
             disabled={submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 disabled:bg-stone-400 disabled:cursor-not-allowed rounded transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-on-night bg-night hover:bg-night disabled:bg-line-strong disabled:cursor-not-allowed rounded transition-colors"
           >
             {submitting ? (
               <>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { GitCommit, Github, RefreshCw, Settings } from 'lucide-react';
-import { ShippedItem, EmptyState, RecentCommitCard } from '../../components/v2';
+import { ShippedItem, EmptyState, MergedPullCard } from '../../components/v2';
 import {
   fetchV2Shipped,
   reopenShipped,
@@ -82,7 +82,7 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
   }, [toast]);
 
   if (loading && !data) {
-    return <div className="text-sm text-stone-500">Loading shipped items…</div>;
+    return <div className="text-sm text-ink-muted">Loading shipped items…</div>;
   }
   if (error) {
     return (
@@ -93,7 +93,7 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
           <button
             type="button"
             onClick={() => void reload()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
             Retry
@@ -105,31 +105,31 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
   if (!data) return null;
 
   const hasRepo = !!data.repo;
-  const recentCommits = Array.isArray(data.recentCommits) ? data.recentCommits : [];
+  const recentMerges = Array.isArray(data.recentMerges) ? data.recentMerges : [];
   const isEmpty = data.items.length === 0;
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What you've shipped</h3>
-        <p className="text-stone-600 text-sm leading-relaxed">
+        <h3 className="text-2xl font-bold text-ink mb-2 v2-font-serif">What you've shipped</h3>
+        <p className="text-ink-muted text-sm leading-relaxed">
           Takeoff watches your repo. Every commit gets matched to a gap and verified — we re-scan the affected files to confirm the problem is actually gone.
         </p>
       </div>
 
-      <div className="bg-white border border-stone-200 rounded-lg p-4 flex items-center gap-3 flex-wrap">
-        <Github className="w-4 h-4 text-stone-500" />
-        <span className="text-sm text-stone-700">
+      <div className="bg-paper-raised border border-line rounded-lg p-4 flex items-center gap-3 flex-wrap">
+        <Github className="w-4 h-4 text-ink-muted" />
+        <span className="text-sm text-ink">
           {hasRepo ? (
-            <>Connected to <span className="font-mono text-stone-900">{data.repo}</span></>
+            <>Connected to <span className="font-mono text-ink">{data.repo}</span></>
           ) : (
             'No GitHub repo connected'
           )}
         </span>
         {hasRepo ? (
           <span className="ml-auto flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="flex items-center gap-1.5 text-xs text-cleared font-medium">
+              <span className="w-2 h-2 rounded-full bg-cleared" />
               Listening for commits
             </span>
             {!readOnly ? (
@@ -138,7 +138,7 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
                 onClick={onSync}
                 disabled={syncing}
                 title="Pull recent commits from GitHub and match them to your gaps"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-stone-700 hover:text-stone-900 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-ink hover:text-ink disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
                 {syncing ? 'Syncing…' : 'Sync recent commits'}
@@ -148,22 +148,22 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
         ) : null}
       </div>
 
-      {recentCommits.length > 0 ? (
-        <section aria-labelledby="recent-updates-heading" className="space-y-3">
+      {recentMerges.length > 0 ? (
+        <section aria-labelledby="recent-merges-heading" className="space-y-3">
           <div>
             <h4
-              id="recent-updates-heading"
-              className="text-sm font-semibold text-stone-900 tracking-wide uppercase"
+              id="recent-merges-heading"
+              className="text-sm font-semibold text-ink tracking-wide uppercase"
             >
-              Recent updates
+              Recent merges
             </h4>
-            <p className="text-xs text-stone-500 mt-1">
-              The latest {recentCommits.length === 1 ? 'commit' : `${recentCommits.length} commits`} on your connected branch, with a short summary of what changed.
+            <p className="text-xs text-ink-muted mt-1">
+              The last {recentMerges.length === 1 ? 'merged pull request' : `${recentMerges.length} merged pull requests`} on this repo.
             </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-1 lg:grid-cols-3">
-            {recentCommits.map((commit) => (
-              <RecentCommitCard key={commit.sha} commit={commit} />
+          <div className="space-y-2">
+            {recentMerges.map((pull) => (
+              <MergedPullCard key={pull.number} pull={pull} />
             ))}
           </div>
         </section>
@@ -190,7 +190,7 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
             action={
               <Link
                 to={`/read/${projectId}#settings`}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
               >
                 <Settings className="w-3 h-3" />
                 Open Settings
@@ -201,10 +201,10 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
       ) : (
         <div className="space-y-3" aria-busy={busyId !== null}>
           <div>
-            <h4 className="text-sm font-semibold text-stone-900 tracking-wide uppercase">
+            <h4 className="text-sm font-semibold text-ink tracking-wide uppercase">
               Gap-verified commits
             </h4>
-            <p className="text-xs text-stone-500 mt-1">
+            <p className="text-xs text-ink-muted mt-1">
               Commits Takeoff matched to an open gap and checked against the codebase.
             </p>
           </div>
@@ -217,7 +217,7 @@ export function ShippedSection({ projectId, readOnly = false }: ShippedSectionPr
       {toast ? (
         <div
           role="status"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-night text-on-night text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
         >
           {toast}
         </div>

@@ -182,10 +182,10 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
 }
 
 function scoreTone(score: number): { text: string; bar: string } {
-  if (score >= 80) return { text: 'text-emerald-700', bar: 'bg-emerald-500' };
-  if (score >= 50) return { text: 'text-amber-700', bar: 'bg-amber-500' };
+  if (score >= 80) return { text: 'text-cleared', bar: 'bg-cleared' };
+  if (score >= 50) return { text: 'text-holding', bar: 'bg-holding' };
   if (score > 0) return { text: 'text-orange-700', bar: 'bg-orange-400' };
-  return { text: 'text-stone-500', bar: 'bg-stone-300' };
+  return { text: 'text-ink-muted', bar: 'bg-paper-sunk' };
 }
 
 export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
@@ -369,7 +369,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
   );
 
   if (loading) {
-    return <div className="text-sm text-stone-500">Loading personas…</div>;
+    return <div className="text-sm text-ink-muted">Loading personas…</div>;
   }
 
   if (error && !data) {
@@ -390,12 +390,12 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
     }
     return (
       <div className="space-y-4">
-        <div className="bg-white border border-stone-200 rounded-lg p-6 text-center">
-          <Sparkles className="w-8 h-8 text-stone-400 mx-auto mb-3" aria-hidden />
-          <h3 className="text-lg font-semibold text-stone-900 v2-font-serif">
+        <div className="bg-paper-raised border border-line rounded-lg p-6 text-center">
+          <Sparkles className="w-8 h-8 text-ink-muted mx-auto mb-3" aria-hidden />
+          <h3 className="text-lg font-semibold text-ink v2-font-serif">
             Map who this is for, automatically
           </h3>
-          <p className="text-sm text-stone-600 mt-2 max-w-md mx-auto">
+          <p className="text-sm text-ink-muted mt-2 max-w-md mx-auto">
             Claude will read your project's description and extract personas + jobs to be done.
             You can edit, add, or remove anything afterwards.
           </p>
@@ -403,19 +403,19 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
             type="button"
             onClick={handleEmptyStateGenerate}
             disabled={generating}
-            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-stone-900 text-white text-sm font-medium rounded-md hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-night text-on-night text-sm font-medium rounded-md hover:bg-night disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {generating ? 'Generating…' : 'Generate from your codebase'}
           </button>
           {error ? (
-            <p className="mt-3 text-xs text-red-600">{error}</p>
+            <p className="mt-3 text-xs text-grounded">{error}</p>
           ) : null}
-          <div className="mt-4 text-xs text-stone-500">
+          <div className="mt-4 text-xs text-ink-muted">
             or{' '}
             <button
               type="button"
               onClick={() => setShowAddPersona(true)}
-              className="text-stone-900 underline hover:no-underline"
+              className="text-ink underline hover:no-underline"
             >
               build manually
             </button>
@@ -426,7 +426,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
                   onCancel={() => setShowAddPersona(false)}
                   busy={busyId === 'add-persona'}
                 />
-                <p className="mt-3 text-[11px] text-stone-400 text-center">
+                <p className="mt-3 text-[11px] text-ink-muted text-center">
                   Adding your first persona will create the map automatically.
                 </p>
               </div>
@@ -441,8 +441,8 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">Who it's for, what they need</h3>
-          <p className="text-stone-600 text-sm leading-relaxed">
+          <h3 className="text-2xl font-bold text-ink mb-2 v2-font-serif">Who it's for, what they need</h3>
+          <p className="text-ink-muted text-sm leading-relaxed">
             Personas detected from the code, weighted by how much of their jobs is already built.
             {readOnly ? ' Click a persona to see its jobs.' : ' Click a persona to edit its jobs.'}
           </p>
@@ -453,7 +453,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
             onClick={handleRerun}
             disabled={generating}
             title="Re-run Claude extraction (creates a fresh map and replaces the current one)"
-            className="text-xs text-stone-600 hover:text-stone-900 inline-flex items-center gap-1 mt-1 disabled:opacity-50"
+            className="text-xs text-ink-muted hover:text-ink inline-flex items-center gap-1 mt-1 disabled:opacity-50"
           >
             <Sparkles className="w-3 h-3" />
             {generating ? 'Regenerating…' : 'Regenerate'}
@@ -462,7 +462,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
       </div>
 
       {error ? (
-        <div className="bg-red-50 border border-red-200 rounded-md p-3 text-xs text-red-700">
+        <div className="bg-grounded-soft border border-grounded rounded-md p-3 text-xs text-grounded">
           {error}
         </div>
       ) : null}
@@ -486,7 +486,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
         ))}
 
         {readOnly ? null : showAddPersona ? (
-          <div className="bg-white border border-stone-300 rounded-lg p-4">
+          <div className="bg-paper-raised border border-line-strong rounded-lg p-4">
             <PersonaForm
               onSubmit={handleAddPersona}
               onCancel={() => setShowAddPersona(false)}
@@ -497,7 +497,7 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
           <button
             type="button"
             onClick={() => setShowAddPersona(true)}
-            className="bg-stone-50 border border-dashed border-stone-300 rounded-lg p-5 flex items-center justify-center text-stone-500 hover:text-stone-900 hover:border-stone-400 hover:bg-white transition-colors text-sm font-medium"
+            className="bg-paper-sunk border border-dashed border-line-strong rounded-lg p-5 flex items-center justify-center text-ink-muted hover:text-ink hover:border-line-strong hover:bg-paper-raised transition-colors text-sm font-medium"
           >
             <Plus className="w-4 h-4 mr-1" /> Add persona
           </button>
@@ -505,9 +505,9 @@ export function MapSection({ projectId, readOnly = false }: MapSectionProps) {
       </div>
 
       {weakest ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex gap-3">
-          <Lightbulb className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-900 leading-relaxed">
+        <div className="bg-holding-soft border border-holding rounded-lg p-4 flex gap-3">
+          <Lightbulb className="w-4 h-4 text-holding flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-holding leading-relaxed">
             <strong>{weakest.name} is your weakest persona</strong> at {weakest.readiness}%. The Missing Functionality gaps that affect them are likely your highest-impact fixes.
           </div>
         </div>
@@ -548,8 +548,8 @@ function PersonaEditor({
 
   return (
     <div
-      className={`bg-white border rounded-lg p-5 transition-colors ${
-        expanded ? 'border-stone-400 shadow-sm' : 'border-stone-200 hover:border-stone-300'
+      className={`bg-paper-raised border rounded-lg p-5 transition-colors ${
+        expanded ? 'border-line-strong shadow-sm' : 'border-line hover:border-line-strong'
       }`}
     >
       <div className="flex items-start justify-between mb-3">
@@ -560,29 +560,29 @@ function PersonaEditor({
         >
           <div className="text-2xl" aria-hidden>{persona.emoji}</div>
           <div className="min-w-0">
-            <p className="font-semibold text-stone-900 truncate">{persona.name}</p>
-            <p className="text-xs text-stone-500">
+            <p className="font-semibold text-ink truncate">{persona.name}</p>
+            <p className="text-xs text-ink-muted">
               {persona.jobs.length} job{persona.jobs.length === 1 ? '' : 's'} to be done
             </p>
           </div>
         </button>
         <div className="flex items-start gap-2">
           <div className="text-right">
-            <p className="text-2xl font-bold text-stone-900 leading-none">
+            <p className="text-2xl font-bold text-ink leading-none">
               {persona.readiness}
-              <span className="text-sm text-stone-400">%</span>
+              <span className="text-sm text-ink-muted">%</span>
             </p>
-            <p className="text-[11px] text-stone-500">ready</p>
+            <p className="text-[11px] text-ink-muted">ready</p>
           </div>
           {persona.confirmed ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-label="Persona confirmed" />
+            <CheckCircle2 className="w-5 h-5 text-cleared" aria-label="Persona confirmed" />
           ) : !readOnly ? (
             <button
               type="button"
               onClick={onConfirmPersona}
               disabled={personaIsBusy}
               title="Confirm persona"
-              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border border-stone-300 text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded border border-line-strong text-ink hover:bg-paper-sunk disabled:opacity-50"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               Confirm
@@ -594,7 +594,7 @@ function PersonaEditor({
               onClick={onRemovePersona}
               disabled={personaIsBusy}
               title="Remove persona"
-              className="text-stone-400 hover:text-red-600 disabled:opacity-50 p-1 -mt-1 -mr-1"
+              className="text-ink-muted hover:text-grounded disabled:opacity-50 p-1 -mt-1 -mr-1"
             >
               <X className="w-4 h-4" />
             </button>
@@ -604,13 +604,13 @@ function PersonaEditor({
       <ProgressBar value={persona.readiness} label={`${persona.name} readiness`} />
 
       {persona.description ? (
-        <p className="text-xs text-stone-500 mt-3 leading-relaxed">{persona.description}</p>
+        <p className="text-xs text-ink-muted mt-3 leading-relaxed">{persona.description}</p>
       ) : null}
 
       {expanded ? (
-        <div className="mt-4 pt-4 border-t border-stone-100 space-y-2">
+        <div className="mt-4 pt-4 border-t border-line space-y-2">
           {persona.jobs.length === 0 ? (
-            <p className="text-xs text-stone-400 italic">
+            <p className="text-xs text-ink-muted italic">
               {readOnly ? 'No jobs yet.' : 'No jobs yet. Add one below.'}
             </p>
           ) : (
@@ -640,7 +640,7 @@ function PersonaEditor({
             <button
               type="button"
               onClick={() => setShowAddJob(true)}
-              className="text-xs text-stone-600 hover:text-stone-900 inline-flex items-center gap-1 mt-2"
+              className="text-xs text-ink-muted hover:text-ink inline-flex items-center gap-1 mt-2"
             >
               <Plus className="w-3 h-3" /> Add job
             </button>
@@ -679,10 +679,10 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
   const hasNeeds = totalNeeds > 0;
 
   return (
-    <div className="rounded-md border border-stone-100 bg-stone-50/50 hover:border-stone-200 transition-colors">
+    <div className="rounded-md border border-line bg-paper-sunk/50 hover:border-line transition-colors">
       <div className="flex items-center gap-2 p-2 text-sm">
         {readOnly ? (
-          <span className="text-[11px] uppercase tracking-wide font-medium border border-stone-200 rounded px-1.5 py-0.5 bg-white text-stone-600">
+          <span className="text-[11px] uppercase tracking-wide font-medium border border-line rounded px-1.5 py-0.5 bg-paper-raised text-ink-muted">
             {job.priority === 'medium' ? 'Med' : job.priority}
           </span>
         ) : (
@@ -690,7 +690,7 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
             value={job.priority}
             onChange={(e) => onSetPriority(e.target.value as Priority)}
             disabled={busy}
-            className="text-[11px] uppercase tracking-wide font-medium border border-stone-200 rounded px-1.5 py-0.5 bg-white disabled:opacity-50"
+            className="text-[11px] uppercase tracking-wide font-medium border border-line rounded px-1.5 py-0.5 bg-paper-raised disabled:opacity-50"
             aria-label="Job priority"
           >
             <option value="high">High</option>
@@ -706,9 +706,9 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
           className="flex-1 min-w-0 flex items-center gap-2 text-left disabled:cursor-default"
           aria-expanded={hasNeeds ? expanded : undefined}
         >
-          <span className="flex-1 min-w-0 text-stone-700 truncate">{job.title}</span>
+          <span className="flex-1 min-w-0 text-ink truncate">{job.title}</span>
           {job.invariantTotal > 0 ? (
-            <span className="text-[10px] text-stone-500 whitespace-nowrap">
+            <span className="text-[10px] text-ink-muted whitespace-nowrap">
               {job.invariantTotal} guarantees
               {job.invariantBroken > 0 ? ` · ${job.invariantBroken} broken` : ''}
             </span>
@@ -716,21 +716,21 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
           <span className={`text-xs font-semibold tabular-nums ${tone.text}`}>{job.score}%</span>
           {hasNeeds ? (
             <ChevronDown
-              className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+              className={`w-3.5 h-3.5 text-ink-muted transition-transform ${expanded ? 'rotate-180' : ''}`}
               aria-hidden
             />
           ) : null}
         </button>
 
         {job.confirmed ? (
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" aria-label="Job confirmed" />
+          <CheckCircle2 className="w-4 h-4 text-cleared flex-shrink-0" aria-label="Job confirmed" />
         ) : !readOnly ? (
           <button
             type="button"
             onClick={onConfirm}
             disabled={busy}
             title="Confirm job"
-            className="text-xs font-medium text-stone-700 border border-stone-300 rounded px-1.5 py-0.5 hover:bg-white disabled:opacity-50"
+            className="text-xs font-medium text-ink border border-line-strong rounded px-1.5 py-0.5 hover:bg-paper-raised disabled:opacity-50"
           >
             Confirm
           </button>
@@ -742,7 +742,7 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
             onClick={onRemove}
             disabled={busy}
             title="Remove job"
-            className="text-stone-400 hover:text-red-600 disabled:opacity-50"
+            className="text-ink-muted hover:text-grounded disabled:opacity-50"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -750,7 +750,7 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
       </div>
 
       <div className="px-2 pb-2">
-        <div className="h-1 bg-stone-200 rounded-full overflow-hidden">
+        <div className="h-1 bg-paper-sunk rounded-full overflow-hidden">
           <div
             className={`h-full ${tone.bar} transition-all`}
             style={{ width: `${job.score}%` }}
@@ -758,26 +758,26 @@ function JobRow({ job, busy, readOnly = false, onRemove, onSetPriority, onConfir
         </div>
 
         {hasNeeds ? (
-          <p className="mt-1.5 text-[11px] text-stone-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <p className="mt-1.5 text-[11px] text-ink-muted flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span>
-              <span className="font-medium text-stone-700">{job.builtCount}</span>
-              <span className="text-stone-400"> / {totalNeeds} built</span>
+              <span className="font-medium text-ink">{job.builtCount}</span>
+              <span className="text-ink-muted"> / {totalNeeds} built</span>
             </span>
             {job.partialCount > 0 ? (
-              <span className="text-amber-700">{job.partialCount} partial</span>
+              <span className="text-holding">{job.partialCount} partial</span>
             ) : null}
             {job.missingCount > 0 ? (
               <span className="text-orange-700">{job.missingCount} not built yet</span>
             ) : null}
           </p>
         ) : (
-          <p className="mt-1.5 text-[11px] text-stone-400 italic">
+          <p className="mt-1.5 text-[11px] text-ink-muted italic">
             No components mapped to this job yet — Claude couldn't link it to your codebase.
           </p>
         )}
 
         {hasNeeds && expanded ? (
-          <ul className="mt-2 space-y-1 border-t border-stone-100 pt-2">
+          <ul className="mt-2 space-y-1 border-t border-line pt-2">
             {job.needs.map((need) => (
               <NeedRow key={need.id} need={need} />
             ))}
@@ -793,25 +793,25 @@ function NeedRow({ need }: { need: JobNeed }) {
     need.status === 'built' ? CheckCircle2 : need.status === 'partial' ? CircleDashed : Circle;
   const tone =
     need.status === 'built'
-      ? 'text-emerald-600'
+      ? 'text-cleared'
       : need.status === 'partial'
-        ? 'text-amber-600'
-        : 'text-stone-300';
-  const labelTone = need.status === 'missing' ? 'text-stone-500' : 'text-stone-700';
+        ? 'text-holding'
+        : 'text-ink-muted';
+  const labelTone = need.status === 'missing' ? 'text-ink-muted' : 'text-ink';
 
   return (
     <li className="flex items-center gap-2 text-xs">
       <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${tone}`} aria-hidden />
       <span className={`flex-1 min-w-0 truncate ${labelTone}`}>{need.label}</span>
       {need.module ? (
-        <span className="text-[10px] text-stone-400 truncate max-w-[40%]">· {need.module}</span>
+        <span className="text-[10px] text-ink-muted truncate max-w-[40%]">· {need.module}</span>
       ) : null}
       {need.status === 'missing' ? (
         <span className="text-[10px] uppercase tracking-wider text-orange-600 font-medium">
           not built
         </span>
       ) : need.status === 'partial' ? (
-        <span className="text-[10px] uppercase tracking-wider text-amber-700 font-medium">
+        <span className="text-[10px] uppercase tracking-wider text-holding font-medium">
           partial
         </span>
       ) : null}
@@ -845,7 +845,7 @@ function PersonaForm({ onSubmit, onCancel, busy }: PersonaFormProps) {
           value={emoji}
           onChange={(e) => setEmoji(e.target.value)}
           maxLength={4}
-          className="w-12 text-center text-lg border border-stone-200 rounded px-2 py-1.5"
+          className="w-12 text-center text-lg border border-line rounded px-2 py-1.5"
         />
         <input
           aria-label="Persona name"
@@ -853,7 +853,7 @@ function PersonaForm({ onSubmit, onCancel, busy }: PersonaFormProps) {
           onChange={(e) => setName(e.target.value)}
           placeholder="Persona name (e.g. New developer)"
           autoFocus
-          className="flex-1 text-sm border border-stone-200 rounded px-2 py-1.5"
+          className="flex-1 text-sm border border-line rounded px-2 py-1.5"
         />
       </div>
       <input
@@ -861,20 +861,20 @@ function PersonaForm({ onSubmit, onCancel, busy }: PersonaFormProps) {
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description (optional)"
-        className="w-full text-xs border border-stone-200 rounded px-2 py-1.5 text-stone-600"
+        className="w-full text-xs border border-line rounded px-2 py-1.5 text-ink-muted"
       />
       <div className="flex gap-2 justify-end pt-1">
         <button
           type="button"
           onClick={onCancel}
-          className="text-xs text-stone-600 hover:text-stone-900 px-2 py-1"
+          className="text-xs text-ink-muted hover:text-ink px-2 py-1"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={busy || !name.trim()}
-          className="text-xs font-medium px-3 py-1 rounded bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="text-xs font-medium px-3 py-1 rounded bg-night text-on-night hover:bg-night disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {busy ? 'Adding…' : 'Add persona'}
         </button>
@@ -906,7 +906,7 @@ function JobForm({ onSubmit, onCancel, busy }: JobFormProps) {
       <select
         value={priority}
         onChange={(e) => setPriority(e.target.value as Priority)}
-        className="text-[11px] uppercase tracking-wide font-medium border border-stone-200 rounded px-1.5 py-0.5 bg-white"
+        className="text-[11px] uppercase tracking-wide font-medium border border-line rounded px-1.5 py-0.5 bg-paper-raised"
       >
         <option value="high">High</option>
         <option value="medium">Med</option>
@@ -918,19 +918,19 @@ function JobForm({ onSubmit, onCancel, busy }: JobFormProps) {
         onChange={(e) => setTitle(e.target.value)}
         placeholder="What does this persona need to do?"
         autoFocus
-        className="flex-1 text-sm border border-stone-200 rounded px-2 py-1"
+        className="flex-1 text-sm border border-line rounded px-2 py-1"
       />
       <button
         type="submit"
         disabled={busy || !title.trim()}
-        className="text-xs font-medium px-2 py-1 rounded bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
+        className="text-xs font-medium px-2 py-1 rounded bg-night text-on-night hover:bg-night disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {busy ? 'Adding…' : 'Add'}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="text-xs text-stone-600 hover:text-stone-900"
+        className="text-xs text-ink-muted hover:text-ink"
       >
         Cancel
       </button>

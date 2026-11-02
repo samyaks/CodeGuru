@@ -7,7 +7,7 @@ export interface MetadataLabelProps {
 
 export function MetadataLabel({ children, className = '' }: MetadataLabelProps) {
   return (
-    <p className={`text-xs uppercase tracking-widest text-stone-500 ${className}`.trim()}>
+    <p className={`text-xs uppercase tracking-widest text-ink-muted ${className}`.trim()}>
       {children}
     </p>
   );

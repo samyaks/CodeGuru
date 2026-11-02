@@ -252,7 +252,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
   }, [toast]);
 
   if (loading && allGaps.length === 0) {
-    return <div className="text-sm text-stone-500">Loading gaps…</div>;
+    return <div className="text-sm text-ink-muted">Loading gaps…</div>;
   }
 
   if (error) {
@@ -264,7 +264,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
           <button
             type="button"
             onClick={() => void reload()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-stone-700 bg-white border border-stone-300 rounded hover:bg-stone-50 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-ink bg-paper-raised border border-line-strong rounded hover:bg-paper-sunk transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
             Retry
@@ -277,8 +277,8 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-2xl font-bold text-stone-900 mb-2 v2-font-serif">What's missing or broken</h3>
-        <p className="text-stone-600 text-sm leading-relaxed">
+        <h3 className="text-2xl font-bold text-ink mb-2 v2-font-serif">What's missing or broken</h3>
+        <p className="text-ink-muted text-sm leading-relaxed">
           {readOnly
             ? 'Gaps found in the code, ranked by which jobs they block.'
             : 'Accept a gap to start working on it. The prompt opens inline — copy it, build, then mark committed. Takeoff will verify it landed.'}
@@ -305,7 +305,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
           filter row tight on clean projects.
         */}
         {counts.securityTotal > 0 ? (
-          <div className="ml-4 pl-4 border-l border-stone-200 flex items-center gap-3">
+          <div className="ml-4 pl-4 border-l border-line flex items-center gap-3">
             <SecurityChip
               active={securityOnly}
               count={counts.securityTotal}
@@ -313,23 +313,23 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
             />
             <Link
               to={`/v2/projects/${projectId}/security`}
-              className="text-xs text-stone-500 hover:text-stone-900 underline underline-offset-2"
+              className="text-xs text-ink-muted hover:text-ink underline underline-offset-2"
             >
               Full report →
             </Link>
           </div>
         ) : null}
         {counts.inProgress > 0 ? (
-          <div className="ml-auto text-xs text-stone-500 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-500 v2-animate-pulse" />
+          <div className="ml-auto text-xs text-ink-muted flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-holding v2-animate-pulse" />
             {counts.inProgress} in progress
           </div>
         ) : null}
       </div>
 
       {personas.length > 0 ? (
-        <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-stone-100">
-          <span className="text-xs uppercase tracking-wider text-stone-500 font-semibold pr-1 pt-2.5">For:</span>
+        <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-line">
+          <span className="text-xs uppercase tracking-wider text-ink-muted font-semibold pr-1 pt-2.5">For:</span>
           <PersonaChip active={personaFilter === null} onClick={() => setPersonaFilter(null)}>
             All personas
           </PersonaChip>
@@ -352,13 +352,13 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
       ) : null}
 
       {visible.length === 0 ? (
-        <div className="bg-white border border-stone-200 rounded-lg p-8 text-center">
+        <div className="bg-paper-raised border border-line rounded-lg p-8 text-center">
           {securityOnly ? (
-            <Shield className="w-8 h-8 text-emerald-500 mx-auto mb-3" aria-hidden />
+            <Shield className="w-8 h-8 text-cleared mx-auto mb-3" aria-hidden />
           ) : (
-            <CheckCircle className="w-8 h-8 text-emerald-500 mx-auto mb-3" aria-hidden />
+            <CheckCircle className="w-8 h-8 text-cleared mx-auto mb-3" aria-hidden />
           )}
-          <p className="font-semibold text-stone-900 mb-1">
+          <p className="font-semibold text-ink mb-1">
             {securityOnly
               ? counts.securityTotal === 0
                 ? 'No security gaps detected'
@@ -369,7 +369,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
                 ? `Nothing left for ${personas.find((p) => p.id === personaFilter)?.name ?? 'this persona'}.`
                 : emptyTitle(filter)}
           </p>
-          <p className="text-sm text-stone-600">
+          <p className="text-sm text-ink-muted">
             {securityOnly
               ? counts.securityTotal === 0
                 ? "Either you're in great shape, or detectors haven't run on this project yet. Re-run analysis to refresh."
@@ -405,7 +405,7 @@ export function GapsSection({ projectId, onCommitted, readOnly = false }: GapsSe
       {toast ? (
         <div
           role="status"
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-night text-on-night text-sm px-4 py-2 rounded-md shadow-lg z-40 max-w-lg"
         >
           {toast}
         </div>
@@ -422,10 +422,10 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-        active ? 'bg-stone-900 text-white' : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+        active ? 'bg-night text-on-night' : 'bg-paper-raised border border-line text-ink hover:border-line-strong'
       }`}
     >
-      {children} <span className={active ? 'text-stone-300' : 'text-stone-400'}>{count}</span>
+      {children} <span className={active ? 'text-ink-muted' : 'text-ink-muted'}>{count}</span>
     </button>
   );
 }
@@ -446,13 +446,13 @@ function SecurityChip({
       aria-pressed={active}
       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1.5 ${
         active
-          ? 'bg-red-50 border border-red-200 text-red-700'
-          : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+          ? 'bg-grounded-soft border border-grounded text-grounded'
+          : 'bg-paper-raised border border-line text-ink hover:border-line-strong'
       }`}
     >
       <Shield className="w-3 h-3" aria-hidden />
       <span>Security only</span>
-      <span className={active ? 'text-red-500' : 'text-stone-400'}>{count}</span>
+      <span className={active ? 'text-grounded' : 'text-ink-muted'}>{count}</span>
     </button>
   );
 }
@@ -473,14 +473,14 @@ function PersonaChip({
       aria-pressed={active}
       className={`px-3 py-1.5 mt-2 rounded-full text-xs font-medium transition-all inline-flex items-center gap-1.5 ${
         active
-          ? 'bg-stone-100 border border-stone-400 text-stone-900'
-          : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-400'
+          ? 'bg-paper-sunk border border-line-strong text-ink'
+          : 'bg-paper-raised border border-line text-ink hover:border-line-strong'
       }`}
     >
       {emoji ? <span aria-hidden>{emoji}</span> : null}
       <span>{children}</span>
       {typeof count === 'number' ? (
-        <span className={active ? 'text-stone-500' : 'text-stone-400'}>{count}</span>
+        <span className={active ? 'text-ink-muted' : 'text-ink-muted'}>{count}</span>
       ) : null}
     </button>
   );

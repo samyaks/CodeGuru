@@ -231,11 +231,11 @@ export async function fetchSharedSecurityReport(slug: string): Promise<SharedSec
 
 // ── Shipped ────────────────────────────────────────────────────────
 
-import type { ShippedItemData, RecentCommitData } from '../components/v2';
+import type { ShippedItemData, MergedPullData } from '../components/v2';
 
 export interface V2ShippedResponse {
   repo: string | null;
-  recentCommits?: RecentCommitData[];
+  recentMerges?: MergedPullData[];
   items: Array<ShippedItemData & {
     gapId: string | null;
     matchConfidence: number | null;

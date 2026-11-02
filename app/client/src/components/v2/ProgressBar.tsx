@@ -10,10 +10,10 @@ export interface ProgressBarProps {
 }
 
 const TONE_CLASSES: Record<ProgressTone, string> = {
-  success: 'bg-emerald-500',
-  warning: 'bg-amber-500',
-  danger: 'bg-red-500',
-  neutral: 'bg-stone-500',
+  success: 'bg-cleared',
+  warning: 'bg-holding',
+  danger: 'bg-grounded',
+  neutral: 'bg-line-strong',
 };
 
 function toneFor(value: number): ProgressTone {
@@ -27,7 +27,7 @@ export function ProgressBar({ value, tone, label, className = '' }: ProgressBarP
   const resolved = tone ?? toneFor(clamped);
   return (
     <div
-      className={`h-1.5 bg-stone-100 rounded-full overflow-hidden ${className}`.trim()}
+      className={`h-1.5 bg-paper-sunk rounded-full overflow-hidden ${className}`.trim()}
       role="progressbar"
       aria-valuenow={clamped}
       aria-valuemin={0}

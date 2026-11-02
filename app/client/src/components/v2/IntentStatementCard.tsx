@@ -10,9 +10,9 @@ import type {
 // is a guardrail so it earns the amber accent, and `non_goal` is deliberately
 // muted — it's an explicit "we're NOT doing this" and shouldn't shout.
 const KIND_META: Record<IntentKind, { label: string; pill: string }> = {
-  behavior: { label: 'Behavior', pill: 'bg-stone-100 text-stone-700 border-stone-200' },
-  constraint: { label: 'Constraint', pill: 'bg-amber-50 text-amber-700 border-amber-200' },
-  non_goal: { label: 'Non-goal', pill: 'bg-stone-50 text-stone-400 border-stone-200' },
+  behavior: { label: 'Behavior', pill: 'bg-paper-sunk text-ink border-line' },
+  constraint: { label: 'Constraint', pill: 'bg-holding-soft text-holding border-holding' },
+  non_goal: { label: 'Non-goal', pill: 'bg-paper-sunk text-ink-muted border-line' },
 };
 
 const KIND_OPTIONS: IntentKind[] = ['behavior', 'constraint', 'non_goal'];
@@ -25,8 +25,8 @@ const LINK_HEALTH_META: Record<Exclude<IntentLink['linkStatus'], 'healthy'>, {
   icon: typeof AlertTriangle;
   label: string;
 }> = {
-  needs_relink: { chip: 'bg-amber-50 border-amber-200 text-amber-700', icon: AlertTriangle, label: 'needs relink' },
-  broken: { chip: 'bg-red-50 border-red-200 text-red-600', icon: Unlink, label: 'broken link' },
+  needs_relink: { chip: 'bg-holding-soft border-holding text-holding', icon: AlertTriangle, label: 'needs relink' },
+  broken: { chip: 'bg-grounded-soft border-grounded text-grounded', icon: Unlink, label: 'broken link' },
 };
 
 function anchorLabel(link: IntentLink): string {
@@ -71,11 +71,11 @@ function LinkChip({ link, showHealth }: { link: IntentLink; showHealth: boolean 
   return (
     <span className="inline-flex items-center gap-1.5">
       <code
-        className="text-xs px-2 py-1 rounded border font-mono inline-flex items-center gap-1 bg-stone-50 border-stone-200 text-stone-700"
+        className="text-xs px-2 py-1 rounded border font-mono inline-flex items-center gap-1 bg-paper-sunk border-line text-ink"
         title={anchorLabel(link)}
       >
-        <span className="text-stone-500">{link.filePath}</span>
-        {link.symbol ? <span className="text-stone-400">·</span> : null}
+        <span className="text-ink-muted">{link.filePath}</span>
+        {link.symbol ? <span className="text-ink-muted">·</span> : null}
         {link.symbol ? <span>{link.symbol}</span> : null}
       </code>
       {showHealth ? <LinkHealthBadge link={link} /> : null}
@@ -142,14 +142,14 @@ export function IntentStatementCard({
   // "not yet checked".
   const satisfactionBadge = !isConfirmed || statement.satisfied === null ? null : statement.satisfied ? (
     <span
-      className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200"
+      className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 bg-cleared-soft text-cleared border-cleared"
       title="The code still satisfies this statement"
     >
       <CircleCheck className="w-3 h-3" aria-hidden /> Satisfied
     </span>
   ) : (
     <span
-      className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 bg-red-50 text-red-600 border-red-200"
+      className="inline-flex items-center gap-1 text-[11px] font-semibold border rounded-full px-2 py-0.5 bg-grounded-soft text-grounded border-grounded"
       title="The code no longer satisfies this statement"
     >
       <CircleSlash className="w-3 h-3" aria-hidden /> Drifted
@@ -157,13 +157,13 @@ export function IntentStatementCard({
   );
 
   const cardTone = isRejected
-    ? 'border-stone-200 opacity-70'
+    ? 'border-line opacity-70'
     : isConfirmed
-      ? 'border-emerald-200'
-      : 'border-stone-200';
+      ? 'border-cleared'
+      : 'border-line';
 
   return (
-    <div className={`bg-white border ${cardTone} rounded-lg overflow-hidden ${className}`.trim()}>
+    <div className={`bg-paper-raised border ${cardTone} rounded-lg overflow-hidden ${className}`.trim()}>
       <div className="p-4">
         <div className="flex items-center gap-2 mb-2.5 flex-wrap">
           <span
@@ -172,20 +172,20 @@ export function IntentStatementCard({
             {kindMeta.label}
           </span>
           {isCandidate ? (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-amber-50 text-amber-700 border-amber-200">
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-holding-soft text-holding border-holding">
               Needs review
             </span>
           ) : isConfirmed ? (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-emerald-50 text-emerald-700 border-emerald-200">
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-cleared-soft text-cleared border-cleared">
               Confirmed
             </span>
           ) : (
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-stone-100 text-stone-500 border-stone-200">
+            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border font-medium bg-paper-sunk text-ink-muted border-line">
               Rejected
             </span>
           )}
           {statement.source === 'human' ? (
-            <span className="text-[10px] uppercase tracking-wider text-stone-400">Edited by you</span>
+            <span className="text-[10px] uppercase tracking-wider text-ink-muted">Edited by you</span>
           ) : null}
           {satisfactionBadge ? <span className="ml-auto">{satisfactionBadge}</span> : null}
         </div>
@@ -197,15 +197,15 @@ export function IntentStatementCard({
               onChange={(e) => setDraftText(e.target.value)}
               rows={3}
               aria-label="Statement text"
-              className="w-full px-3 py-2 text-sm border border-stone-300 rounded focus:outline-none focus:border-stone-900 resize-none v2-font-serif"
+              className="w-full px-3 py-2 text-sm border border-line-strong rounded focus:outline-none focus:border-line-strong resize-none v2-font-serif"
             />
             <div className="flex items-center gap-2">
-              <label htmlFor={`kind-${statement.id}`} className="text-xs text-stone-500">Kind</label>
+              <label htmlFor={`kind-${statement.id}`} className="text-xs text-ink-muted">Kind</label>
               <select
                 id={`kind-${statement.id}`}
                 value={draftKind}
                 onChange={(e) => setDraftKind(e.target.value as IntentKind)}
-                className="text-xs px-2 py-1 border border-stone-300 rounded focus:outline-none focus:border-stone-900 bg-white"
+                className="text-xs px-2 py-1 border border-line-strong rounded focus:outline-none focus:border-line-strong bg-paper-raised"
               >
                 {KIND_OPTIONS.map((k) => (
                   <option key={k} value={k}>{KIND_META[k].label}</option>
@@ -214,22 +214,22 @@ export function IntentStatementCard({
             </div>
 
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-stone-500 mb-1.5">Linked code</p>
+              <p className="text-[11px] uppercase tracking-wider text-ink-muted mb-1.5">Linked code</p>
               {draftLinks.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {draftLinks.map((l, idx) => (
                     <span
                       key={`${l.filePath}-${l.symbol ?? ''}-${idx}`}
-                      className="text-xs px-2 py-1 rounded border bg-stone-50 border-stone-200 text-stone-700 font-mono inline-flex items-center gap-1.5"
+                      className="text-xs px-2 py-1 rounded border bg-paper-sunk border-line text-ink font-mono inline-flex items-center gap-1.5"
                     >
-                      <span className="text-stone-500">{l.filePath}</span>
-                      {l.symbol ? <span className="text-stone-400">·</span> : null}
+                      <span className="text-ink-muted">{l.filePath}</span>
+                      {l.symbol ? <span className="text-ink-muted">·</span> : null}
                       {l.symbol ? <span>{l.symbol}</span> : null}
                       <button
                         type="button"
                         onClick={() => removeLink(idx)}
                         aria-label={`Remove link ${anchorLabel({ ...l, linkStatus: 'healthy' })}`}
-                        className="text-stone-400 hover:text-red-600 transition-colors"
+                        className="text-ink-muted hover:text-grounded transition-colors"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -237,7 +237,7 @@ export function IntentStatementCard({
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-stone-400 mb-2">No linked code.</p>
+                <p className="text-xs text-ink-muted mb-2">No linked code.</p>
               )}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <input
@@ -246,7 +246,7 @@ export function IntentStatementCard({
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLink(); } }}
                   placeholder="path/to/file.ts"
                   aria-label="Link file path"
-                  className="text-xs px-2 py-1 border border-stone-300 rounded focus:outline-none focus:border-stone-900 font-mono flex-1 min-w-[8rem]"
+                  className="text-xs px-2 py-1 border border-line-strong rounded focus:outline-none focus:border-line-strong font-mono flex-1 min-w-[8rem]"
                 />
                 <input
                   value={newSymbol}
@@ -254,14 +254,14 @@ export function IntentStatementCard({
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLink(); } }}
                   placeholder="symbol (optional)"
                   aria-label="Link symbol"
-                  className="text-xs px-2 py-1 border border-stone-300 rounded focus:outline-none focus:border-stone-900 font-mono flex-1 min-w-[7rem]"
+                  className="text-xs px-2 py-1 border border-line-strong rounded focus:outline-none focus:border-line-strong font-mono flex-1 min-w-[7rem]"
                 />
                 <button
                   type="button"
                   onClick={addLink}
                   disabled={!newFilePath.trim()}
                   aria-label="Add link"
-                  className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded border border-stone-300 text-stone-700 hover:bg-stone-100 disabled:opacity-40 transition-colors"
+                  className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded border border-line-strong text-ink hover:bg-paper-sunk disabled:opacity-40 transition-colors"
                 >
                   <Plus className="w-3 h-3" /> Add
                 </button>
@@ -272,7 +272,7 @@ export function IntentStatementCard({
               <button
                 type="button"
                 onClick={() => setEditing(false)}
-                className="text-xs text-stone-600 hover:text-stone-900 px-3 py-1.5"
+                className="text-xs text-ink-muted hover:text-ink px-3 py-1.5"
               >
                 Cancel
               </button>
@@ -280,7 +280,7 @@ export function IntentStatementCard({
                 type="button"
                 onClick={saveEdit}
                 disabled={busy || !draftText.trim()}
-                className="text-xs bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white px-3 py-1.5 rounded font-medium"
+                className="text-xs bg-night hover:bg-night disabled:bg-line-strong text-on-night px-3 py-1.5 rounded font-medium"
               >
                 Save changes
               </button>
@@ -288,7 +288,7 @@ export function IntentStatementCard({
           </div>
         ) : (
           <>
-            <p className="text-sm text-stone-800 leading-relaxed v2-font-serif mb-3">{statement.text}</p>
+            <p className="text-sm text-ink leading-relaxed v2-font-serif mb-3">{statement.text}</p>
 
             {statement.links.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 mb-3">
@@ -309,7 +309,7 @@ export function IntentStatementCard({
                     onClick={() => onRestore?.(statement.id)}
                     disabled={busy}
                     aria-label="Restore statement"
-                    className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 text-ink-muted hover:text-ink hover:bg-paper-sunk disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
                   >
                     <RotateCcw className="w-4 h-4" /> Restore
                   </button>
@@ -321,7 +321,7 @@ export function IntentStatementCard({
                         onClick={() => onAccept(statement.id)}
                         disabled={busy}
                         aria-label="Accept statement"
-                        className="flex items-center gap-2 px-4 py-1.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 text-white rounded-md text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 px-4 py-1.5 bg-night hover:bg-night disabled:bg-line-strong text-on-night rounded-md text-sm font-medium transition-colors"
                       >
                         <Check className="w-4 h-4" /> Accept
                       </button>
@@ -332,7 +332,7 @@ export function IntentStatementCard({
                         onClick={openEditor}
                         disabled={busy}
                         aria-label="Edit statement"
-                        className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 px-3 py-1.5 text-ink-muted hover:text-ink hover:bg-paper-sunk disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
                       >
                         <Pencil className="w-4 h-4" /> Edit
                       </button>
@@ -343,7 +343,7 @@ export function IntentStatementCard({
                         onClick={() => onReject(statement.id)}
                         disabled={busy}
                         aria-label="Reject statement"
-                        className="flex items-center gap-2 px-3 py-1.5 text-stone-600 hover:text-stone-900 hover:bg-stone-100 disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
+                        className="flex items-center gap-2 px-3 py-1.5 text-ink-muted hover:text-ink hover:bg-paper-sunk disabled:opacity-40 rounded-md text-sm font-medium transition-colors"
                       >
                         <X className="w-4 h-4" /> Reject
                       </button>
