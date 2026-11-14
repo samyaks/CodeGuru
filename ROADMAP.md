@@ -10,6 +10,9 @@ Source of truth for what we are building and in what order.
 > the one agreed on 2026-11-01: ship to outsiders and verify before building the
 > team layer. First drafted 2026-10-11 on `cursor/analysis-file-ticker`; landed on
 > `main` with the trust pass.
+>
+> **Direction draft, 2026-11-13, not yet agreed:** [product-direction.md](docs/specs/product-direction.md)
+> proposes narrowing to one loop (a shared plan, an in-flight view, a check that keeps the plan true) and trying it first on the new two-person project. Nothing above changes until it is agreed.
 
 ## Now
 
