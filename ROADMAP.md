@@ -13,6 +13,8 @@ Source of truth for what we are building and in what order.
 >
 > **Direction draft, 2026-11-13, not yet agreed:** [product-direction.md](docs/specs/product-direction.md)
 > proposes narrowing to one loop (a shared plan, an in-flight view, a check that keeps the plan true) and trying it first on the new two-person project. Nothing above changes until it is agreed.
+>
+> **Beta sprint draft, 2026-11-13:** [beta-sprint.md](docs/specs/beta-sprint.md) lists everything to finish before inviting builders, with sizes and "done when". Draft; the Stage 1 and 2 lists above stay the source of truth until it is agreed.
 
 ## Now
 
