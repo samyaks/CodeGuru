@@ -137,6 +137,69 @@ or "does this branch match the plan?" over the plan file, inside Cursor or
 Claude Code, with no new hosted agent. If we reach for that daily, it is the
 seed of the bigger version.
 
+## Intent intake: how the plan gets captured
+
+The check is only as good as the plan it holds the code against. A generic
+checklist says "you have no payments" even when the app is free. If detection is
+driven by what the founder says they're building, the report flags only what
+that app needs. Order of work: the founder states what the app is for and how
+it will be used; that implies the capabilities it must have; the detectors check
+each one and give it a status (Cleared, Holding, Grounded).
+
+Today the Read page captures three things: objective, audience and core job.
+(Based on a read of `read/ReadPage.tsx`; the rest of the flow was not checked.)
+What is missing is the business and risk side.
+
+| Ask, in plain words | What it implies |
+|---|---|
+| Will people pay you? How? | Checkout, webhooks, subscription state, receipts, refunds |
+| Do people have accounts? | Sign-in, password reset, email verification |
+| Will different people see different things? | Roles, permissions, data isolation (row level security) |
+| Do you store personal or sensitive data? | Privacy policy, deletion, secrets handling, security checks |
+| Does it send email or notifications? | Email provider, unsubscribe |
+| Who is it for at launch: friends, or the public? | Rate limiting, monitoring, backups, error handling |
+
+### A conversation, bounded
+
+Not an open chat, and not a plain form. People are bad at describing what they
+are building from a blank page and good at correcting a draft.
+
+1. **Read the code first, then propose.** "Here's what I think you're building,
+   and I can see Stripe installed." This reuses the claim-correction pattern the
+   Read page already has.
+2. **Ask only where the code is ambiguous or silent.** Two to five questions,
+   one at a time, in plain words. Pre-fill from the code ("We see Stripe. Is that
+   how you'll charge?").
+3. **Cap the turns** (about seven exchanges), and allow "not sure", marked as
+   such, with what that choice would mean.
+4. **Output is structured, not a transcript.** Each answer becomes a field (for
+   example "needs payments: yes, later") shown as an editable chip and written to
+   the plan file, so the check has something to hold the code against.
+5. **Show findings as it goes**, so value arrives before the interview ends.
+
+The same agent becomes the "ask the plan" interface above.
+
+### Cautions
+
+- Intake says what to look for, not whether the looking is accurate. The
+  detectors need work too: some rules assume Express, and there is no payments
+  detector yet. Good intent with a weak detector still produces bad reports.
+- Cost: conversations run long and wander, and scan spend is already unbounded
+  on the roadmap. Cap turns and tokens per intake.
+
+### How we'll test it
+
+Start with propose-and-correct (cheap, half-built), and add follow-up questions
+only where the code is unclear. Compare a plain form against the conversation
+with different testers:
+
+- Share of findings marked relevant and acted on (the main number).
+- How many finish intake.
+- Time to the first useful finding.
+- Cost per scan.
+
+If the conversation does not beat the form on relevance, ship the form.
+
 ## What waits
 
 Until the two-person loop is proven:
@@ -273,3 +336,14 @@ blocker before building more.
   pull requests and a human approving.
 - Can the funnel tell us what the five other accounts did? Worth a look before
   anyone is called.
+- Which product do we lead with: launch readiness for a solo founder (auth,
+  users, permissions, database, payments), or staying in sync for people and
+  agents? Settle with evidence, not theory: write the PULL for each, find people
+  with the "unavoidable" moment, and set the kill criteria before testing. The
+  intake above serves both.
+- Where does the first launch-readiness test stop? A small version (existing
+  detectors plus a payments check, public repos or folder upload, fixes as agent
+  prompts) is days of work. Private repos and applying fixes as pull requests
+  are weeks.
+- What do the intake answers look like in the plan file, so a human can read and
+  edit them, and an agent can act on them?
