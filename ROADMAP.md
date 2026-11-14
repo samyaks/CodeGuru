@@ -95,7 +95,7 @@ sign-in, repo picker, live scan progress, folder upload.
 
 ## Shipped
 
-- 2026-11-13 Spec tab shows Recent merges in place of "What must hold for it to work" (this PR)
+- 2026-11-13 Spec tab shows Recent merges in place of "What must hold for it to work" (#40)
 - 2026-11-01 Four-tab project shell (Spec / Build / Shipped / Settings), Pro gate replaced by sign-in, read-only visitor state, legacy routes hidden (#35)
 - 2026-11-01 Takeoff design system and new dashboard (#31); Shipped tab shows recent commits with summaries (#33)
 - 2026-09-10 Dashboard cards show persona summary, gaps and last commit; gap findings grounded in evidence (#27)
