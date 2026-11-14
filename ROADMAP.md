@@ -62,11 +62,11 @@ sign-in, repo picker, live scan progress, folder upload.
 10. [ ] **"Live demo" is a static mock of the older report.** The Readiness number was removed 2026-11-01; still point it at a real public Read.
 11. [ ] **Read pages have a generic tab title**, so shared links do not name the repo.
 12. [ ] Small copy: raw values like `fullstack` and `ready` in Settings; Shipped prints a commit title twice. (Context heading, "saves your tokens" and "under 2 minutes" fixed 2026-11-01.)
-13. [ ] **Empty states not yet seen live:** a ready project with zero personas or zero guarantees (copy updated 2026-11-01, not viewed with real data), and a fresh project in the first minutes after the scan.
+13. [ ] **Empty states not yet seen live:** a ready project with zero personas (copy updated 2026-11-01, not viewed with real data), Recent merges on the Spec tab with no merges or no repo (2026-11-13), and a fresh project in the first minutes after the scan.
 
 ## Stage 3 — Public launch
 
-- [ ] **MCP server for the living spec.** Tool logic and tests exist in `app/server/services/intent/mcp-tools.js`; it needs a transport, a per-project key, and setup docs for Cursor and Claude Code.
+- [ ] **MCP server for the living spec.** Tool logic and tests exist in `app/server/services/intent/mcp-tools.js`; it needs a transport, a per-project key, and setup docs for Cursor and Claude Code. Since 2026-11-13 no screen shows guarantees, so they can't be confirmed or exported from the app (`IntentSection.tsx` is kept, unused).
 - [ ] **A public sample Read** linked from the landing page, so visitors see the output before scanning.
 - [ ] **Launch assets:** short demo video, launch post, refreshed `/demo`.
 - [ ] **Channels:** Show HN, Product Hunt, X, Cursor and Claude Code communities.
@@ -95,6 +95,7 @@ sign-in, repo picker, live scan progress, folder upload.
 
 ## Shipped
 
+- 2026-11-13 Spec tab shows Recent merges in place of "What must hold for it to work" (this PR)
 - 2026-11-01 Four-tab project shell (Spec / Build / Shipped / Settings), Pro gate replaced by sign-in, read-only visitor state, legacy routes hidden (#35)
 - 2026-11-01 Takeoff design system and new dashboard (#31); Shipped tab shows recent commits with summaries (#33)
 - 2026-09-10 Dashboard cards show persona summary, gaps and last commit; gap findings grounded in evidence (#27)
