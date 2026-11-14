@@ -181,6 +181,21 @@ function shapePersonas(data: ProductMapData): PersonaJobs[] {
   }));
 }
 
+/** Unfinished jobs first, so the thing still to build is not under a stack of finished rows. */
+function splitJobs(jobs: JobView[]): { next: JobView[]; done: JobView[] } {
+  const next: JobView[] = [];
+  const done: JobView[] = [];
+  for (const job of jobs) {
+    if (job.missingCount > 0 || job.partialCount > 0) next.push(job);
+    else done.push(job);
+  }
+  next.sort((a, b) => {
+    if (a.missingCount !== b.missingCount) return b.missingCount - a.missingCount;
+    return a.score - b.score;
+  });
+  return { next, done };
+}
+
 function scoreTone(score: number): { text: string; bar: string } {
   if (score >= 80) return { text: 'text-cleared', bar: 'bg-cleared' };
   if (score >= 50) return { text: 'text-holding', bar: 'bg-holding' };
@@ -544,8 +559,10 @@ function PersonaEditor({
   readOnly = false,
 }: PersonaEditorProps) {
   const [showAddJob, setShowAddJob] = useState(false);
+  const [showDone, setShowDone] = useState(false);
   const personaIsBusy = busyId === persona.id;
   const notBuiltCount = persona.jobs.filter((job) => job.missingCount > 0).length;
+  const { next, done } = splitJobs(persona.jobs);
 
   return (
     <div
@@ -620,17 +637,50 @@ function PersonaEditor({
               {readOnly ? 'No jobs yet.' : 'No jobs yet. Add one below.'}
             </p>
           ) : (
-            persona.jobs.map((job) => (
-              <JobRow
-                key={job.id}
-                job={job}
-                busy={busyId === job.id}
-                readOnly={readOnly}
-                onRemove={() => onRemoveJob(job.id)}
-                onSetPriority={(priority) => onSetPriority(job.id, priority)}
-                onConfirm={() => onConfirmJob(job.id)}
-              />
-            ))
+            <>
+              {next.map((job) => (
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  busy={busyId === job.id}
+                  readOnly={readOnly}
+                  onRemove={() => onRemoveJob(job.id)}
+                  onSetPriority={(priority) => onSetPriority(job.id, priority)}
+                  onConfirm={() => onConfirmJob(job.id)}
+                />
+              ))}
+              {done.length > 0 ? (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowDone((open) => !open)}
+                    className="text-xs text-ink-muted hover:text-ink inline-flex items-center gap-1"
+                    aria-expanded={showDone}
+                  >
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform ${showDone ? 'rotate-180' : ''}`}
+                      aria-hidden
+                    />
+                    {done.length} already built
+                  </button>
+                  {showDone ? (
+                    <div className="mt-2 space-y-2">
+                      {done.map((job) => (
+                        <JobRow
+                          key={job.id}
+                          job={job}
+                          busy={busyId === job.id}
+                          readOnly={readOnly}
+                          onRemove={() => onRemoveJob(job.id)}
+                          onSetPriority={(priority) => onSetPriority(job.id, priority)}
+                          onConfirm={() => onConfirmJob(job.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
           )}
 
           {readOnly ? null : showAddJob ? (
