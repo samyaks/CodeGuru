@@ -10,7 +10,7 @@ import { useAuth } from '../../hooks/useAuth';
 import GapsSection from '../v2/GapsSection';
 import ShippedSection from '../v2/ShippedSection';
 import MapSection from '../v2/MapSection';
-import IntentSection from '../v2/IntentSection';
+import RecentMergesSection from '../v2/RecentMergesSection';
 import SettingsSection from '../v2/SettingsSection';
 import ClaimPhrase from './ClaimPhrase';
 import EditorPop from './EditorPop';
@@ -445,7 +445,7 @@ export default function ReadPage() {
         <div className="read-panel v2-font-sans">
           <div className="space-y-8">
             <MapSection projectId={id} readOnly={!canEdit} />
-            <IntentSection projectId={id} readOnly={!canEdit} />
+            <RecentMergesSection projectId={id} />
           </div>
         </div>
       ) : null}
