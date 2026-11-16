@@ -1,0 +1,25 @@
+{
+  "id": "hardening-express",
+  "version": "0.1.0",
+  "capability": "security",
+  "provider": null,
+  "stacks": ["express"],
+  "conflicts": [],
+  "triggers": ["missing-helmet"],
+  "inputs": [
+    { "key": "rateLimitPerMinute", "type": "number", "default": 100, "min": 1, "max": 100000, "prompt": "Max requests per IP per minute" }
+  ],
+  "env": [
+    { "key": "CORS_ORIGINS", "source": "user", "secret": false, "note": "Comma-separated allowed browser origins, e.g. https://app.example.com. Empty means no cross-origin browser access." }
+  ],
+  "dependencies": { "helmet": "^8.0.0", "cors": "^2.8.5", "express-rate-limit": "^7.5.0" },
+  "files": [
+    { "from": "templates/express/security/hardening.js", "to": "{{entryDir}}security/hardening.js" }
+  ],
+  "entryPatches": [
+    { "op": "after-last-match", "match": "^(?:const|let|var)\\s.*require\\(.*$", "text": "const { applyHardening, hardeningErrorHandler } = require('./security/hardening');" },
+    { "op": "after-only-match", "match": "^(?:const|let|var)\\s+app\\s*=\\s*express\\(\\)\\s*;?\\s*$", "text": "applyHardening(app);" },
+    { "op": "before-first-match", "match": "^\\s*app\\.listen\\(", "text": "app.use(hardeningErrorHandler);\n" }
+  ],
+  "verify": { "detectors": ["missing-helmet", "cors-wildcard"], "checks": ["syntax"] }
+}
