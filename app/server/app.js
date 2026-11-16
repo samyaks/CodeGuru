@@ -22,6 +22,7 @@ const githubWebhookRoutes = require('./routes/github-webhook');
 const v2GapsRoutes = require('./routes/v2/gaps');
 const v2IntentRoutes = require('./routes/v2/intent');
 const v2ReadRoutes = require('./routes/v2/read');
+const v2LaunchRoutes = require('./routes/v2/launch');
 const v2SliceRoutes = require('./routes/v2/slice');
 const v2ShippedRoutes = require('./routes/v2/shipped');
 const v2SecurityRoutes = require('./routes/v2/security');
@@ -158,6 +159,7 @@ if (supabase) {
   app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), v2GapsRoutes);
   app.use('/api/v2/projects/:id/intent', optionalAuth(supabase), v2IntentRoutes);
   app.use('/api/v2/projects/:id/read', optionalAuth(supabase), v2ReadRoutes);
+  app.use('/api/v2/projects/:id/launch', optionalAuth(supabase), v2LaunchRoutes);
   app.use('/api/v2/projects/:id/slice', optionalAuth(supabase), v2SliceRoutes);
   app.use('/api/v2/projects/:id/shipped', optionalAuth(supabase), v2ShippedRoutes);
   app.use('/api/v2/projects/:id/security-summary', optionalAuth(supabase), v2SecurityRoutes);
@@ -182,6 +184,7 @@ if (supabase) {
   app.use('/api/v2/projects/:id/gaps', v2GapsRoutes);
   app.use('/api/v2/projects/:id/intent', v2IntentRoutes);
   app.use('/api/v2/projects/:id/read', v2ReadRoutes);
+  app.use('/api/v2/projects/:id/launch', v2LaunchRoutes);
   app.use('/api/v2/projects/:id/shipped', v2ShippedRoutes);
   app.use('/api/v2/projects/:id/security-summary', v2SecurityRoutes);
   // No-Supabase deployments don't have user identities, so share-link

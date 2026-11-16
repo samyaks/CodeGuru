@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Button, StatusMark, IntentCard, ConformanceRing, ChangeNote, VerdictPanel,
+  Button, StatusMark, IntentCard, ConformanceRing, ArchitectureMap, ChangeNote, VerdictPanel,
   PlanInput, Roadmap, SocialCard, STATUSES,
 } from '../components/takeoff';
 import type { RoadmapStage } from '../components/takeoff';
@@ -269,6 +269,23 @@ export default function Design() {
               <ConformanceRing cleared={3} total={4} size={80} />
             </State>
           </div>
+        </Section>
+
+        <Section id="map" title="ArchitectureMap" note="The app in the middle, each launch check as a part around it. Dashed and dotted links mean Holding and Grounded, so it never relies on colour.">
+          <ArchitectureMap
+            name="pawpath"
+            nodes={[
+              { id: 'signin', label: 'Sign-in', status: 'cleared' },
+              { id: 'permissions', label: 'Who sees what', status: 'grounded' },
+              { id: 'abuse', label: 'Abuse protection', status: 'holding' },
+              { id: 'privacy', label: 'Privacy', status: 'grounded' },
+              { id: 'data', label: 'Saved data', status: 'cleared' },
+              { id: 'payments', label: 'Payments', status: 'holding' },
+              { id: 'email', label: 'Email', status: 'holding' },
+              { id: 'live', label: 'Going live', status: 'cleared' },
+            ]}
+            onSelect={() => {}}
+          />
         </Section>
 
         <Section id="change" title="ChangeNote" note="A plain sentence first. The code stays behind “Show the code”.">

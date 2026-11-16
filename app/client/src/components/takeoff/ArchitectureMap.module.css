@@ -1,0 +1,99 @@
+.wrap {
+  overflow-x: auto;
+  padding-block: var(--space-2);
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  fill: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+/* Status colours on the node's own classes so the edge and the card agree. */
+.cleared { --tone: var(--cleared); --tone-soft: var(--cleared-soft); }
+.holding { --tone: var(--holding); --tone-soft: var(--holding-soft); }
+.grounded { --tone: var(--grounded); --tone-soft: var(--grounded-soft); }
+
+.edge {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* Status is never colour alone: weaker links are dashed, broken ones dotted. */
+.edge.holding { stroke-dasharray: 8 6; }
+.edge.grounded { stroke-dasharray: 2 6; }
+
+.hub {
+  fill: var(--paper-raised);
+  stroke: var(--beacon);
+  stroke-width: 2;
+}
+
+.hubName {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  fill: var(--ink);
+}
+
+.hubCount {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  fill: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  fill: var(--tone-soft);
+  stroke: var(--tone);
+  stroke-width: 1.5;
+}
+
+.icon {
+  color: var(--tone);
+}
+
+.label {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+
+.word {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  fill: var(--tone);
+}
+
+.interactive {
+  cursor: pointer;
+}
+
+.interactive:hover .card {
+  stroke-width: 2.5;
+}
+
+.interactive:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Too small to read on a phone. The verdict and the cards list the same checks. */
+@media (max-width: 559px) {
+  .wrap {
+    display: none;
+  }
+}
