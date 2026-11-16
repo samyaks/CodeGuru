@@ -5,6 +5,8 @@ const { asyncHandler } = require('../../lib/async-handler');
 const { checkProjectAccess } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
 const { buildLaunchChecks } = require('../../services/v2/launch-checks');
+const { buildAppWords } = require('../../services/v2/app-words');
+const { productMap: productMapDb } = require('../../lib/db-map');
 
 // GET /api/v2/projects/:id/launch -> the launch checks for the project page,
 // read from the detector results saved by the last scan. No analysis runs here.
@@ -21,7 +23,9 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   if (!project) throw AppError.notFound('Project not found');
   checkProjectAccess(project, req);
 
-  const { checks, notChecked } = buildLaunchChecks(project.analysis_data?.gaps);
+  // The map only supplies the app's own nouns; the checks still work without it.
+  const map = await productMapDb.getMapByProject(req.params.id).catch(() => null);
+  const { checks, notChecked } = buildLaunchChecks(project.analysis_data?.gaps, buildAppWords(map));
   res.json({
     name: project.owner && project.repo ? `${project.owner}/${project.repo}` : project.repo || 'Your project',
     // The project row's last update. There is no separate scan time saved.
