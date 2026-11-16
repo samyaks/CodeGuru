@@ -11,6 +11,7 @@ import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 import ReadPage from './pages/read/ReadPage';
+import { ReleaseProject, ReleaseIntake } from './pages/ReleasePreview';
 import SecurityReportV2 from './pages/v2/SecurityReport';
 import MarketingLayout from './layouts/MarketingLayout';
 import Features from './pages/marketing/Features';
@@ -24,6 +25,12 @@ import GapExplainerPage from './pages/marketing/GapExplainerPage';
 // Design system review pages. Dev only: the imports are dropped from production builds.
 const Design = import.meta.env.DEV ? lazy(() => import('./pages/Design')) : null;
 const DesignDashboard = import.meta.env.DEV ? lazy(() => import('./pages/DesignDashboard')) : null;
+const DesignProject = import.meta.env.DEV
+  ? lazy(() => import('./pages/DesignStory').then((m) => ({ default: m.DesignProject })))
+  : null;
+const DesignIntake = import.meta.env.DEV
+  ? lazy(() => import('./pages/DesignStory').then((m) => ({ default: m.DesignIntake })))
+  : null;
 
 // Canonical project surface is The Read; preserve any #tab deep link.
 function NavigateToRead() {
@@ -73,7 +80,10 @@ export default function App() {
             <Route path="/projects/:id/map/onboard" element={<NavigateToSpec />} />
             <Route path="/projects/:id/story" element={<NavigateToRead />} />
             {/* The Read — GET is public; writes handle auth themselves */}
-            <Route path="/read/:id" element={<ReadPage />} />
+            {/* Release 11.15.26: new design first, previous Read page kept at /old/read/:id. */}
+            <Route path="/read/:id" element={<ReleaseProject />} />
+            <Route path="/old/read/:id" element={<ReadPage />} />
+            <Route path="/intake" element={<ReleaseIntake />} />
 
             {/* Takeoff flow */}
             <Route path="/takeoff/:id" element={<AnalysisProgress />} />
@@ -86,6 +96,12 @@ export default function App() {
             )}
             {DesignDashboard && (
               <Route path="/design/dashboard" element={<Suspense fallback={null}><DesignDashboard /></Suspense>} />
+            )}
+            {DesignProject && (
+              <Route path="/design/project" element={<Suspense fallback={null}><DesignProject /></Suspense>} />
+            )}
+            {DesignIntake && (
+              <Route path="/design/intake" element={<Suspense fallback={null}><DesignIntake /></Suspense>} />
             )}
             {/* Legacy /v2/projects/:id URL — canonical is /read/:id. */}
             <Route path="/v2/projects/:id" element={<NavigateToRead />} />

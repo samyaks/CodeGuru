@@ -1,7 +1,7 @@
 {
   "name": "codeguru-client",
   "private": true,
-  "version": "0.1.0",
+  "version": "11.15.26",
   "type": "module",
   "scripts": {
     "dev": "vite",
