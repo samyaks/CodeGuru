@@ -9,7 +9,7 @@ import type { LaunchCheck, ProjectStory, ShippedChange } from './types';
 
 interface LaunchResponse {
   name: string;
-  scannedAt: string | null;
+  updatedAt: string | null;
   checks: LaunchCheck[];
   notChecked: string[];
 }
@@ -43,8 +43,8 @@ export function told(claims: ReadClaim[]): string[] {
     .filter(Boolean);
 }
 
-function list(labels: string[]): string {
-  const l = labels.map((x) => x.toLowerCase());
+function list(labels: string[], lower = true): string {
+  const l = lower ? labels.map((x) => x.toLowerCase()) : labels;
   if (l.length <= 1) return l.join('');
   return `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
 }
@@ -58,13 +58,13 @@ export function verdict(checks: LaunchCheck[], notChecked: string[]): { headline
   if (grounded.length > 0) {
     return {
       headline: 'Not ready to go live yet.',
-      support: `${list(grounded.map((c) => c.label))} ${grounded.length === 1 ? 'is' : 'are'} missing.${gap}`,
+      support: `${list(grounded.map((c) => c.label), false)} ${grounded.length === 1 ? 'is' : 'are'} missing.${gap}`,
     };
   }
   if (holding.length > 0) {
     return {
       headline: 'Nearly ready to go live.',
-      support: `${list(holding.map((c) => c.label))} ${holding.length === 1 ? 'is' : 'are'} only partly there.${gap}`,
+      support: `${list(holding.map((c) => c.label), false)} ${holding.length === 1 ? 'is' : 'are'} only partly there.${gap}`,
     };
   }
   return { headline: 'The basics are in place.', support: `Everything we check matches what a launch needs.${gap}` };
@@ -92,7 +92,7 @@ export function buildStory(
     told: told(claims),
     checks: launch.checks,
     shipped,
-    readAt: formatAgo(launch.scannedAt),
+    readAt: formatAgo(launch.updatedAt),
   };
 }
 
@@ -109,7 +109,10 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
   const reload = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => {
-    if (!projectId) return undefined;
+    if (!projectId) {
+      setState({ story: null, loading: false, error: null });
+      return undefined;
+    }
     let cancelled = false;
     setState({ story: null, loading: true, error: null });
     (async () => {

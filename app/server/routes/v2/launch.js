@@ -24,7 +24,8 @@ router.get('/', readLimit, asyncHandler(async (req, res) => {
   const { checks, notChecked } = buildLaunchChecks(project.analysis_data?.gaps);
   res.json({
     name: project.owner && project.repo ? `${project.owner}/${project.repo}` : project.repo || 'Your project',
-    scannedAt: project.updated_at || project.created_at || null,
+    // The project row's last update. There is no separate scan time saved.
+    updatedAt: project.updated_at || project.created_at || null,
     checks,
     notChecked,
   });

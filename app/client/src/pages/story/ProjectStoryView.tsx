@@ -317,7 +317,7 @@ export function ProjectStoryView({
           ) : null}
 
           <footer className={styles.foot}>
-            <p className={cx('type-small', styles.muted)}>Read from your code {story.readAt}.</p>
+            <p className={cx('type-small', styles.muted)}>Project updated {story.readAt}.</p>
             {oldHref ? (
               <Link className={cx('type-small', styles.oldLink)} to={oldHref}>See the old version</Link>
             ) : null}

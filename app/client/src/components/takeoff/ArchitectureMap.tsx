@@ -24,8 +24,8 @@ const SIDE: Record<string, 'in' | 'out'> = {
   privacy: 'in',
 };
 
-const W = 720;
-const NODE_W = 208;
+const W = 760;
+const NODE_W = 244;
 const NODE_H = 48;
 const GAP = 12;
 const TOP = 36;
@@ -35,6 +35,10 @@ const HUB_H = 88;
 const LEFT_X = 0;
 const RIGHT_X = W - NODE_W;
 const HUB_X = (W - HUB_W) / 2;
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
 
 function edge(x1: number, y1: number, x2: number, y2: number): string {
   const mid = (x1 + x2) / 2;
@@ -59,9 +63,7 @@ export function ArchitectureMap({ name, nodes, onSelect }: ArchitectureMapProps)
   const placedRight = place(right);
 
   const cleared = nodes.filter((n) => n.status === 'cleared').length;
-  const spoken =
-    `${name}, ${cleared} of ${nodes.length} launch checks cleared. ` +
-    nodes.map((n) => `${n.label}: ${STATUS[n.status].word}`).join('. ') + '.';
+  const spoken = `${name}, ${cleared} of ${nodes.length} launch checks cleared.`;
 
   const renderNode = (n: ArchitectureNode, x: number, y: number) => {
     const interactive = Boolean(onSelect) && n.status !== 'cleared';
@@ -84,7 +86,7 @@ export function ArchitectureMap({ name, nodes, onSelect }: ArchitectureMapProps)
         key={n.id}
         className={cx(styles.node, styles[n.status], interactive && styles.interactive)}
         transform={`translate(${x} ${y})`}
-        {...props}
+        {...(interactive ? props : { role: 'img' as const, 'aria-label': `${n.label}, ${STATUS[n.status].word}` })}
       >
         <rect className={styles.card} width={NODE_W} height={NODE_H} rx={12} />
         <g className={styles.icon} transform="translate(14 16)">
@@ -92,7 +94,7 @@ export function ArchitectureMap({ name, nodes, onSelect }: ArchitectureMapProps)
             <StatusIcon status={n.status} />
           </foreignObject>
         </g>
-        <text className={styles.label} x={40} y={21}>{n.label}</text>
+        <text className={styles.label} x={40} y={21}>{clip(n.label, 28)}</text>
         <text className={styles.word} x={40} y={37}>{STATUS[n.status].word}</text>
       </g>
     );
@@ -103,11 +105,11 @@ export function ArchitectureMap({ name, nodes, onSelect }: ArchitectureMapProps)
       <svg
         className={styles.svg}
         viewBox={`0 0 ${W} ${H}`}
-        role="img"
+        role="group"
         aria-label={spoken}
       >
-        <text className={styles.eyebrow} x={LEFT_X} y={14}>WHO GETS IN</text>
-        <text className={styles.eyebrow} x={W} y={14} textAnchor="end">WHAT IT RUNS ON</text>
+        <text className={styles.eyebrow} x={LEFT_X} y={14}>Who gets in</text>
+        <text className={styles.eyebrow} x={W} y={14} textAnchor="end">What it runs on</text>
 
         <g aria-hidden="true">
           {placedLeft.map(({ node, y }) => (
@@ -128,7 +130,7 @@ export function ArchitectureMap({ name, nodes, onSelect }: ArchitectureMapProps)
 
         <g transform={`translate(${HUB_X} ${hubY})`} aria-hidden="true">
           <rect className={styles.hub} width={HUB_W} height={HUB_H} rx={20} />
-          <text className={styles.hubName} x={HUB_W / 2} y={38} textAnchor="middle">{name}</text>
+          <text className={styles.hubName} x={HUB_W / 2} y={38} textAnchor="middle">{clip(name, 16)}</text>
           <text className={styles.hubCount} x={HUB_W / 2} y={62} textAnchor="middle">
             {cleared} of {nodes.length} cleared
           </text>

@@ -12,11 +12,11 @@ import styles from './ReleasePreview.module.css';
 
 export const RELEASE = '11.15.26';
 
-function Banner({ oldHref, label, real }: { oldHref?: string; label: string; real?: boolean }) {
+function Banner({ oldHref, label }: { oldHref?: string; label: string }) {
   return (
     <div className={cx('takeoff', styles.banner)} role="note">
       <span className="type-small">
-        Release {RELEASE}. {label}{real ? '' : ' Sample data, not your project.'}
+        Release {RELEASE}. {label}
       </span>
       {oldHref ? (
         <Link className={cx('type-small', styles.link)} to={oldHref}>
@@ -36,7 +36,7 @@ export function ReleaseProject() {
   };
   return (
     <>
-      <Banner oldHref={`/old/read/${id}`} label="This is the new project page." real />
+      <Banner oldHref={`/old/read/${id}`} label="This is the new project page." />
       <ProjectStoryView
         story={story}
         loading={loading}
@@ -53,8 +53,8 @@ export function ReleaseIntake() {
   const navigate = useNavigate();
   return (
     <>
-      <Banner label="This is the new intake conversation." />
-      <IntakeView script={SAMPLE_INTAKE} onFinish={() => navigate(-1)} />
+      <Banner label="This is the new intake conversation. Sample questions, not your project." />
+      <IntakeView script={SAMPLE_INTAKE} onFinish={() => navigate('/dashboard')} />
     </>
   );
 }
