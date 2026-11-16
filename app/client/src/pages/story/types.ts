@@ -29,6 +29,32 @@ export interface ShippedChange {
   where?: string;
 }
 
+/** The next feature to build, derived from the read. */
+export interface BuildNext {
+  title: string;
+  why: string;
+  /** null until the person signs in. */
+  prompt: string | null;
+  gated: boolean;
+}
+
+/** Something missing or broken, with the people and jobs it affects. */
+export interface BuildGap {
+  id: string;
+  title: string;
+  summary: string;
+  kind: 'broken' | 'missing';
+  /** Who it matters to: a persona and the job they are trying to get done. */
+  jobs: { persona: string | null; job: string }[];
+  /** null until fetched; the page asks for it when someone copies. */
+  prompt: string | null;
+}
+
+export interface BuildSection {
+  next: BuildNext | null;
+  gaps: BuildGap[];
+}
+
 export interface ProjectStory {
   name: string;
   /** The verdict, in a sentence. */
@@ -37,7 +63,11 @@ export interface ProjectStory {
   support: string;
   /** What the person told Takeoff, one line each, in their words. */
   told: string[];
+  /** Whether `told` is ready, still being drafted, or could not be loaded. Defaults to ready when there are lines. */
+  toldStatus?: 'ready' | 'drafting' | 'failed';
   checks: LaunchCheck[];
+  /** What to build after the checks. Left out when there is nothing to show. */
+  build?: BuildSection;
   shipped: ShippedChange[];
   /** Already formatted: "2 hours ago". */
   readAt: string;

@@ -61,6 +61,13 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
 }
+.toldNote {
+  display: grid;
+  gap: var(--space-2);
+}
+.toldNote p {
+  margin: 0;
+}
 .intent .told li:last-child {
   border-bottom: 0;
 }
@@ -286,4 +293,64 @@
   .chevron {
     transition: none;
   }
+}
+
+.build {
+  display: grid;
+  gap: var(--space-5);
+  scroll-margin-top: calc(var(--space-8) + var(--space-3));
+}
+.build:focus {
+  outline: none;
+}
+.build > h2 {
+  margin: 0;
+}
+
+.buildNext,
+.gap {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.buildNext h3,
+.buildNext p,
+.gap h3,
+.gap p {
+  margin: 0;
+}
+
+.gapsBlock {
+  display: grid;
+  gap: var(--space-4);
+}
+.gapsBlock > p {
+  margin: 0;
+}
+.gaps {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jobs {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.persona {
+  font-weight: 600;
+}
+
+.buildFoot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
 }

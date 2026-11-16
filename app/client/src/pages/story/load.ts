@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { handleApiResponse } from '../../lib/api-error';
-import { fetchRead, type ReadClaim } from '../../services/readApi';
-import { fetchV2Shipped } from '../../services/v2Api';
-import type { LaunchCheck, ProjectStory, ShippedChange } from './types';
+import { ApiError, handleApiResponse } from '../../lib/api-error';
+import { fetchRead, unlockRead, type ReadClaim, type ReadNext } from '../../services/readApi';
+import { fetchGapPrompt, fetchV2Gaps, fetchV2Shipped, type V2Gap } from '../../services/v2Api';
+import type { BuildGap, BuildNext, BuildSection, LaunchCheck, ProjectStory, ShippedChange } from './types';
 
 // Loads the real data behind the project page and maps it into ProjectStory.
 // The view knows nothing about the API; this file is the only place that does.
@@ -78,9 +78,62 @@ export function promptFor(check: LaunchCheck): string {
   ].join('\n\n');
 }
 
+export type ToldState = { status: 'ready' | 'drafting' | 'failed'; lines: string[] };
+
+export function toNext(next: ReadNext | undefined): BuildNext | null {
+  if (!next || !(next.title || next.why)) return null;
+  return { title: next.title ?? 'The next thing to build', why: next.why ?? '', prompt: next.prompt, gated: next.gated };
+}
+
+/** 404 or no claims means the read is still being drafted; anything else is a failure. */
+export async function loadRead(projectId: string): Promise<{ told: ToldState; next: BuildNext | null }> {
+  try {
+    const read = await fetchRead(projectId);
+    const lines = told(read.claims);
+    return {
+      told: lines.length > 0 ? { status: 'ready', lines } : { status: 'drafting', lines: [] },
+      next: toNext(read.next),
+    };
+  } catch (err) {
+    const status = err instanceof ApiError && err.status === 404 ? 'drafting' : 'failed';
+    return { told: { status, lines: [] }, next: null };
+  }
+}
+
+// The checks already cover infrastructure, so only features that are missing
+// or broken are listed, and only ones nobody has dismissed or shipped.
+export function toBuildGaps(gaps: { broken: V2Gap[]; missing: V2Gap[] }): BuildGap[] {
+  const open = (g: V2Gap) => g.status === 'untriaged' || g.status === 'in-progress';
+  const map = (kind: 'broken' | 'missing') => (g: V2Gap): BuildGap => ({
+    id: g.id,
+    title: g.title,
+    summary: g.description,
+    kind,
+    jobs: (g.affectedJobs ?? []).map((j) => ({ persona: j.personaName, job: j.jobTitle })),
+    prompt: g.prompt ?? null,
+  });
+  return [...gaps.broken.filter(open).map(map('broken')), ...gaps.missing.filter(open).map(map('missing'))]
+    // Gaps that name who they matter to come first: that is the context.
+    .sort((a, b) => Number(b.jobs.length > 0) - Number(a.jobs.length > 0));
+}
+
+export async function loadGaps(projectId: string): Promise<BuildGap[]> {
+  try {
+    return toBuildGaps(await fetchV2Gaps(projectId));
+  } catch {
+    return [];
+  }
+}
+
+/** The prompt for a gap: the saved one, or one generated on request. */
+export async function gapPrompt(projectId: string, gap: BuildGap): Promise<string> {
+  return gap.prompt || (await fetchGapPrompt(projectId, gap.id));
+}
+
 export function buildStory(
   launch: LaunchResponse,
-  claims: ReadClaim[],
+  toldState: ToldState,
+  build: BuildSection,
   shipped: ShippedChange[],
 ): ProjectStory | null {
   if (launch.checks.length === 0) return null;
@@ -89,11 +142,19 @@ export function buildStory(
     name: launch.name,
     headline,
     support,
-    told: told(claims),
+    told: toldState.lines,
+    toldStatus: toldState.status,
     checks: launch.checks,
+    build: build.next || build.gaps.length > 0 ? build : undefined,
     shipped,
     readAt: formatAgo(launch.updatedAt),
   };
+}
+
+function withRead(story: ProjectStory, read: { told: ToldState; next: BuildNext | null }): ProjectStory {
+  const gaps = story.build?.gaps ?? [];
+  const build = read.next || gaps.length > 0 ? { next: read.next, gaps } : undefined;
+  return { ...story, told: read.told.lines, toldStatus: read.told.status, build };
 }
 
 export interface LoadedStory {
@@ -103,7 +164,7 @@ export interface LoadedStory {
   reload: () => void;
 }
 
-export function useProjectStory(projectId: string | undefined): LoadedStory {
+export function useProjectStory(projectId: string | undefined, signedIn = false): LoadedStory {
   const [state, setState] = useState<Omit<LoadedStory, 'reload'>>({ story: null, loading: true, error: null });
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
@@ -119,8 +180,9 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
       try {
         const launch = await fetchLaunch(projectId);
         // The read and the recent merges are extras: the page still works without them.
-        const [read, merged] = await Promise.all([
-          fetchRead(projectId).catch(() => null),
+        const [read, gaps, merged] = await Promise.all([
+          loadRead(projectId),
+          loadGaps(projectId),
           fetchV2Shipped(projectId).catch(() => null),
         ]);
         const shipped: ShippedChange[] = (merged?.recentMerges ?? []).map((m) => ({
@@ -129,7 +191,7 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
           when: formatAgo(m.mergedAt),
         }));
         if (!cancelled) {
-          setState({ story: buildStory(launch, read?.claims ?? [], shipped), loading: false, error: null });
+          setState({ story: buildStory(launch, read.told, { next: read.next, gaps }, shipped), loading: false, error: null });
         }
       } catch (err) {
         if (!cancelled) {
@@ -141,6 +203,46 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
       cancelled = true;
     };
   }, [projectId, tick]);
+
+  // The old page polls while the read is drafted; do the same, for the summary only.
+  const drafting = state.story?.toldStatus === 'drafting';
+  useEffect(() => {
+    if (!projectId || !drafting) return undefined;
+    let tries = 0;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      tries += 1;
+      const next = await loadRead(projectId);
+      if (cancelled) return;
+      if (next.told.status !== 'drafting') {
+        setState((s) => (s.story ? { ...s, story: withRead(s.story, next) } : s));
+        window.clearInterval(timer);
+      } else if (tries >= 36) {
+        window.clearInterval(timer);
+      }
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [projectId, drafting]);
+
+  // The next feature's prompt is only sent once someone is signed in; ask for it then.
+  const gated = state.story?.build?.next?.gated === true;
+  useEffect(() => {
+    if (!projectId || !signedIn || !gated) return undefined;
+    let cancelled = false;
+    unlockRead(projectId)
+      .then((payload) => {
+        const next = toNext(payload.next);
+        if (cancelled || !next) return;
+        setState((s) => (s.story?.build ? { ...s, story: { ...s.story, build: { ...s.story.build, next } } } : s));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, signedIn, gated]);
 
   return { ...state, reload };
 }
