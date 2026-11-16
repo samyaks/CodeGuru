@@ -51,6 +51,23 @@
   gap: var(--space-3);
 }
 
+.nameRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+}
+
+.oldLink {
+  color: var(--ink-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.oldLink:hover {
+  color: var(--ink);
+}
+
 /* The project name is a title, so it takes the title accent. */
 .name {
   margin: 0;
@@ -104,15 +121,34 @@
 .check {
   display: grid;
   gap: var(--space-3);
-  scroll-margin-top: var(--space-5);
+  /* Clears the sticky header (about 55px) with room for the highlight ring. */
+  scroll-margin-top: calc(var(--space-8) + var(--space-3));
 }
 .check:focus {
   outline: none;
 }
+@media (prefers-reduced-motion: reduce) {
+  .check > article {
+    transition: none;
+  }
+}
+
 .check:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-lg);
+}
+
+.cleared { --tone: var(--cleared); }
+.holding { --tone: var(--holding); }
+.grounded { --tone: var(--grounded); }
+
+/* After a jump from the map: the card gets its status colour as a border. */
+.check > article {
+  transition: box-shadow 0.4s ease;
+}
+.highlight > article {
+  box-shadow: 0 0 0 2px var(--tone), var(--shadow-card);
 }
 
 .checkFoot {

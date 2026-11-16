@@ -43,6 +43,7 @@ export function ReleaseProject() {
         error={error}
         onRetry={reload}
         onCopyPrompt={copyPrompt}
+        oldHref={`/old/read/${id}`}
       />
     </>
   );

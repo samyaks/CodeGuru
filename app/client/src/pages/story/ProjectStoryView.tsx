@@ -1,11 +1,12 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { AlertCircle, ChevronDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import Header from '../../components/Header';
 import {
+  ArchitectureMap,
   Button,
   ButtonLink,
   ChangeNote,
-  ConformanceRing,
   IntentCard,
   StatusMark,
   VerdictPanel,
@@ -26,11 +27,28 @@ function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-function jumpTo(id: string) {
+/** Scrolls to a check's card, then calls `done` once the scroll has settled. */
+function jumpTo(id: string, done: () => void) {
   const el = document.getElementById(`check-${id}`);
   if (!el) return;
-  el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  const reduced = prefersReducedMotion();
+  el.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
   el.focus({ preventScroll: true });
+  if (reduced) {
+    done();
+    return;
+  }
+  // `scrollend` where supported; otherwise a timer long enough for a smooth scroll.
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    window.removeEventListener('scrollend', finish);
+    window.clearTimeout(fallback);
+    done();
+  };
+  const fallback = window.setTimeout(finish, 900);
+  window.addEventListener('scrollend', finish, { once: true });
 }
 
 export interface ProjectStoryViewProps {
@@ -41,6 +59,8 @@ export interface ProjectStoryViewProps {
   onRetry: () => void;
   /** Where the intake conversation lives, offered when there is no plan yet. */
   intakeHref?: string;
+  /** The previous version of this page, linked from the top and the foot. */
+  oldHref?: string;
   onCopyPrompt?: (checkId: string) => void;
   onEditTold?: () => void;
   onRedo?: () => void;
@@ -86,10 +106,23 @@ export function ProjectStoryView({
   onEditTold,
   onRedo,
   readOnly = false,
+  oldHref,
 }: ProjectStoryViewProps) {
   const [doneOpen, setDoneOpen] = useState<boolean | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const doneId = useId();
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  const goTo = (id: string) => {
+    setHighlightId(null);
+    jumpTo(id, () => setHighlightId(id));
+  };
+
+  useEffect(() => {
+    if (!highlightId) return undefined;
+    const t = window.setTimeout(() => setHighlightId(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [highlightId]);
 
   useEffect(() => {
     if (!copiedId) return undefined;
@@ -163,7 +196,7 @@ export function ProjectStoryView({
         <div className={styles.panel}>
           <VerdictPanel status={status} eyebrow="Before you launch" counts={counts}>
             {first ? (
-              <Button variant="primary" wide onClick={() => jumpTo(first.id)}>
+              <Button variant="primary" wide onClick={() => goTo(first.id)}>
                 Start with {first.label.toLowerCase()}
               </Button>
             ) : null}
@@ -172,16 +205,20 @@ export function ProjectStoryView({
 
         <div className={styles.read}>
           <header className={styles.lede}>
-            <p className={cx('type-heading', styles.name)}>{story.name}</p>
+            <div className={styles.nameRow}>
+              <p className={cx('type-heading', styles.name)}>{story.name}</p>
+              {oldHref ? (
+                <Link className={cx('type-small', styles.oldLink)} to={oldHref}>See the old version</Link>
+              ) : null}
+            </div>
             <h1 className={cx('type-display', styles.headline)}>{story.headline}</h1>
             <p className={cx('type-body', styles.muted)}>{story.support}</p>
           </header>
 
-          <ConformanceRing
-            cleared={done.length}
-            total={story.checks.length}
-            label="Launch checks cleared"
-            size={160}
+          <ArchitectureMap
+            name={story.name.split('/').pop() ?? story.name}
+            nodes={story.checks.map((c) => ({ id: c.id, label: c.label, status: c.status }))}
+            onSelect={goTo}
           />
 
           {story.told.length > 0 ? (
@@ -205,7 +242,12 @@ export function ProjectStoryView({
               <h2 id="next-title" className="type-title">Next up</h2>
               <ol className={styles.checks}>
                 {open.map((c) => (
-                  <li key={c.id} id={`check-${c.id}`} tabIndex={-1} className={styles.check}>
+                  <li
+                    key={c.id}
+                    id={`check-${c.id}`}
+                    tabIndex={-1}
+                    className={cx(styles.check, styles[c.status], highlightId === c.id && styles.highlight)}
+                  >
                     <IntentCard
                       intent={c.need}
                       status={c.status}
@@ -276,6 +318,9 @@ export function ProjectStoryView({
 
           <footer className={styles.foot}>
             <p className={cx('type-small', styles.muted)}>Read from your code {story.readAt}.</p>
+            {oldHref ? (
+              <Link className={cx('type-small', styles.oldLink)} to={oldHref}>See the old version</Link>
+            ) : null}
             {!readOnly && onRedo ? (
               <Button variant="quiet" size="sm" onClick={onRedo}>Redo from your code</Button>
             ) : null}

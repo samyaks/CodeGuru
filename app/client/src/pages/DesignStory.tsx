@@ -43,6 +43,7 @@ export function DesignProject() {
       error={state === 'error' ? 'The server didn’t answer.' : null}
       onRetry={() => navigate('/design/project')}
       intakeHref="/design/intake"
+      oldHref="/old/read/sample"
       readOnly={state === 'visitor'}
       onCopyPrompt={() => {}}
       onEditTold={() => navigate('/design/intake')}

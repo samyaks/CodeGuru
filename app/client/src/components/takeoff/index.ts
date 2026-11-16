@@ -22,6 +22,9 @@ export type { IntentCardProps } from './IntentCard';
 export { ConformanceRing } from './ConformanceRing';
 export type { ConformanceRingProps } from './ConformanceRing';
 
+export { ArchitectureMap } from './ArchitectureMap';
+export type { ArchitectureMapProps, ArchitectureNode } from './ArchitectureMap';
+
 export { ChangeNote } from './ChangeNote';
 export type { ChangeNoteProps } from './ChangeNote';
 
