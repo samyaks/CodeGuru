@@ -51,6 +51,28 @@ function jumpTo(id: string, done: () => void) {
   window.addEventListener('scrollend', finish, { once: true });
 }
 
+export type BuildTarget = { kind: 'next' } | { kind: 'gap'; id: string };
+export type CopyResult = 'copied' | 'signin' | 'failed';
+
+function jumpToBuild() {
+  const el = document.getElementById('build');
+  if (!el) return;
+  el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+  el.focus({ preventScroll: true });
+}
+
+const GAPS_SHOWN = 4;
+
+function copyLabel(state: 'busy' | CopyResult | undefined): string {
+  switch (state) {
+    case 'busy': return 'Getting the prompt…';
+    case 'copied': return 'Copied';
+    case 'signin': return 'Sign in to copy';
+    case 'failed': return 'Couldn’t copy. Try again';
+    default: return 'Copy a prompt for your agent';
+  }
+}
+
 export interface ProjectStoryViewProps {
   /** null with no error and not loading means nothing has been captured yet. */
   story: ProjectStory | null;
@@ -62,6 +84,10 @@ export interface ProjectStoryViewProps {
   /** The previous version of this page, linked from the top and the foot. */
   oldHref?: string;
   onCopyPrompt?: (checkId: string) => void;
+  /** Copies the prompt for the next feature or a gap; resolves with what happened. */
+  onCopyBuild?: (target: BuildTarget) => Promise<CopyResult>;
+  /** Shown beside the next feature when its prompt is waiting for a sign-in. */
+  onSignIn?: () => void;
   onEditTold?: () => void;
   onRedo?: () => void;
   /** Signed-out and non-owner visitors: no editing or copying. */
@@ -103,6 +129,8 @@ export function ProjectStoryView({
   onRetry,
   intakeHref,
   onCopyPrompt,
+  onCopyBuild,
+  onSignIn,
   onEditTold,
   onRedo,
   readOnly = false,
@@ -111,6 +139,8 @@ export function ProjectStoryView({
   const [doneOpen, setDoneOpen] = useState<boolean | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const doneId = useId();
+  const [buildCopy, setBuildCopy] = useState<{ key: string; state: 'busy' | CopyResult } | null>(null);
+  const [allGaps, setAllGaps] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
   const goTo = (id: string) => {
@@ -186,6 +216,15 @@ export function ProjectStoryView({
   const first = open[0];
   const showDone = doneOpen ?? open.length === 0;
 
+  const copyBuild = async (key: string, target: BuildTarget) => {
+    if (!onCopyBuild) return;
+    setBuildCopy({ key, state: 'busy' });
+    const state = await onCopyBuild(target).catch((): CopyResult => 'failed');
+    setBuildCopy({ key, state });
+    window.setTimeout(() => setBuildCopy((c) => (c?.key === key ? null : c)), 2500);
+  };
+  const copyState = (key: string) => (buildCopy?.key === key ? buildCopy.state : undefined);
+
   const copy = (id: string) => {
     onCopyPrompt?.(id);
     setCopiedId(id);
@@ -200,6 +239,8 @@ export function ProjectStoryView({
               <Button variant="primary" wide onClick={() => goTo(first.id)}>
                 Start with {first.label.toLowerCase()}
               </Button>
+            ) : story.build ? (
+              <Button variant="primary" wide onClick={jumpToBuild}>See what to build next</Button>
             ) : null}
           </VerdictPanel>
           <section aria-labelledby="told-title" className={styles.intent}>
@@ -291,6 +332,79 @@ export function ProjectStoryView({
                   </li>
                 ))}
               </ol>
+            </section>
+          ) : null}
+
+          {story.build ? (
+            <section id="build" tabIndex={-1} aria-labelledby="build-title" className={cx(styles.section, styles.build)}>
+              <h2 id="build-title" className="type-title">What to build next</h2>
+              {story.build.next ? (
+                <article className={styles.buildNext}>
+                  <p className={cx('type-eyebrow', styles.muted)}>The next feature</p>
+                  <h3 className="type-heading">{story.build.next.title}</h3>
+                  {story.build.next.why ? (
+                    <p className={cx('type-body', styles.muted)}>{story.build.next.why}</p>
+                  ) : null}
+                  {onCopyBuild && story.build.next.prompt ? (
+                    <div className={styles.buildFoot}>
+                      <Button variant="quiet" size="sm" onClick={() => void copyBuild('next', { kind: 'next' })}>
+                        {copyLabel(copyState('next'))}
+                      </Button>
+                    </div>
+                  ) : story.build.next.gated && onSignIn ? (
+                    <div className={styles.buildFoot}>
+                      <Button variant="quiet" size="sm" onClick={onSignIn}>Sign in to get the prompt</Button>
+                    </div>
+                  ) : null}
+                </article>
+              ) : null}
+
+              {story.build.gaps.length > 0 ? (
+                <div className={styles.gapsBlock}>
+                  <p className={cx('type-eyebrow', styles.muted)}>And after that</p>
+                  <ol className={styles.gaps}>
+                    {(allGaps ? story.build.gaps : story.build.gaps.slice(0, GAPS_SHOWN)).map((g) => (
+                      <li key={g.id} className={styles.gap}>
+                        <h3 className="type-heading">{g.title}</h3>
+                        {g.summary ? <p className={cx('type-small', styles.muted)}>{g.summary}</p> : null}
+                        {g.jobs.length > 0 ? (
+                          <ul className={styles.jobs} aria-label="Who it helps">
+                            {g.jobs.slice(0, 3).map((j) => (
+                              <li key={`${j.persona}-${j.job}`} className="type-small">
+                                {j.persona ? <><span className={styles.persona}>{j.persona}</span>: </> : null}{j.job}
+                              </li>
+                            ))}
+                            {g.jobs.length > 3 ? (
+                              <li className={cx('type-small', styles.muted)}>and {g.jobs.length - 3} more</li>
+                            ) : null}
+                          </ul>
+                        ) : null}
+                        {onCopyBuild ? (
+                          <div className={styles.buildFoot}>
+                            <Button
+                              variant="quiet"
+                              size="sm"
+                              onClick={() => void copyBuild(`gap:${g.id}`, { kind: 'gap', id: g.id })}
+                            >
+                              {copyLabel(copyState(`gap:${g.id}`))}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                  {story.build.gaps.length > GAPS_SHOWN ? (
+                    <div>
+                      <Button variant="quiet" size="sm" aria-expanded={allGaps} onClick={() => setAllGaps(!allGaps)}>
+                        {allGaps ? 'Show fewer' : `Show ${story.build.gaps.length - GAPS_SHOWN} more`}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <span className={styles.srOnly} role="status">
+                {buildCopy && buildCopy.state !== 'busy' ? copyLabel(buildCopy.state) : ''}
+              </span>
             </section>
           ) : null}
 

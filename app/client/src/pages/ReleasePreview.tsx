@@ -1,7 +1,10 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { IntakeView } from './story/IntakeView';
-import { promptFor, useProjectStory } from './story/load';
-import { ProjectStoryView } from './story/ProjectStoryView';
+import { gapPrompt, promptFor, useProjectStory } from './story/load';
+import { ProjectStoryView, type BuildTarget, type CopyResult } from './story/ProjectStoryView';
+import { ApiError } from '../lib/api-error';
+import { useAuth } from '../hooks/useAuth';
+import { track } from '../services/telemetry';
 import { SAMPLE_INTAKE } from './story/sample';
 import { cx } from '../components/takeoff/status';
 import styles from './ReleasePreview.module.css';
@@ -29,10 +32,27 @@ function Banner({ oldHref, label }: { oldHref?: string; label: string }) {
 
 export function ReleaseProject() {
   const { id } = useParams();
-  const { story, loading, error, reload } = useProjectStory(id);
+  const { user, login } = useAuth();
+  const { story, loading, error, reload } = useProjectStory(id, !!user);
   const copyPrompt = (checkId: string) => {
     const check = story?.checks.find((c) => c.id === checkId);
     if (check) void navigator.clipboard?.writeText(promptFor(check));
+  };
+  const copyBuild = async (target: BuildTarget): Promise<CopyResult> => {
+    if (!id || !story?.build) return 'failed';
+    try {
+      const gap = target.kind === 'gap' ? story.build.gaps.find((g) => g.id === target.id) : null;
+      const text = target.kind === 'next' ? story.build.next?.prompt : gap ? await gapPrompt(id, gap) : null;
+      if (!text) return 'failed';
+      await navigator.clipboard.writeText(text);
+      track('prompt_copied', {
+        projectId: id,
+        metadata: target.kind === 'next' ? { source: 'next-thing' } : { source: 'gap', gapId: target.id },
+      });
+      return 'copied';
+    } catch (err) {
+      return err instanceof ApiError && err.status === 401 ? 'signin' : 'failed';
+    }
   };
   return (
     <>
@@ -43,6 +63,8 @@ export function ReleaseProject() {
         error={error}
         onRetry={reload}
         onCopyPrompt={copyPrompt}
+        onCopyBuild={copyBuild}
+        onSignIn={() => login('github')}
         oldHref={`/old/read/${id}`}
       />
     </>
