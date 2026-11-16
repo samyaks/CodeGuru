@@ -178,6 +178,7 @@ export function ProjectStoryView({
     );
   }
 
+  const toldStatus = story.toldStatus ?? (story.told.length > 0 ? 'ready' : 'drafting');
   const status = overall(story.checks);
   const counts = Object.fromEntries(
     STATUSES.map((s) => [s, story.checks.filter((c) => c.status === s).length]),
@@ -201,24 +202,42 @@ export function ProjectStoryView({
               </Button>
             ) : null}
           </VerdictPanel>
-          {story.told.length > 0 ? (
-            <section aria-labelledby="told-title" className={styles.intent}>
-              <div className={styles.sectionHead}>
-                <h2 id="told-title" className="type-heading">What you told us</h2>
-                {!readOnly && onEditTold ? (
-                  <Button variant="quiet" size="sm" onClick={onEditTold}>Change answers</Button>
+          <section aria-labelledby="told-title" className={styles.intent}>
+            <div className={styles.sectionHead}>
+              <h2 id="told-title" className="type-heading">What you told us</h2>
+              {toldStatus === 'ready' && !readOnly && onEditTold ? (
+                <Button variant="quiet" size="sm" onClick={onEditTold}>Change answers</Button>
+              ) : null}
+            </div>
+            {toldStatus === 'ready' ? (
+              <>
+                <p className={cx('type-small', styles.muted)}>
+                  Every check on this page is measured against this. If it’s off, say so first.
+                </p>
+                <ul className={styles.told}>
+                  {story.told.map((line) => (
+                    <li key={line} className="type-intent">{line}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <div role="status" className={styles.toldNote}>
+                <p className="type-body">
+                  {toldStatus === 'drafting'
+                    ? 'We’re still reading what this app is for. It will appear here when it’s done.'
+                    : 'We couldn’t load what this app is for.'}
+                </p>
+                <p className={cx('type-small', styles.muted)}>
+                  The checks below can’t be tested against your intent until it’s here.
+                </p>
+                {toldStatus === 'failed' ? (
+                  <div>
+                    <Button variant="quiet" size="sm" onClick={onRetry}>Try again</Button>
+                  </div>
                 ) : null}
               </div>
-              <p className={cx('type-small', styles.muted)}>
-                Every check on this page is measured against this. If it’s off, say so first.
-              </p>
-              <ul className={styles.told}>
-                {story.told.map((line) => (
-                  <li key={line} className="type-intent">{line}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+            )}
+          </section>
         </div>
 
         <div className={styles.read}>

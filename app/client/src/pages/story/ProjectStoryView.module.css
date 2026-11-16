@@ -61,6 +61,13 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
 }
+.toldNote {
+  display: grid;
+  gap: var(--space-2);
+}
+.toldNote p {
+  margin: 0;
+}
 .intent .told li:last-child {
   border-bottom: 0;
 }

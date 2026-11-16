@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { handleApiResponse } from '../../lib/api-error';
+import { ApiError, handleApiResponse } from '../../lib/api-error';
 import { fetchRead, type ReadClaim } from '../../services/readApi';
 import { fetchV2Shipped } from '../../services/v2Api';
 import type { LaunchCheck, ProjectStory, ShippedChange } from './types';
@@ -78,9 +78,22 @@ export function promptFor(check: LaunchCheck): string {
   ].join('\n\n');
 }
 
+export type ToldState = { status: 'ready' | 'drafting' | 'failed'; lines: string[] };
+
+/** 404 or no claims means the read is still being drafted; anything else is a failure. */
+export async function loadTold(projectId: string): Promise<ToldState> {
+  try {
+    const lines = told((await fetchRead(projectId)).claims);
+    return lines.length > 0 ? { status: 'ready', lines } : { status: 'drafting', lines: [] };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return { status: 'drafting', lines: [] };
+    return { status: 'failed', lines: [] };
+  }
+}
+
 export function buildStory(
   launch: LaunchResponse,
-  claims: ReadClaim[],
+  toldState: ToldState,
   shipped: ShippedChange[],
 ): ProjectStory | null {
   if (launch.checks.length === 0) return null;
@@ -89,7 +102,8 @@ export function buildStory(
     name: launch.name,
     headline,
     support,
-    told: told(claims),
+    told: toldState.lines,
+    toldStatus: toldState.status,
     checks: launch.checks,
     shipped,
     readAt: formatAgo(launch.updatedAt),
@@ -119,8 +133,8 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
       try {
         const launch = await fetchLaunch(projectId);
         // The read and the recent merges are extras: the page still works without them.
-        const [read, merged] = await Promise.all([
-          fetchRead(projectId).catch(() => null),
+        const [toldState, merged] = await Promise.all([
+          loadTold(projectId),
           fetchV2Shipped(projectId).catch(() => null),
         ]);
         const shipped: ShippedChange[] = (merged?.recentMerges ?? []).map((m) => ({
@@ -129,7 +143,7 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
           when: formatAgo(m.mergedAt),
         }));
         if (!cancelled) {
-          setState({ story: buildStory(launch, read?.claims ?? [], shipped), loading: false, error: null });
+          setState({ story: buildStory(launch, toldState, shipped), loading: false, error: null });
         }
       } catch (err) {
         if (!cancelled) {
@@ -141,6 +155,29 @@ export function useProjectStory(projectId: string | undefined): LoadedStory {
       cancelled = true;
     };
   }, [projectId, tick]);
+
+  // The old page polls while the read is drafted; do the same, for the summary only.
+  const drafting = state.story?.toldStatus === 'drafting';
+  useEffect(() => {
+    if (!projectId || !drafting) return undefined;
+    let tries = 0;
+    let cancelled = false;
+    const timer = window.setInterval(async () => {
+      tries += 1;
+      const next = await loadTold(projectId);
+      if (cancelled) return;
+      if (next.status !== 'drafting') {
+        setState((s) => (s.story ? { ...s, story: { ...s.story, told: next.lines, toldStatus: next.status } } : s));
+        window.clearInterval(timer);
+      } else if (tries >= 36) {
+        window.clearInterval(timer);
+      }
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [projectId, drafting]);
 
   return { ...state, reload };
 }

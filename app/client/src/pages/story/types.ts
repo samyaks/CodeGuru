@@ -37,6 +37,8 @@ export interface ProjectStory {
   support: string;
   /** What the person told Takeoff, one line each, in their words. */
   told: string[];
+  /** Whether `told` is ready, still being drafted, or could not be loaded. Defaults to ready when there are lines. */
+  toldStatus?: 'ready' | 'drafting' | 'failed';
   checks: LaunchCheck[];
   shipped: ShippedChange[];
   /** Already formatted: "2 hours ago". */
