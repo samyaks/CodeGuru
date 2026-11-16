@@ -201,6 +201,24 @@ export function ProjectStoryView({
               </Button>
             ) : null}
           </VerdictPanel>
+          {story.told.length > 0 ? (
+            <section aria-labelledby="told-title" className={styles.intent}>
+              <div className={styles.sectionHead}>
+                <h2 id="told-title" className="type-heading">What you told us</h2>
+                {!readOnly && onEditTold ? (
+                  <Button variant="quiet" size="sm" onClick={onEditTold}>Change answers</Button>
+                ) : null}
+              </div>
+              <p className={cx('type-small', styles.muted)}>
+                Every check on this page is measured against this. If it’s off, say so first.
+              </p>
+              <ul className={styles.told}>
+                {story.told.map((line) => (
+                  <li key={line} className="type-intent">{line}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
 
         <div className={styles.read}>
@@ -220,22 +238,6 @@ export function ProjectStoryView({
             nodes={story.checks.map((c) => ({ id: c.id, label: c.label, status: c.status }))}
             onSelect={goTo}
           />
-
-          {story.told.length > 0 ? (
-          <section aria-labelledby="told-title" className={styles.section}>
-            <div className={styles.sectionHead}>
-              <h2 id="told-title" className="type-title">What you told us</h2>
-              {!readOnly && onEditTold ? (
-                <Button variant="quiet" size="sm" onClick={onEditTold}>Change answers</Button>
-              ) : null}
-            </div>
-            <ul className={styles.told}>
-              {story.told.map((line) => (
-                <li key={line} className="type-intent">{line}</li>
-              ))}
-            </ul>
-          </section>
-          ) : null}
 
           {open.length > 0 ? (
             <section aria-labelledby="next-title" className={styles.section}>
