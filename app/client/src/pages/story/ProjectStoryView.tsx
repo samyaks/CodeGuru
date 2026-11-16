@@ -40,7 +40,7 @@ export interface ProjectStoryViewProps {
   error: string | null;
   onRetry: () => void;
   /** Where the intake conversation lives, offered when there is no plan yet. */
-  intakeHref: string;
+  intakeHref?: string;
   onCopyPrompt?: (checkId: string) => void;
   onEditTold?: () => void;
   onRedo?: () => void;
@@ -129,9 +129,17 @@ export function ProjectStoryView({
     return (
       <Shell>
         <Notice
-          title="Tell us what you’re building"
-          description="Answer a few questions and Takeoff checks your app against what you say it needs."
-          action={readOnly ? undefined : <ButtonLink variant="primary" to={intakeHref}>Start the questions</ButtonLink>}
+          title={intakeHref ? 'Tell us what you’re building' : 'Nothing to show yet'}
+          description={
+            intakeHref
+              ? 'Answer a few questions and Takeoff checks your app against what you say it needs.'
+              : 'We haven’t finished reading this project. Check back in a minute.'
+          }
+          action={
+            readOnly || !intakeHref ? undefined : (
+              <ButtonLink variant="primary" to={intakeHref}>Start the questions</ButtonLink>
+            )
+          }
         />
       </Shell>
     );
@@ -176,6 +184,7 @@ export function ProjectStoryView({
             size={160}
           />
 
+          {story.told.length > 0 ? (
           <section aria-labelledby="told-title" className={styles.section}>
             <div className={styles.sectionHead}>
               <h2 id="told-title" className="type-title">What you told us</h2>
@@ -189,6 +198,7 @@ export function ProjectStoryView({
               ))}
             </ul>
           </section>
+          ) : null}
 
           {open.length > 0 ? (
             <section aria-labelledby="next-title" className={styles.section}>
@@ -221,6 +231,7 @@ export function ProjectStoryView({
             </section>
           ) : null}
 
+          {done.length > 0 ? (
           <section className={styles.section}>
             <h2 className={cx('type-title', styles.disclosureTitle)}>
               <button
@@ -247,7 +258,9 @@ export function ProjectStoryView({
               ))}
             </ul>
           </section>
+          ) : null}
 
+          {story.shipped.length > 0 ? (
           <section aria-labelledby="changed-title" className={styles.section}>
             <h2 id="changed-title" className="type-title">What changed lately</h2>
             <ol className={styles.shipped}>
@@ -259,6 +272,7 @@ export function ProjectStoryView({
               ))}
             </ol>
           </section>
+          ) : null}
 
           <footer className={styles.foot}>
             <p className={cx('type-small', styles.muted)}>Read from your code {story.readAt}.</p>

@@ -24,7 +24,8 @@ export interface ShippedChange {
   summary: string;
   /** Already formatted: "Yesterday", "3 days ago". */
   when: string;
-  status: Status;
+  /** Left out when the change hasn't been checked against the person's needs. */
+  status?: Status;
   where?: string;
 }
 
