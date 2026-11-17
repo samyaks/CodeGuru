@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, handleApiResponse } from '../../lib/api-error';
 import { fetchRead, unlockRead, type ReadClaim, type ReadNext } from '../../services/readApi';
 import { fetchGapPrompt, fetchV2Gaps, fetchV2Shipped, type V2Gap } from '../../services/v2Api';
-import type { BuildGap, BuildNext, BuildSection, LaunchCheck, ProjectStory, ShippedChange } from './types';
+import { clampScore, fetchProductMap, type ProductMapData } from '../../services/productMapApi';
+import type { BuildGap, BuildNext, BuildSection, LaunchCheck, ProjectStory, ShippedChange, StoryPersona } from './types';
 
 // Loads the real data behind the project page and maps it into ProjectStory.
 // The view knows nothing about the API; this file is the only place that does.
@@ -117,6 +118,38 @@ export function toBuildGaps(gaps: { broken: V2Gap[]; missing: V2Gap[] }): BuildG
     .sort((a, b) => Number(b.jobs.length > 0) - Number(a.jobs.length > 0));
 }
 
+// A job counts as done at the same score the product map shows as ready.
+const JOB_DONE_SCORE = 80;
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
+export function toPersonas(map: ProductMapData | null): StoryPersona[] {
+  if (!map) return [];
+  const scores = map.scores?.job ?? {};
+  return map.personas
+    .map((p) => {
+      const jobs = map.jobs
+        .filter((j) => j.personaId === p.id)
+        .map((j) => ({
+          id: j.id,
+          title: j.title,
+          done: (clampScore(scores[j.id]) ?? 0) >= JOB_DONE_SCORE,
+          rank: PRIORITY_RANK[j.priority] ?? 1,
+        }))
+        .sort((a, b) => Number(a.done) - Number(b.done) || a.rank - b.rank)
+        .map(({ id, title, done }) => ({ id, title, done }));
+      return { id: p.id, name: p.name, description: p.description, jobs };
+    })
+    .filter((p) => p.name && p.jobs.length > 0);
+}
+
+export async function loadPersonas(projectId: string): Promise<StoryPersona[]> {
+  try {
+    return toPersonas(await fetchProductMap(projectId));
+  } catch {
+    return [];
+  }
+}
+
 export async function loadGaps(projectId: string): Promise<BuildGap[]> {
   try {
     return toBuildGaps(await fetchV2Gaps(projectId));
@@ -135,6 +168,7 @@ export function buildStory(
   toldState: ToldState,
   build: BuildSection,
   shipped: ShippedChange[],
+  personas: StoryPersona[] = [],
 ): ProjectStory | null {
   if (launch.checks.length === 0) return null;
   const { headline, support } = verdict(launch.checks, launch.notChecked);
@@ -145,6 +179,7 @@ export function buildStory(
     told: toldState.lines,
     toldStatus: toldState.status,
     checks: launch.checks,
+    personas: personas.length > 0 ? personas : undefined,
     build: build.next || build.gaps.length > 0 ? build : undefined,
     shipped,
     readAt: formatAgo(launch.updatedAt),
@@ -180,9 +215,10 @@ export function useProjectStory(projectId: string | undefined, signedIn = false)
       try {
         const launch = await fetchLaunch(projectId);
         // The read and the recent merges are extras: the page still works without them.
-        const [read, gaps, merged] = await Promise.all([
+        const [read, gaps, personas, merged] = await Promise.all([
           loadRead(projectId),
           loadGaps(projectId),
+          loadPersonas(projectId),
           fetchV2Shipped(projectId).catch(() => null),
         ]);
         const shipped: ShippedChange[] = (merged?.recentMerges ?? []).map((m) => ({
@@ -191,7 +227,7 @@ export function useProjectStory(projectId: string | undefined, signedIn = false)
           when: formatAgo(m.mergedAt),
         }));
         if (!cancelled) {
-          setState({ story: buildStory(launch, read.told, { next: read.next, gaps }, shipped), loading: false, error: null });
+          setState({ story: buildStory(launch, read.told, { next: read.next, gaps }, shipped, personas), loading: false, error: null });
         }
       } catch (err) {
         if (!cancelled) {

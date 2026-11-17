@@ -354,3 +354,33 @@
   justify-content: flex-end;
   margin-top: var(--space-2);
 }
+
+.personas {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.personaCard {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--paper-raised);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+.personaCard h3,
+.personaCard p {
+  margin: 0;
+}
+.jobList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.jobList[hidden] {
+  display: none;
+}

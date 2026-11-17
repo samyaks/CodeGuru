@@ -4,6 +4,28 @@ import type { IntakeScript, ProjectStory } from './types';
 // Nothing here comes from a real project.
 
 export const SAMPLE_STORY: ProjectStory = {
+  personas: [
+    {
+      id: 'owner',
+      name: 'Dog owner',
+      description: 'Finds a walker, books a time and pays.',
+      jobs: [
+        { id: 'pay', title: 'Pay for a walk', done: false },
+        { id: 'cancel', title: 'Cancel or move a booking', done: false },
+        { id: 'find', title: 'Find a walker nearby', done: true },
+        { id: 'book', title: 'Book a time', done: true },
+      ],
+    },
+    {
+      id: 'walker',
+      name: 'Dog walker',
+      description: 'Sets when they are free and sees who they are walking.',
+      jobs: [
+        { id: 'free', title: 'Set when I am free', done: true },
+        { id: 'today', title: 'See who I am walking today', done: true },
+      ],
+    },
+  ],
   name: 'sample/pawpath',
   headline: 'Not ready to go live yet.',
   support:
