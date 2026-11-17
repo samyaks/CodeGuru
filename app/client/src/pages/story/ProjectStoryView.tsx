@@ -12,7 +12,7 @@ import {
   VerdictPanel,
 } from '../../components/takeoff';
 import { STATUSES, cx, type Status } from '../../components/takeoff/status';
-import type { LaunchCheck, ProjectStory } from './types';
+import type { LaunchCheck, ProjectStory, StoryPersona } from './types';
 import styles from './ProjectStoryView.module.css';
 
 const RANK: Record<Status, number> = { grounded: 0, holding: 1, cleared: 2 };
@@ -71,6 +71,49 @@ function copyLabel(state: 'busy' | CopyResult | undefined): string {
     case 'failed': return 'Couldn’t copy. Try again';
     default: return 'Copy a prompt for your agent';
   }
+}
+
+function PersonaCard({ persona }: { persona: StoryPersona }) {
+  const doneId = useId();
+  const [showDone, setShowDone] = useState(false);
+  const open = persona.jobs.filter((j) => !j.done);
+  const done = persona.jobs.filter((j) => j.done);
+  return (
+    <li className={styles.personaCard}>
+      <h3 className="type-heading">{persona.name}</h3>
+      {persona.description ? (
+        <p className={cx('type-small', styles.muted)}>{persona.description}</p>
+      ) : null}
+      {open.length > 0 ? (
+        <ul className={styles.jobList} aria-label={`Jobs ${persona.name} still needs done`}>
+          {open.map((j) => (
+            <li key={j.id} className="type-body">{j.title}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className={cx('type-small', styles.muted)}>Every job here is done.</p>
+      )}
+      {done.length > 0 ? (
+        <div>
+          <button
+            type="button"
+            className={cx('type-small', styles.disclosure, styles.muted)}
+            aria-expanded={showDone}
+            aria-controls={doneId}
+            onClick={() => setShowDone(!showDone)}
+          >
+            <ChevronDown size={16} className={cx(styles.chevron, showDone && styles.chevronOpen)} aria-hidden="true" />
+            {done.length} already done
+          </button>
+          <ul id={doneId} className={styles.jobList} hidden={!showDone}>
+            {done.map((j) => (
+              <li key={j.id} className={cx('type-body', styles.muted)}>{j.title}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </li>
+  );
 }
 
 export interface ProjectStoryViewProps {
@@ -332,6 +375,17 @@ export function ProjectStoryView({
                   </li>
                 ))}
               </ol>
+            </section>
+          ) : null}
+
+          {story.personas && story.personas.length > 0 ? (
+            <section aria-labelledby="people-title" className={styles.section}>
+              <h2 id="people-title" className="type-title">Who it’s for</h2>
+              <ul className={styles.personas}>
+                {story.personas.map((p) => (
+                  <PersonaCard key={p.id} persona={p} />
+                ))}
+              </ul>
             </section>
           ) : null}
 

@@ -50,6 +50,15 @@ export interface BuildGap {
   prompt: string | null;
 }
 
+/** A person the app is for, and the jobs they are trying to get done. */
+export interface StoryPersona {
+  id: string;
+  name: string;
+  description?: string;
+  /** Not-done jobs first, most important first. */
+  jobs: { id: string; title: string; done: boolean }[];
+}
+
 export interface BuildSection {
   next: BuildNext | null;
   gaps: BuildGap[];
@@ -66,6 +75,8 @@ export interface ProjectStory {
   /** Whether `told` is ready, still being drafted, or could not be loaded. Defaults to ready when there are lines. */
   toldStatus?: 'ready' | 'drafting' | 'failed';
   checks: LaunchCheck[];
+  /** Who the app is for. Left out when there is no product map. */
+  personas?: StoryPersona[];
   /** What to build after the checks. Left out when there is nothing to show. */
   build?: BuildSection;
   shipped: ShippedChange[];
