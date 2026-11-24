@@ -1,5 +1,14 @@
 /**
- * Takeoff GitHub App — read-only access to the specific repos a user grants.
+ * Takeoff GitHub App — access to the specific repos a user grants.
+ *
+ * Required app settings on GitHub (General → Permissions & events):
+ *   Repository permissions: Metadata: read; Contents: read & write (commit
+ *     takeoff.yaml and agent files); Pull requests: read & write (verdict
+ *     comment); Checks: read & write (verdict check run).
+ *   Subscribe to events: Push, Pull request.
+ *   Today's code only reads; the write permissions and Pull request event are
+ *   for the PR-verdict and agreements milestones. Raising permissions makes
+ *   each existing installation re-approve before they take effect.
  *
  * Two identities are involved:
  *   - The app itself (JWT signed with the app's private key) mints short-lived
