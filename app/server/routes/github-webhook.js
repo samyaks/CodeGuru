@@ -255,16 +255,56 @@ async function handlePush({ payload, deliveryId, source, installationId }, deps)
     }
 
     // v2: kick off matcher + verifier in the background — never block v1.
+    // The claim is final only once this finishes; a failure releases it so a
+    // redelivery can retry, and a claim left by a crash goes stale (see
+    // processedPushes.claim).
+    const claimKey = { projectId: project.id, ref: ref || '', before: before || '', after };
     setImmediate(() => {
-      deps.processPushV2({ project, payload }).catch((err) => {
-        console.error(`[v2/shipped] processPush failed for project ${project.id}:`, err.message);
-      });
+      deps.processPushV2({ project, payload })
+        .then(() => deps.processedPushes.complete(claimKey))
+        .catch(async (err) => {
+          console.error(`[v2/shipped] processPush failed for project ${project.id}:`, err.message);
+          try {
+            await deps.processedPushes.release(claimKey);
+          } catch (releaseErr) {
+            console.error(`processedPushes.release ${project.id} failed:`, releaseErr.message);
+          }
+        });
     });
   }
 }
 
-// Logged and archived only, for now; uninstall/suspend handling builds on these.
+// Revoke what an uninstall, suspension or repo removal takes away: users'
+// grants through that installation, and projects reading through it. Only
+// deliveries the App signed are trusted to name an installation. Everything is
+// archived too.
+async function revokeAccess({ event, payload }, deps) {
+  const installationId = Number(payload.installation?.id);
+  if (!installationId) return;
+  if (event === 'installation' && (payload.action === 'deleted' || payload.action === 'suspend')) {
+    const grants = await deps.githubRepoAccess.deleteForInstallation(installationId);
+    const projects = await deps.deployments.clearInstallation(installationId);
+    console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: payload.action, installationId, grants, projects }));
+    return;
+  }
+  if (event === 'installation_repositories' && payload.action === 'removed') {
+    const removed = Array.isArray(payload.repositories_removed) ? payload.repositories_removed : [];
+    const ids = removed.map((r) => Number(r.id)).filter(Number.isFinite);
+    const fullNames = removed.map((r) => r.full_name).filter(Boolean);
+    const grants = await deps.githubRepoAccess.deleteForRepos(installationId, ids);
+    const projects = await deps.deployments.clearInstallationForRepos(installationId, fullNames);
+    console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'repositories_removed', installationId, grants, projects }));
+  }
+}
+
 async function handleInstallationEvent({ event, payload, deliveryId, source }, deps) {
+  if (source === 'app') {
+    try {
+      await revokeAccess({ event, payload }, deps);
+    } catch (err) {
+      console.error(`github webhook ${event} revoke failed:`, err.message);
+    }
+  }
   const names = (list) => (Array.isArray(list) ? list.map((r) => r.full_name).filter(Boolean) : []);
   const repos = names(payload.repositories);
   const added = names(payload.repositories_added);

@@ -104,7 +104,12 @@ router.get('/callback', callbackRateLimit, asyncHandler(async (req, res) => {
     const app = getGithubApp();
     const userToken = await app.exchangeUserCode(code);
     const grants = await app.listUserGrants(userToken);
-    await githubRepoAccess.replaceForUser(req.user.id, grants);
+    // A callback that carries our state proves this browser started the flow,
+    // so its listing replaces the user's grants (dropping revoked ones). A
+    // stateless one (installs begun on GitHub's own page) could be a forged
+    // link carrying someone else's code, so it may only add grants.
+    if (state) await githubRepoAccess.replaceForUser(req.user.id, grants);
+    else await githubRepoAccess.mergeForUser(req.user.id, grants);
     console.log(JSON.stringify({
       event: 'github_app_connected',
       userId: req.user.id,

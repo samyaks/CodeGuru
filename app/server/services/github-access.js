@@ -9,12 +9,17 @@
  */
 
 const github = require('@codeguru/github');
-const { githubRepoAccess } = require('../lib/db');
+const { githubRepoAccess, deployments } = require('../lib/db');
 const { getGithubApp } = require('../lib/github-app');
 const { AppError } = require('../lib/app-error');
 
 function defaultDeps() {
-  return { accessStore: githubRepoAccess, app: getGithubApp(), publicClient: github };
+  return {
+    accessStore: githubRepoAccess,
+    app: getGithubApp(),
+    publicClient: github,
+    clearInstallation: (projectId) => deployments.update(projectId, { github_installation_id: null }),
+  };
 }
 
 function accessError({ userId, appConfigured }) {
@@ -64,10 +69,52 @@ async function resolveRepoAccess({ userId, owner, repo }, deps = defaultDeps()) 
   return { client: publicClient, installationId: null };
 }
 
+// Functions whose first two arguments are (owner, repo).
+const REPO_SCOPED = (name) => name !== 'fetchUserRepos' && name !== 'searchRepos';
+
+/**
+ * Wraps an installation client so that when the installation is gone
+ * (uninstalled or suspended), a public repo keeps reading with the server
+ * token and the project stops pointing at the dead installation. A private
+ * repo gets the original error: the server token must not stand in for it.
+ */
+function withInstallationFallback(installClient, publicClient, onGone) {
+  const wrapped = {};
+  for (const [name, fn] of Object.entries(installClient)) {
+    if (typeof fn !== 'function' || !REPO_SCOPED(name)) {
+      wrapped[name] = fn;
+      continue;
+    }
+    wrapped[name] = async (...args) => {
+      try {
+        return await fn(...args);
+      } catch (err) {
+        if (!err || !err.installationGone) throw err;
+        let isPublic = false;
+        try {
+          const meta = await publicClient.fetchRepoMeta(args[0], args[1]);
+          isPublic = !!meta && !meta.private;
+        } catch { /* can't prove it's public */ }
+        if (!isPublic) throw err;
+        try { await onGone(); } catch (clearErr) {
+          console.warn('could not clear a dead GitHub installation:', clearErr.message);
+        }
+        return publicClient[name](...args);
+      }
+    };
+  }
+  return wrapped;
+}
+
 /** Client for background work on an existing project (no user present). */
 function clientForProject(project, deps = defaultDeps()) {
   if (project && project.github_installation_id) {
-    return deps.app.clientForInstallation(project.github_installation_id);
+    const installClient = deps.app.clientForInstallation(project.github_installation_id);
+    return withInstallationFallback(
+      installClient,
+      deps.publicClient,
+      () => (deps.clearInstallation ? deps.clearInstallation(project.id) : null),
+    );
   }
   return deps.publicClient;
 }

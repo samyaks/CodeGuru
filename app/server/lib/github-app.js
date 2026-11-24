@@ -102,10 +102,18 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
 
   async function mintInstallationToken(installationId) {
     const jwt = createAppJwt({ appId: config.appId, privateKey: config.privateKey, now: now() });
-    const data = await githubJson(`/app/installations/${installationId}/access_tokens`, {
-      method: 'POST',
-      token: jwt,
-    });
+    let data;
+    try {
+      data = await githubJson(`/app/installations/${installationId}/access_tokens`, {
+        method: 'POST',
+        token: jwt,
+      });
+    } catch (err) {
+      // 404: uninstalled. 403: suspended. Either way this installation can't be read through any more.
+      if (err.status === 404 || err.status === 403) err.installationGone = true;
+      tokenCache.delete(String(installationId));
+      throw err;
+    }
     const entry = { token: data.token, expiresAt: new Date(data.expires_at).getTime() };
     tokenCache.set(String(installationId), entry);
     return entry.token;

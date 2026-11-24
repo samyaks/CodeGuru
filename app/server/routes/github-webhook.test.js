@@ -37,7 +37,7 @@ function makeWorld({ projects = [{ id: 'p1', user_id: 'u1', branch: 'main', gith
   const rows = projects.map((p) => ({ ...p }));
   const reviews = new Map();
   const claimed = new Set();
-  const calls = { reviewJobs: [], v2: [], archived: [], updates: [], claims: [] };
+  const calls = { reviewJobs: [], v2: [], archived: [], updates: [], claims: [], completed: [], released: [], revoked: [] };
   const deps = {
     deployments: {
       // A fresh copy per call, as a query would return.
@@ -45,6 +45,14 @@ function makeWorld({ projects = [{ id: 'p1', user_id: 'u1', branch: 'main', gith
       update: async (id, fields) => {
         calls.updates.push({ id, ...fields });
         Object.assign(rows.find((p) => p.id === id), fields);
+      },
+      clearInstallation: async (installationId) => {
+        calls.revoked.push({ clearInstallation: installationId });
+        return 0;
+      },
+      clearInstallationForRepos: async (installationId, fullNames) => {
+        calls.revoked.push({ clearInstallationForRepos: installationId, fullNames });
+        return 0;
       },
     },
     commitReviews: {
@@ -66,6 +74,14 @@ function makeWorld({ projects = [{ id: 'p1', user_id: 'u1', branch: 'main', gith
     githubRepoAccess: {
       findForUserRepo: async (userId, owner, repo) =>
         grants.find((g) => g.user_id === userId && g.repo_full_name === `${owner}/${repo}`) || null,
+      deleteForInstallation: async (installationId) => {
+        calls.revoked.push({ deleteForInstallation: installationId });
+        return 0;
+      },
+      deleteForRepos: async (installationId, repoIds) => {
+        calls.revoked.push({ deleteForRepos: installationId, repoIds });
+        return 0;
+      },
     },
     processedPushes: {
       claim: async (push) => {
@@ -74,6 +90,11 @@ function makeWorld({ projects = [{ id: 'p1', user_id: 'u1', branch: 'main', gith
         if (claimed.has(key)) return false;
         claimed.add(key);
         return true;
+      },
+      complete: async (key) => { calls.completed.push(key.after); },
+      release: async (key) => {
+        calls.released.push(key.after);
+        claimed.delete([key.projectId, key.ref, key.before, key.after].join('|'));
       },
     },
     runCommitReviewJobSafe: (ctx) => {
@@ -204,4 +225,63 @@ test('installation events are acknowledged and archived without touching project
   assert.deepStrictEqual(res.body, { ok: true, logged: 'installation_repositories' });
   assert.deepStrictEqual(calls.archived.map((e) => [e.event_type, e.source]), [['installation_repositories', 'github_app']]);
   assert.strictEqual(calls.reviewJobs.length + calls.v2.length + calls.claims.length, 0);
+});
+
+test('a completed push is marked done; a failed one is released so a redelivery retries it', async () => {
+  const ok = makeWorld();
+  await send(createWebhookHandler(ok.deps), delivery(pushPayload(), { secret: HOOK_SECRET }));
+  assert.deepStrictEqual(ok.calls.completed, [AFTER]);
+  assert.deepStrictEqual(ok.calls.released, []);
+
+  const bad = makeWorld();
+  let fail = true;
+  const original = bad.deps.processPushV2;
+  bad.deps.processPushV2 = async (args) => {
+    if (fail) throw new Error('anthropic down');
+    return original(args);
+  };
+  const handler = createWebhookHandler(bad.deps);
+  await send(handler, delivery(pushPayload(), { secret: HOOK_SECRET, id: 'd-1' }));
+  assert.deepStrictEqual(bad.calls.released, [AFTER]);
+  assert.deepStrictEqual(bad.calls.v2, []);
+
+  fail = false;
+  await send(handler, delivery(pushPayload(), { secret: HOOK_SECRET, id: 'd-1' }));
+  assert.strictEqual(bad.calls.v2.length, 1, 'the redelivery processed the push');
+});
+
+test('uninstalling or suspending the App revokes grants and project installations', async () => {
+  for (const action of ['deleted', 'suspend']) {
+    const { deps, calls } = makeWorld();
+    await send(
+      createWebhookHandler(deps),
+      delivery({ action, installation: { id: 42, account: { login: 'acme' } } }, { secret: APP_SECRET, event: 'installation' }),
+    );
+    assert.deepStrictEqual(calls.revoked, [{ deleteForInstallation: 42 }, { clearInstallation: 42 }], action);
+  }
+});
+
+test('removing repos from the installation revokes only those repos', async () => {
+  const { deps, calls } = makeWorld();
+  await send(
+    createWebhookHandler(deps),
+    delivery({
+      action: 'removed',
+      installation: { id: 42 },
+      repositories_removed: [{ id: 9, full_name: 'acme/web' }],
+    }, { secret: APP_SECRET, event: 'installation_repositories' }),
+  );
+  assert.deepStrictEqual(calls.revoked, [
+    { deleteForRepos: 42, repoIds: [9] },
+    { clearInstallationForRepos: 42, fullNames: ['acme/web'] },
+  ]);
+});
+
+test('an installation event signed with the repo-hook secret revokes nothing', async () => {
+  const { deps, calls } = makeWorld();
+  await send(
+    createWebhookHandler(deps),
+    delivery({ action: 'deleted', installation: { id: 42 } }, { secret: HOOK_SECRET, event: 'installation' }),
+  );
+  assert.deepStrictEqual(calls.revoked, []);
 });

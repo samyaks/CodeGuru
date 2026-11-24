@@ -402,7 +402,32 @@ const deployments = {
   },
 };
 
+// Projects stop reading through an installation that is gone or no longer covers their repo.
+deployments.clearInstallation = async function clearInstallation(installationId) {
+  const { rowCount } = await getDb().query(
+    'UPDATE deployments SET github_installation_id = NULL WHERE github_installation_id = $1',
+    [installationId]);
+  return rowCount;
+};
+deployments.clearInstallationForRepos = async function clearInstallationForRepos(installationId, fullNames) {
+  if (!fullNames.length) return 0;
+  const { rowCount } = await getDb().query(
+    `UPDATE deployments SET github_installation_id = NULL
+      WHERE github_installation_id = $1 AND LOWER(owner || '/' || repo) = ANY($2::text[])`,
+    [installationId, fullNames.map((n) => n.toLowerCase())]);
+  return rowCount;
+};
+
 // ── GitHub App repo access ────────────────────────────────────────
+
+const GRANT_UPSERT_SQL = `INSERT INTO github_repo_access
+     (user_id, installation_id, repo_id, repo_full_name, private, account_login)
+   VALUES ($1, $2, $3, $4, $5, $6)
+   ON CONFLICT (user_id, repo_id) DO UPDATE SET
+     installation_id = EXCLUDED.installation_id,
+     repo_full_name = EXCLUDED.repo_full_name,
+     private = EXCLUDED.private,
+     account_login = EXCLUDED.account_login`;
 
 const githubRepoAccess = {
   /** Replace everything a user can read via the app with a fresh listing. */
@@ -410,15 +435,33 @@ const githubRepoAccess = {
     await withTransaction(async (client) => {
       await client.query('DELETE FROM github_repo_access WHERE user_id = $1', [userId]);
       for (const g of grants) {
-        await client.query(
-          `INSERT INTO github_repo_access
-             (user_id, installation_id, repo_id, repo_full_name, private, account_login)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (user_id, repo_id) DO NOTHING`,
-          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin],
-        );
+        await client.query(GRANT_UPSERT_SQL,
+          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin]);
       }
     });
+  },
+  /** Add or refresh grants without removing any (used when the callback's state can't vouch for the listing). */
+  async mergeForUser(userId, grants) {
+    await withTransaction(async (client) => {
+      for (const g of grants) {
+        await client.query(GRANT_UPSERT_SQL,
+          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin]);
+      }
+    });
+  },
+  /** The app was uninstalled or suspended: nobody reads through this installation any more. */
+  async deleteForInstallation(installationId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1', [installationId]);
+    return rowCount;
+  },
+  /** Repos were removed from an installation. */
+  async deleteForRepos(installationId, repoIds) {
+    if (!repoIds.length) return 0;
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1 AND repo_id = ANY($2::bigint[])',
+      [installationId, repoIds]);
+    return rowCount;
   },
   async findForUserRepo(userId, owner, repo) {
     const { rows } = await getDb().query(
@@ -2179,21 +2222,44 @@ const webhookEvents = {
 
 // ── Processed pushes (webhook dedupe) ─────────────────────────────
 
+// A claim that never completed (crash, deploy) can be taken over after this long.
+const PUSH_CLAIM_STALE_MINUTES = 10;
+
 const processedPushes = {
   /**
-   * True for the first delivery of a push to a project; false when another
-   * delivery (per-repo hook + GitHub App, or a redelivery) already claimed it.
-   * Migration 026 adds the table.
+   * True when this delivery should process the push: it is the first, or the
+   * earlier claim never completed and has gone stale. False when another
+   * delivery is working on it or finished it. Migration 026 adds the table.
    */
   async claim({ projectId, ref, before, after, deliveryId, source }) {
     const { rows } = await getDb().query(
       `INSERT INTO processed_pushes (project_id, ref, before_sha, after_sha, delivery_id, source)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (project_id, ref, before_sha, after_sha) DO NOTHING
+        ON CONFLICT (project_id, ref, before_sha, after_sha) DO UPDATE
+          SET delivery_id = EXCLUDED.delivery_id, source = EXCLUDED.source, received_at = now()
+          WHERE processed_pushes.completed_at IS NULL
+            AND processed_pushes.received_at < now() - ($7 || ' minutes')::interval
         RETURNING project_id`,
-      [projectId, ref, before, after, deliveryId ?? null, source]
+      [projectId, ref, before, after, deliveryId ?? null, source, String(PUSH_CLAIM_STALE_MINUTES)]
     );
     return rows.length > 0;
+  },
+  /** Processing finished; later deliveries of this push are true duplicates. */
+  async complete({ projectId, ref, before, after }) {
+    await getDb().query(
+      `UPDATE processed_pushes SET completed_at = now()
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4`,
+      [projectId, ref, before, after]
+    );
+  },
+  /** Processing failed; let a redelivery try again. */
+  async release({ projectId, ref, before, after }) {
+    await getDb().query(
+      `DELETE FROM processed_pushes
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4
+          AND completed_at IS NULL`,
+      [projectId, ref, before, after]
+    );
   },
 };
 

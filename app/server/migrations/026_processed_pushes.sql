@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS processed_pushes (
   delivery_id  TEXT,
   source       TEXT NOT NULL,
   received_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
   PRIMARY KEY (project_id, ref, before_sha, after_sha),
   FOREIGN KEY (project_id) REFERENCES deployments(id) ON DELETE CASCADE
 );
+
+-- Added after the first draft: a claim is only final once processing completed,
+-- so a failed or interrupted push can be retried by a redelivery.
+ALTER TABLE processed_pushes ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;

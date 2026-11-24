@@ -113,3 +113,32 @@ test('appInstallationForRepo is null without the app configured', async () => {
   assert.strictEqual(await appInstallationForRepo({ owner: 'acme', repo: 'web' }, deps), null);
   assert.deepStrictEqual(calls.findRepoInstallation, []);
 });
+
+function goneDeps({ meta }) {
+  const cleared = [];
+  const gone = Object.assign(new Error('GitHub API 404'), { status: 404, installationGone: true });
+  const publicClient = {
+    async fetchRepoMeta() { return meta; },
+    async fetchCommits() { return ['public']; },
+  };
+  const deps = {
+    app: { clientForInstallation: () => ({ fetchCommits: async () => { throw gone; } }) },
+    publicClient,
+    clearInstallation: async (id) => { cleared.push(id); },
+  };
+  return { deps, cleared, gone };
+}
+
+test('a gone installation falls back to the server token for a public repo and is cleared', async () => {
+  const { deps, cleared } = goneDeps({ meta: { private: false } });
+  const client = clientForProject({ id: 'p1', github_installation_id: 7 }, deps);
+  assert.deepStrictEqual(await client.fetchCommits('acme', 'web'), ['public']);
+  assert.deepStrictEqual(cleared, ['p1']);
+});
+
+test('a gone installation never lets the server token read a private repo', async () => {
+  const { deps, cleared, gone } = goneDeps({ meta: { private: true } });
+  const client = clientForProject({ id: 'p1', github_installation_id: 7 }, deps);
+  await assert.rejects(() => client.fetchCommits('acme', 'web'), (err) => err === gone);
+  assert.deepStrictEqual(cleared, []);
+});

@@ -134,3 +134,15 @@ test('installUrl and authorizeUrl carry the state', () => {
   assert.strictEqual(auth.searchParams.get('client_id'), 'Iv1.abc');
   assert.strictEqual(auth.searchParams.get('state'), 'abc');
 });
+
+test('a 404 or 403 minting an installation token marks the installation as gone', async () => {
+  for (const status of [404, 403]) {
+    const app = createGithubApp(CONFIG, { fetchImpl: async () => jsonResponse({ message: 'nope' }, status) });
+    await assert.rejects(
+      () => app.getInstallationToken(77),
+      (err) => err.installationGone === true && err.status === status,
+    );
+  }
+  const flaky = createGithubApp(CONFIG, { fetchImpl: async () => jsonResponse({ message: 'boom' }, 500) });
+  await assert.rejects(() => flaky.getInstallationToken(77), (err) => !err.installationGone);
+});

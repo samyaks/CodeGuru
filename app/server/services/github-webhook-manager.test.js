@@ -3,11 +3,12 @@ const assert = require('node:assert');
 
 const { autoConnectWebhook } = require('./github-webhook-manager');
 
-function makeDeps({ installation = null, lookupError = null, connectResult = { ok: true, hookId: 1 } } = {}) {
+function makeDeps({ installation = null, lookupError = null, connectResult = { ok: true, hookId: 1 }, appSecret = true } = {}) {
   const calls = { lookups: [], connects: [] };
   return {
     calls,
     deps: {
+      appWebhookConfigured: () => appSecret,
       appInstallationForRepo: async (args) => {
         calls.lookups.push(args);
         if (lookupError) throw lookupError;
@@ -49,5 +50,13 @@ test('repos the App doesn’t cover still get a per-repo hook', async () => {
 test('a failed installation lookup falls back to a per-repo hook', async () => {
   const { deps, calls } = makeDeps({ lookupError: Object.assign(new Error('GitHub API 500'), { status: 500 }) });
   await autoConnectWebhook(SCAN, deps);
+  assert.strictEqual(calls.connects.length, 1);
+});
+
+test('without the App webhook secret, the per-repo hook is still registered', async () => {
+  const { deps, calls } = makeDeps({ installation: 42, appSecret: false });
+  const result = await autoConnectWebhook({ ...SCAN, installationId: 42 }, deps);
+  assert.deepStrictEqual(result, { ok: true, hookId: 1 });
+  assert.deepStrictEqual(calls.lookups, []);
   assert.strictEqual(calls.connects.length, 1);
 });

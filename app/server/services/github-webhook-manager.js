@@ -84,6 +84,10 @@ async function connectWebhook({ projectId, owner, repo, userToken }) {
   }
 }
 
+function appWebhookConfigured() {
+  return !!process.env.GITHUB_APP_WEBHOOK_SECRET;
+}
+
 /**
  * Scan-time hook registration. Skipped when the Takeoff GitHub App covers the
  * repo: the app already delivers its pushes, and a per-repo hook would deliver
@@ -92,11 +96,17 @@ async function connectWebhook({ projectId, owner, repo, userToken }) {
  */
 async function autoConnectWebhook(
   { projectId, owner, repo, userToken, installationId = null },
-  deps = { appInstallationForRepo, connectWebhook },
+  deps = { appInstallationForRepo, connectWebhook, appWebhookConfigured },
 ) {
   let coveredBy = null;
+  // The App only counts as delivering pushes if its webhook secret is set;
+  // without it every App delivery is rejected with 401.
+  const appDelivers = deps.appWebhookConfigured();
+  if (!appDelivers) {
+    console.warn('GITHUB_APP_WEBHOOK_SECRET is not set; registering a per-repo hook instead of relying on the GitHub App');
+  }
   try {
-    coveredBy = await deps.appInstallationForRepo({ owner, repo, knownInstallationId: installationId });
+    if (appDelivers) coveredBy = await deps.appInstallationForRepo({ owner, repo, knownInstallationId: installationId });
   } catch (err) {
     // Can't tell; register the hook. The webhook handler dedupes repeat pushes.
     console.warn(`app installation lookup ${owner}/${repo}:`, err.message);
