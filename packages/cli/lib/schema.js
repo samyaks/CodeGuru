@@ -17,7 +17,8 @@ const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const KEYS = {
   root: ['version', 'product', 'areas', 'agreements'],
   product: ['name', 'summary'],
-  area: ['id', 'name', 'paths', 'creators', 'rules', 'never'],
+  area: ['id', 'name', 'paths', 'creators', 'rules', 'never', 'screens'],
+  screen: ['name', 'route'],
   rule: ['id', 'text'],
   agreement: ['id', 'area', 'text', 'agreed_by', 'agreed_on', 'source'],
 };

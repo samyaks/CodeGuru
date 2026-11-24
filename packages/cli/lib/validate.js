@@ -164,6 +164,33 @@ function validateArea(area, path, areaIds, ctx) {
   });
   validateRules(area.rules, [...path, 'rules'], 'rules', ctx);
   validateRules(area.never, [...path, 'never'], 'never', ctx);
+  validateScreens(area.screens, [...path, 'screens'], ctx);
+}
+
+// Screens the PR check captures for UAT when this area's files change.
+function validateScreens(value, path, ctx) {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    ctx.error(path, '`screens` must be a list of { name, route }.');
+    return;
+  }
+  const routes = new Set();
+  value.forEach((sc, i) => {
+    const p = [...path, i];
+    if (!isObj(sc)) {
+      ctx.error(p, 'Each screen must be a mapping with `name` and `route`.');
+      return;
+    }
+    checkUnknown(sc, KEYS.screen, p, ctx.warn);
+    if (!isStr(sc.name)) ctx.error([...p, 'name'], 'Screen needs a `name` (what a person would call it, like "Checkout").');
+    if (typeof sc.route !== 'string' || !sc.route.startsWith('/') || sc.route.startsWith('//') || /\s/.test(sc.route)) {
+      ctx.error([...p, 'route'], 'Screen `route` must be a path on the app starting with `/`, like `/checkout`.');
+    } else if (routes.has(sc.route)) {
+      ctx.warn([...p, 'route'], `Route \`${sc.route}\` is listed twice.`);
+    } else {
+      routes.add(sc.route);
+    }
+  });
 }
 
 function validateAgreement(a, path, areaIds, seen, ctx) {

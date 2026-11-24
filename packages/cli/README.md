@@ -24,6 +24,8 @@ areas:
     creators: ["a@example.com"] # notified about drift here (optional)
     rules: ["Stripe holds all billing data."]   # a string, or { id, text }
     never: ["Never store card numbers."]
+    screens:                    # optional: screens captured for UAT when this area changes
+      - { name: Checkout, route: /checkout }
 agreements:                      # added by Takeoff when members agree
   - id: agr_2026_11_24_annual_plan
     area: billing                # optional, must be an area id

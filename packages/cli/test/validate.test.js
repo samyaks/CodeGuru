@@ -113,3 +113,27 @@ test('unknown keys are warnings, not errors; rules may be objects with ids', () 
   assert.ok(only(r, 'areas[0].rules[1].id').some((i) => /Duplicate rule id/.test(i.message)));
   assert.ok(only(r, 'areas[0].rules[2].text').length);
 });
+
+test('screens: name and an app route are required; bad shapes and repeats are reported', () => {
+  const r = validateText([
+    'version: 2',
+    'product: { name: X, summary: y }',
+    'areas:',
+    '  - id: a',
+    '    name: A',
+    '    paths: [x]',
+    '    screens:',
+    '      - { name: Checkout, route: /checkout }',
+    '      - { name: Again, route: /checkout }',
+    '      - { name: "", route: checkout }',
+    '      - { name: Out, route: "//evil.example" }',
+    '      - nope',
+    '',
+  ].join('\n'));
+  assert.ok(only(r, 'areas[0].screens[1].route').some((i) => i.severity === 'warning'), 'repeat warns');
+  assert.ok(only(r, 'areas[0].screens[2].name').some((i) => i.severity === 'error'));
+  assert.ok(only(r, 'areas[0].screens[2].route').some((i) => i.severity === 'error'));
+  assert.ok(only(r, 'areas[0].screens[3].route').some((i) => i.severity === 'error'), 'protocol-relative is rejected');
+  assert.ok(only(r, 'areas[0].screens[4]').some((i) => i.severity === 'error'));
+  assert.strictEqual(only(r, 'areas[0].screens[0].route').length, 0);
+});

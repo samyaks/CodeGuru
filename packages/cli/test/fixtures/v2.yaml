@@ -11,6 +11,8 @@ areas:
       - "Stripe holds all billing data; we store only Stripe IDs."
     never:
       - "Never store card numbers."
+    screens:
+      - { name: Checkout, route: /checkout }
 agreements:
   - id: agr_2026_11_24_annual_plan
     area: billing
