@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes } = require('../lib/db');
+const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 const { runPrCheck, prCheckJobs } = require('../services/verdict/runner');
@@ -26,6 +26,7 @@ function defaultDeps() {
     commitReviews,
     webhookEvents,
     githubRepoAccess,
+    userGithubLinks,
     processedPushes,
     runCommitReviewJobSafe,
     processPushV2,
@@ -293,6 +294,8 @@ async function revokeAccess({ event, payload }, deps) {
     const githubUserId = Number(payload.sender?.id);
     if (payload.action !== 'revoked' || !githubUserId) return;
     const grants = await deps.githubRepoAccess.deleteForGithubUser(githubUserId);
+    // The link to that GitHub account goes too: committing actions ask again.
+    if (deps.userGithubLinks) await deps.userGithubLinks.deleteForGithubUser(githubUserId);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'authorization_revoked', githubUserId, grants }));
     return;
   }

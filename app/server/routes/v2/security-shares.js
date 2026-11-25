@@ -23,7 +23,7 @@ const express = require('express');
 const { suggestions, deployments, securityShares } = require('../../lib/db');
 const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
-const { checkProjectAccess } = require('../../lib/helpers');
+const { checkProjectOwner } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
 const { toGap, groupGaps } = require('../../services/v2/gap-mapper');
 const { computeSecurityScore } = require('../../services/security/score');
@@ -83,7 +83,7 @@ function pruneInternalFields(gap) {
 async function loadProjectAndAuthorize(req) {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
   return project;
 }
 
@@ -209,7 +209,7 @@ slugRouter.delete('/:slug', revokeLimit, asyncHandler(async (req, res) => {
 
   const project = await deployments.findById(existing.project_id);
   if (!project) throw AppError.notFound('Share link not found');
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   if (existing.revoked_at) {
     return res.json({ revoked: true, alreadyRevoked: true });

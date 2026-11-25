@@ -293,7 +293,7 @@ async function enrichProjectsForDashboard(projects) {
 }
 
 async function listDashboardCards(userId) {
-  const projects = await deployments.findByUserId(userId);
+  const projects = await deployments.findByMember(userId);
   return enrichProjectsForDashboard(projects);
 }
 

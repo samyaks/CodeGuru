@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
-const { githubRepoAccess } = require('../lib/db');
+const { githubRepoAccess, userGithubLinks } = require('../lib/db');
 const { getGithubApp } = require('../lib/github-app');
 const { createRateLimit } = require('../lib/rate-limit');
 const { AppError } = require('../lib/app-error');
@@ -109,6 +109,14 @@ router.get('/callback', callbackRateLimit, asyncHandler(async (req, res) => {
     // The state proves this browser started the flow, so the listing replaces
     // the user's grants (dropping revoked ones).
     await githubRepoAccess.replaceForUser(req.user.id, grants);
+    // Which GitHub account this user is, for write-access checks before a
+    // committing action (Milestone 2). Best effort: the grants are what matter here.
+    try {
+      const me = await app.fetchAuthenticatedUser(userToken);
+      if (me.githubUserId && me.githubLogin) await userGithubLinks.upsert(req.user.id, me);
+    } catch (err) {
+      console.error('[github-app] could not record the GitHub account:', err.message);
+    }
     console.log(JSON.stringify({
       event: 'github_app_connected',
       userId: req.user.id,

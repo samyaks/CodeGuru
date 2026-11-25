@@ -247,6 +247,12 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     return items;
   }
 
+  /** The GitHub account behind a user token: { githubUserId, githubLogin }. */
+  async function fetchAuthenticatedUser(userToken) {
+    const user = await githubJson('/user', { token: userToken });
+    return { githubUserId: user && user.id ? Number(user.id) : null, githubLogin: user && user.login ? String(user.login) : null };
+  }
+
   /**
    * Every repo the user can read through any installation of this app.
    * `/user/installations/:id/repositories` returns only repos both the
@@ -283,6 +289,7 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     installUrl,
     authorizeUrl,
     exchangeUserCode,
+    fetchAuthenticatedUser,
     listUserGrants,
   };
 }

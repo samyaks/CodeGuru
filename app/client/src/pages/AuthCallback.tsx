@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { safeNext, takeAfterSignIn } from '../lib/safe-next';
 
 export default function AuthCallback() {
   const [error, setError] = useState<string | null>(null);
@@ -11,6 +12,9 @@ export default function AuthCallback() {
 
     const queryParams = new URLSearchParams(window.location.search);
     const code = queryParams.get('code');
+    // An invite's magic link carries ?next=/invite/...; a GitHub sign-in
+    // started from an invite page remembers it in sessionStorage.
+    const next = safeNext(queryParams.get('next')) || takeAfterSignIn() || '/dashboard';
     const authError = queryParams.get('error_description') || queryParams.get('error');
 
     if (authError) {
@@ -28,7 +32,7 @@ export default function AuthCallback() {
       })
         .then((res) => {
           if (!res.ok) throw new Error('Failed to set session');
-          window.location.href = '/dashboard';
+          window.location.href = next;
         })
         .catch(() => setError('Failed to complete sign in. Please try again.'));
       return;

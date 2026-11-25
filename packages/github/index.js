@@ -305,6 +305,27 @@ function createClient({ token, onUnauthorized } = {}) {
     return found;
   }
 
+  /**
+   * A user's permission on the repo ("admin", "maintain", "write", "triage",
+   * "read" or "none"), or "none" when GitHub doesn't know them there.
+   */
+  async function fetchCollaboratorPermission(owner, repo, username) {
+    try {
+      const res = await request(`/repos/${owner}/${repo}/collaborators/${enc(username)}/permission`);
+      const data = await res.json();
+      const p = data.user?.permissions || {};
+      return {
+        permission: data.role_name || data.permission || 'none',
+        // Custom roles have their own names; these flags say what they allow.
+        canPush: !!(p.push || p.maintain || p.admin),
+        githubUserId: data.user?.id ?? null,
+      };
+    } catch (err) {
+      if (err.status === 404) return { permission: 'none', canPush: false, githubUserId: null };
+      throw err;
+    }
+  }
+
   async function createIssueComment(owner, repo, issueNumber, body) {
     const res = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, jsonBody('POST', { body }));
     return res.json();
@@ -344,6 +365,7 @@ function createClient({ token, onUnauthorized } = {}) {
 
   return {
     fetchAllPRFiles,
+    fetchCollaboratorPermission,
     fetchFileTextOrNull,
     findIssueCommentWithMarker,
     createIssueComment,
