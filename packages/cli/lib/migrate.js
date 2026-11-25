@@ -1,7 +1,7 @@
 'use strict';
 
 const YAML = require('yaml');
-const { CURRENT_VERSION, slugify } = require('./schema');
+const { CURRENT_VERSION, ID_RE, EMAIL_RE, slugify } = require('./schema');
 
 // v1 had no schema of its own in the repo, so `migrate` accepts every plain
 // shape a hand-written file would reasonably take:
@@ -14,12 +14,49 @@ const { CURRENT_VERSION, slugify } = require('./schema');
 // Anything else is dropped and reported in `notes`, never silently.
 
 const V1_KNOWN = new Set(['version', 'name', 'product', 'summary', 'description', 'rules', 'never', 'avoid', 'areas']);
+const V1_AREA_KNOWN = new Set(['id', 'name', 'path', 'paths', 'creator', 'creators', 'rules', 'never', 'avoid', 'screens']);
 
 const asList = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v]);
 const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '';
 
-function ruleList(v) {
-  return asList(v).filter((r) => nonEmpty(r) || (r && typeof r === 'object' && nonEmpty(r.text)));
+/**
+ * Rules as v2 accepts them: strings, or { text, id? } with a valid, unique id.
+ * Anything dropped or changed is reported through `note`.
+ */
+function ruleList(v, where, note) {
+  const out = [];
+  const ids = new Set();
+  for (const r of asList(v)) {
+    if (nonEmpty(r)) {
+      out.push(r);
+    } else if (r && typeof r === 'object' && !Array.isArray(r) && nonEmpty(r.text)) {
+      if (r.id === undefined) {
+        out.push(r.text);
+      } else if (typeof r.id === 'string' && ID_RE.test(r.id) && !ids.has(r.id)) {
+        ids.add(r.id);
+        out.push({ id: r.id, text: r.text });
+      } else {
+        note(`${where}: rule id ${JSON.stringify(r.id)} is not a valid, unique lowercase id; kept the rule without it.`);
+        out.push(r.text);
+      }
+    } else {
+      note(`${where}: dropped an entry that is not a rule (${JSON.stringify(r)}).`);
+    }
+  }
+  return out;
+}
+
+function screenList(v, where, note) {
+  const out = [];
+  for (const sc of asList(v)) {
+    if (sc && typeof sc === 'object' && nonEmpty(sc.name) && typeof sc.route === 'string'
+      && sc.route.startsWith('/') && !sc.route.startsWith('//') && !/\s/.test(sc.route)) {
+      out.push({ name: sc.name, route: sc.route });
+    } else {
+      note(`${where}: dropped a screen without a name and a route like \`/checkout\` (${JSON.stringify(sc)}).`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -63,20 +100,40 @@ function migrateData(v1) {
       continue;
     }
     const areaName = nonEmpty(a.name) ? a.name : (nonEmpty(a.id) ? a.id : `Area ${i + 1}`);
-    const paths = asList(a.paths !== undefined ? a.paths : a.path).filter(nonEmpty);
-    if (!paths.length) notes.push(`Area "${areaName}" has no paths; add some so Takeoff knows which files it covers.`);
-    const out = { id: uniqueId(nonEmpty(a.id) && /^[a-z][a-z0-9_-]*$/.test(a.id) ? a.id : slugify(areaName)), name: areaName, paths };
-    const creators = asList(a.creators !== undefined ? a.creators : a.creator).filter(nonEmpty);
+    const where = `Area "${areaName}"`;
+    const note = (n) => notes.push(n);
+
+    const rawPaths = asList(a.paths !== undefined ? a.paths : a.path);
+    let paths = rawPaths.filter(nonEmpty);
+    if (paths.length < rawPaths.length) notes.push(`${where}: dropped ${rawPaths.length - paths.length} path(s) that were not text.`);
+    if (!paths.length) {
+      paths = ['**'];
+      notes.push(`${where} had no paths, so it now covers every file (\`**\`). Narrow it so Takeoff knows which files it covers.`);
+    }
+    const out = { id: uniqueId(nonEmpty(a.id) && ID_RE.test(a.id) ? a.id : slugify(areaName)), name: areaName, paths };
+
+    const rawCreators = asList(a.creators !== undefined ? a.creators : a.creator);
+    const creators = rawCreators.filter((c) => nonEmpty(c) && EMAIL_RE.test(c.trim())).map((c) => c.trim());
+    const notEmails = rawCreators.filter((c) => !(nonEmpty(c) && EMAIL_RE.test(c.trim())));
+    if (notEmails.length) notes.push(`${where}: creators must be email addresses; dropped ${notEmails.map((c) => JSON.stringify(c)).join(', ')}.`);
     if (creators.length) out.creators = creators;
-    const rules = ruleList(a.rules);
+
+    const rules = ruleList(a.rules, where, note);
     if (rules.length) out.rules = rules;
-    const never = ruleList(a.never !== undefined ? a.never : a.avoid);
+    const never = ruleList(a.never !== undefined ? a.never : a.avoid, where, note);
     if (never.length) out.never = never;
+    const screens = screenList(a.screens, where, note);
+    if (screens.length) out.screens = screens;
+
+    for (const key of Object.keys(a)) {
+      if (!V1_AREA_KNOWN.has(key)) notes.push(`${where}: unknown key \`${key}\` was not carried over.`);
+    }
     areas.push(out);
   }
 
-  const topRules = ruleList(src.rules);
-  const topNever = ruleList(src.never !== undefined ? src.never : src.avoid);
+  const topNote = (n) => notes.push(n);
+  const topRules = ruleList(src.rules, 'Top-level rules', topNote);
+  const topNever = ruleList(src.never !== undefined ? src.never : src.avoid, 'Top-level never', topNote);
   if (topRules.length || topNever.length) {
     const general = { id: uniqueId('general'), name: 'General', paths: ['**'] };
     if (topRules.length) general.rules = topRules;

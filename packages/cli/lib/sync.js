@@ -15,6 +15,27 @@ class TakeoffError extends Error {
   }
 }
 
+/**
+ * Refuse to follow a symlink at a target or any directory between `dir` and it,
+ * so sync never writes outside the repo it was run in.
+ */
+function assertNoSymlink(dir, rel) {
+  const parts = rel.split('/');
+  for (let n = 1; n <= parts.length; n += 1) {
+    const p = path.join(dir, ...parts.slice(0, n));
+    let st;
+    try {
+      st = fs.lstatSync(p);
+    } catch (err) {
+      if (err.code === 'ENOENT') return;
+      throw err;
+    }
+    if (st.isSymbolicLink()) {
+      throw new TakeoffError(`${parts.slice(0, n).join('/')} is a symlink. Takeoff only writes real files inside this folder; replace it with a file, then run sync again.`);
+    }
+  }
+}
+
 function readIfExists(file) {
   try {
     return fs.readFileSync(file, 'utf8');
@@ -50,7 +71,11 @@ function sync({ dir = process.cwd(), file = null, check = false, dryRun = false 
   const block = renderBlock(data);
   const planned = TARGETS.map((t) => {
     const target = path.join(dir, t.path);
+    assertNoSymlink(dir, t.path);
     const existing = readIfExists(target);
+    if (t.prefix && existing !== null && !existing.startsWith('---')) {
+      notes.push(`${t.path} has no front matter, so Cursor may not apply it. Add \`alwaysApply: true\` front matter at the top (Takeoff won't edit outside its markers).`);
+    }
     const { text: next, error } = applyBlock(existing, block, { prefix: t.prefix });
     if (error) throw new TakeoffError(`${t.path}: ${error}`);
     const action = existing === null ? 'created' : (next === existing ? 'unchanged' : 'updated');

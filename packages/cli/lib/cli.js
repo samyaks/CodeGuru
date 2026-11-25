@@ -7,12 +7,19 @@ const { migrateData, stringifyV2 } = require('./migrate');
 const { sync, TakeoffError, readIfExists } = require('./sync');
 const { FILENAME, CURRENT_VERSION } = require('./schema');
 
+const FLAGS = {
+  validate: ['--strict'],
+  sync: ['--check', '--dry-run'],
+  migrate: ['--dry-run'],
+};
+
 const HELP = `takeoff: keep what you build matching what you agreed
 
 Usage:
   takeoff validate [file]            Check takeoff.yaml (add --strict to fail on warnings)
-  takeoff sync [--check] [--dry-run] Write CLAUDE.md, AGENTS.md and .cursor/rules/takeoff.mdc
-  takeoff migrate [--dry-run]        Upgrade a v1 takeoff.yaml to v2
+  takeoff sync [file] [--check] [--dry-run]
+                                     Write CLAUDE.md, AGENTS.md and .cursor/rules/takeoff.mdc
+  takeoff migrate [file] [--dry-run] Upgrade a v1 takeoff.yaml to v2
 
 Options:
   --dir <path>   Run in another directory (default: current)
@@ -65,6 +72,15 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
     return command || args.flags.size ? 0 : 2;
   }
 
+  const allowed = FLAGS[command];
+  if (allowed) {
+    const unknown = [...args.flags].filter((f) => !allowed.includes(f));
+    if (unknown.length) {
+      err(`Unknown option ${unknown.join(', ')} for \`${command}\`. It accepts: ${allowed.join(', ')}, --dir, --file.`);
+      return 2;
+    }
+  }
+
   const dir = path.resolve(cwd, args.dir || '.');
   const yamlRel = args.file || rest[0] || FILENAME;
   const yamlPath = path.resolve(dir, yamlRel);
@@ -73,7 +89,7 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
   try {
     switch (command) {
       case 'validate': return validateCommand({ yamlPath, label, strict: args.flags.has('--strict'), out, err });
-      case 'sync': return syncCommand({ dir, file: args.file, args, out, err });
+      case 'sync': return syncCommand({ dir, file: args.file || rest[0] || null, args, out, err });
       case 'migrate': return migrateCommand({ yamlPath, label, dryRun: args.flags.has('--dry-run'), out, err });
       default:
         err(`Unknown command "${command}".\n\n${HELP}`);
@@ -144,8 +160,9 @@ function migrateCommand({ yamlPath, label, dryRun, out, err }) {
   // Never write a file we would reject ourselves.
   const check = validateText(next);
   if (!check.ok) {
-    err('Migration produced an invalid file (this is a bug). Nothing was written.');
-    for (const i of check.issues) if (i.severity === 'error') err(`  ${formatIssue(label, i)}`);
+    err(`Could not turn ${label} into a valid v2 file, so nothing was written. These fields need fixing in your file first:`);
+    // Positions here point into the generated text, not the user's file, so print paths only.
+    for (const i of check.issues) if (i.severity === 'error') err(`  ${i.path ? `${i.path}: ` : ''}${i.message}`);
     return 1;
   }
 

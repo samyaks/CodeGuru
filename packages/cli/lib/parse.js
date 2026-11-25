@@ -39,7 +39,15 @@ function parse(text) {
     return null;
   };
 
-  const data = doc.errors.length ? null : doc.toJS();
+  let data = null;
+  if (!doc.errors.length) {
+    try {
+      data = doc.toJS();
+    } catch (err) {
+      // e.g. the yaml library's alias-count guard ("billion laughs"); report it, don't crash.
+      issues.push({ severity: 'error', path: '', message: `YAML: ${String(err.message).split('\n')[0]}`, line: null, col: null });
+    }
+  }
   return { data, doc, issues, position };
 }
 

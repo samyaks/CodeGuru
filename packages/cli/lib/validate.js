@@ -238,9 +238,10 @@ function validateAgreement(a, path, areaIds, seen, ctx) {
 function validateV1(data, { error, warn }) {
   warn(['version'], 'This is a v1 file. Run `takeoff migrate` to upgrade it to v2.');
   for (const key of ['rules', 'never']) {
-    if (data[key] !== undefined && !Array.isArray(data[key])) error([key], `\`${key}\` must be a list.`);
+    if (data[key] != null && !Array.isArray(data[key])) error([key], `\`${key}\` must be a list.`);
   }
-  if (data.areas !== undefined && !Array.isArray(data.areas)) error(['areas'], '`areas` must be a list.');
+  // An empty key (`areas:` with nothing under it) parses as null; migrate treats it as an empty list.
+  if (data.areas != null && !Array.isArray(data.areas)) error(['areas'], '`areas` must be a list.');
 }
 
 module.exports = { validateText, fmtPath };

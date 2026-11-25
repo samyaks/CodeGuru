@@ -2,7 +2,9 @@
 
 const { MARKER_START, MARKER_END } = require('./schema');
 
-const oneLine = (s) => String(s).replace(/\s*\n\s*/g, ' ').trim();
+// User text must never contain a working marker, or the next sync would find two.
+const safe = (s) => String(s).replace(/<!--/g, '&lt;!--');
+const oneLine = (s) => safe(s).replace(/\s*\n\s*/g, ' ').trim();
 const ruleText = (r) => oneLine(typeof r === 'string' ? r : r.text);
 
 /** The text between (and including) the markers, for a v2 `data` object. Deterministic. */
@@ -23,9 +25,9 @@ function renderBlock(data) {
   const areaName = new Map();
   for (const area of data.areas || []) {
     areaName.set(area.id, area.name);
-    lines.push(`### ${oneLine(area.name)} (\`${area.id}\`)`, '');
-    lines.push(`- Covers: ${(area.paths || []).map((p) => `\`${p}\``).join(', ') || '(no paths yet)'}`);
-    if (area.creators && area.creators.length) lines.push(`- Creators: ${area.creators.join(', ')}`);
+    lines.push(`### ${oneLine(area.name)} (\`${safe(area.id)}\`)`, '');
+    lines.push(`- Covers: ${(area.paths || []).map((p) => `\`${safe(p)}\``).join(', ') || '(no paths yet)'}`);
+    if (area.creators && area.creators.length) lines.push(`- Creators: ${area.creators.map(safe).join(', ')}`);
     if (area.rules && area.rules.length) {
       lines.push('- Rules:');
       for (const r of area.rules) lines.push(`  - ${ruleText(r)}`);
@@ -41,7 +43,7 @@ function renderBlock(data) {
     lines.push('### Agreements', '');
     lines.push('Decisions the team has agreed on. Treat them as rules.', '');
     for (const a of data.agreements) {
-      const bits = [a.area ? (areaName.get(a.area) || a.area) : null, `agreed ${a.agreed_on} by ${(a.agreed_by || []).join(', ')}`].filter(Boolean);
+      const bits = [a.area ? oneLine(areaName.get(a.area) || a.area) : null, `agreed ${safe(a.agreed_on)} by ${(a.agreed_by || []).map(safe).join(', ')}`].filter(Boolean);
       lines.push(`- ${oneLine(a.text)} [${bits.join(' · ')}]`);
     }
     lines.push('');
@@ -65,25 +67,46 @@ function applyBlock(existing, block, { prefix = '' } = {}) {
   const b = crlf ? block.replace(/\n/g, '\r\n') : block;
   const eol = crlf ? '\r\n' : '\n';
 
-  const count = (needle) => existing.split(needle).length - 1;
-  const starts = count(MARKER_START);
-  const ends = count(MARKER_END);
+  const starts = markerLines(existing, MARKER_START);
+  const ends = markerLines(existing, MARKER_END);
 
-  if (starts === 0 && ends === 0) {
+  if (starts.length === 0 && ends.length === 0) {
     if (existing.trim() === '') return { text: `${prefix}${b}${eol}` };
     const sep = existing.endsWith('\n') ? eol : `${eol}${eol}`;
     return { text: `${existing}${sep}${b}${eol}` };
   }
-  const s = existing.indexOf(MARKER_START);
-  const e = existing.indexOf(MARKER_END);
-  if (starts !== 1 || ends !== 1 || e < s) {
+  if (starts.length !== 1 || ends.length !== 1 || ends[0].start < starts[0].start) {
     return {
       text: existing,
-      error: `Found ${starts} "${MARKER_START}" and ${ends} "${MARKER_END}" markers, or they are out of order. `
-        + 'There must be exactly one start marker followed by one end marker. Fix or remove them, then run sync again.',
+      error: `Found ${starts.length} "${MARKER_START}" and ${ends.length} "${MARKER_END}" marker lines, or they are out of order. `
+        + 'There must be exactly one start marker line followed by one end marker line. Fix or remove them, then run sync again.',
     };
   }
-  return { text: existing.slice(0, s) + b + existing.slice(e + MARKER_END.length) };
+  return { text: existing.slice(0, starts[0].start) + b + existing.slice(ends[0].end) };
+}
+
+/**
+ * Where `marker` stands alone on a line, outside fenced code blocks. A marker
+ * quoted in prose or in a code sample is not a marker.
+ * @returns {Array<{ start: number, end: number }>} offsets of the line, without its line break
+ */
+function markerLines(text, marker) {
+  const found = [];
+  let fence = null;
+  let offset = 0;
+  for (const raw of text.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    const trimmed = line.trim();
+    const f = /^(`{3,}|~{3,})/.exec(trimmed);
+    if (f) {
+      if (!fence) fence = f[1];
+      else if (f[1][0] === fence[0] && f[1].length >= fence.length && trimmed === f[1]) fence = null;
+    } else if (!fence && trimmed === marker) {
+      found.push({ start: offset, end: offset + line.length });
+    }
+    offset += raw.length + 1;
+  }
+  return found;
 }
 
 const MDC_PREFIX = '---\ndescription: What this product should do, from takeoff.yaml\nalwaysApply: true\n---\n\n';

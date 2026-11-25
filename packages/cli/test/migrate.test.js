@@ -35,14 +35,32 @@ test('migrate handles product as a string or mapping, duplicate names, and an em
   assert.strictEqual(validateText(stringifyV2(c.data)).ok, true);
 });
 
-test('areas without paths are carried over with a note, and still validate as errors until fixed', () => {
-  const { data, notes } = migrateData({ name: 'P', areas: [{ name: 'Web' }] });
-  assert.ok(notes.some((n) => /no paths/.test(n)));
-  assert.strictEqual(validateText(stringifyV2(data)).ok, false);
+test('v1 shapes that v2 is stricter about still migrate to a valid file, with notes', () => {
+  const { data, notes } = migrateData({
+    name: 'P',
+    areas: [
+      { name: 'Web' },
+      { name: 'Docs', path: 'docs/**', creator: 'Samyak', creators: undefined },
+      { name: 'API', paths: ['api/**', 7], creators: ['a@b.co', 'not-an-email'], rules: [{ id: 'R1', text: 'keep fast' }, { id: 'ok', text: 'one' }, { id: 'ok', text: 'two' }, 42], screens: [{ name: 'Home', route: '/' }, { name: 'Bad' }], owner: 'x' },
+    ],
+    rules: null,
+  });
+  const r = validateText(stringifyV2(data));
+  assert.strictEqual(r.ok, true, JSON.stringify(r.issues));
+  assert.deepStrictEqual(data.areas[0].paths, ['**']);
+  assert.strictEqual(data.areas[1].creators, undefined);
+  assert.deepStrictEqual(data.areas[2].paths, ['api/**']);
+  assert.deepStrictEqual(data.areas[2].creators, ['a@b.co']);
+  assert.deepStrictEqual(data.areas[2].rules, ['keep fast', { id: 'ok', text: 'one' }, 'two']);
+  assert.deepStrictEqual(data.areas[2].screens, [{ name: 'Home', route: '/' }]);
+  for (const re of [/had no paths/, /dropped "Samyak"/, /dropped "not-an-email"/, /"R1"/, /not a rule/, /dropped a screen/, /unknown key `owner`/, /not text/]) {
+    assert.ok(notes.some((n) => re.test(n)), `note matching ${re}: ${notes.join(' | ')}`);
+  }
 });
 
-test('migrating a v2 object’s output twice changes nothing', () => {
+test('migrate output is stable: re-reading and re-writing it changes nothing', () => {
   const once = stringifyV2(migrateData(v1).data);
-  const twice = stringifyV2(require('yaml').parse(once));
-  assert.strictEqual(twice, once);
+  const reread = validateText(once);
+  assert.strictEqual(reread.ok, true);
+  assert.strictEqual(stringifyV2(reread.data), once);
 });
