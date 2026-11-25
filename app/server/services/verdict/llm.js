@@ -9,12 +9,15 @@ const { VerdictError } = require('./parse');
 
 const DEFAULT_MODEL = 'claude-opus-5-5';
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+// `fallbacks: "default"` is only accepted for models that have published
+// fallback targets; an override to another model goes without it.
+const SUPPORTS_FALLBACKS = /^claude-(opus-5|fable-5|mythos-5)/;
 
 let sharedClient = null;
 function defaultClient() {
   if (!sharedClient) {
     const Anthropic = require('@anthropic-ai/sdk');
-    sharedClient = new Anthropic({ timeout: 5 * 60 * 1000, maxRetries: 2 });
+    sharedClient = new Anthropic({ timeout: 4 * 60 * 1000, maxRetries: 1 });
   }
   return sharedClient;
 }
@@ -25,15 +28,17 @@ function verdictModel(env = process.env) {
 
 /** @returns {Promise<{ text: string, model: string, usage: object|null }>} */
 async function callVerdictModel({ system, user }, { client = null, model = verdictModel() } = {}) {
-  const response = await (client || defaultClient()).beta.messages.create({
+  const params = {
     model,
     max_tokens: 16000,
-    betas: [FALLBACK_BETA],
-    fallbacks: 'default',
     output_config: { format: { type: 'json_schema', schema: VERDICT_SCHEMA } },
     system,
     messages: [{ role: 'user', content: user }],
-  });
+  };
+  const api = client || defaultClient();
+  const response = SUPPORTS_FALLBACKS.test(model)
+    ? await api.beta.messages.create({ ...params, betas: [FALLBACK_BETA], fallbacks: 'default' })
+    : await api.messages.create(params);
   if (response.stop_reason === 'refusal') {
     throw new VerdictError('refused', 'The model declined to check this PR.');
   }
@@ -49,4 +54,4 @@ async function callVerdictModel({ system, user }, { client = null, model = verdi
   return { text, model: response.model || model, usage: response.usage || null };
 }
 
-module.exports = { callVerdictModel, verdictModel, DEFAULT_MODEL, FALLBACK_BETA };
+module.exports = { callVerdictModel, verdictModel, DEFAULT_MODEL, FALLBACK_BETA, SUPPORTS_FALLBACKS };

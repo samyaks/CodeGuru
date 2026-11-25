@@ -15,34 +15,48 @@ const LABELS = {
 };
 
 /**
- * Text from the model or the repo goes into Markdown we post as the App:
- * escape `<` (no HTML, no second marker), stop @mentions from pinging
- * anyone, and keep it on one line where a line is expected.
+ * Text from the model, the PR or takeoff.yaml goes into Markdown we post as
+ * the App. It is shown as plain text: no HTML (so no second marker), no
+ * Markdown (no fake headings, links or images), no @mentions, one line.
  */
-function clean(text, { max = 600, oneLine = true } = {}) {
+function clean(text, { max = 600 } = {}) {
   let t = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[\\`*_{}[\]()#+!|>~-]/g, (c) => `\\${c}`)
     .replace(/</g, '&lt;')
-    .replace(/@(?=[A-Za-z0-9_-])/g, '@\u200b');
-  if (oneLine) t = t.replace(/\s+/g, ' ');
-  t = t.trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+    .replace(/@(?=[A-Za-z0-9_-])/g, '@​');
+  if (t.length > max) {
+    t = t.slice(0, max - 1).replace(/\\$/, '');
+    t = `${t}…`;
+  }
+  return t;
 }
 
-const code = (s) => `\`${String(s).replace(/`/g, "'")}\``;
+/** A file name or sha as inline code, on one line. */
+const code = (s) => `\`${String(s).replace(/[\r\n]+/g, ' ').replace(/`/g, "'")}\``;
 
-function footer({ reviewUrl, previewUrl, headSha, note, checked = true }) {
+/** Only a plain https URL is shown, as an autolink. */
+function safeUrl(url) {
+  return typeof url === 'string' && /^https:\/\/[^\s<>"'`]+$/.test(url) ? url : null;
+}
+
+function footer({ reviewUrl, previewUrl, headSha, notes = [], checked = true }) {
   const lines = [];
-  if (note) lines.push('', `_${clean(note, { max: 300 })}_`);
-  if (previewUrl) lines.push('', `Preview: ${previewUrl}`);
+  for (const n of notes) lines.push('', `_${clean(n, { max: 400 })}_`);
+  const preview = safeUrl(previewUrl);
+  if (preview) lines.push('', `Preview: <${preview}>`);
   if (reviewUrl) lines.push('', `[Review in Takeoff](${reviewUrl})`);
   const sha = code(String(headSha || '').slice(0, 7));
   lines.push('', `<sub>${checked ? `Checked ${sha} against takeoff.yaml.` : `Commit ${sha}.`} This check never blocks merging.</sub>`);
   return lines;
 }
 
+const areaLabel = (id, names) => (id === 'product' ? 'Product-wide' : names?.[id] || id);
+
 /**
  * @param {{ verdict: string, summary: string, conflicts: object[], suggested_agreement: string|null }} result
- * @param {{ areaNames: Record<string,string>, reviewUrl?: string|null, previewUrl?: string|null, headSha: string, note?: string|null }} ctx
+ * @param {{ areaNames: Record<string,string>, reviewUrl?: string|null, previewUrl?: string|null, headSha: string, notes?: string[] }} ctx
  */
 function renderComment(result, ctx) {
   const { emoji, label } = LABELS[result.verdict];
@@ -50,8 +64,7 @@ function renderComment(result, ctx) {
   if (result.conflicts.length) {
     lines.push('', '**Conflicts**');
     for (const c of result.conflicts) {
-      const area = ctx.areaNames?.[c.area] || c.area;
-      lines.push('', `- **${clean(area, { max: 80 })}**: ${clean(c.explanation)}`);
+      lines.push('', `- **${clean(areaLabel(c.area, ctx.areaNames), { max: 80 })}**: ${clean(c.explanation)}`);
       lines.push(`  > ${clean(c.rule_or_agreement)}`);
       if (c.files.length) lines.push(`  Files: ${c.files.slice(0, 10).map(code).join(', ')}${c.files.length > 10 ? `, and ${c.files.length - 10} more` : ''}`);
     }
@@ -63,7 +76,7 @@ function renderComment(result, ctx) {
     reviewUrl: result.verdict === 'matches' ? null : ctx.reviewUrl,
     previewUrl: ctx.previewUrl,
     headSha: ctx.headSha,
-    note: ctx.note,
+    notes: ctx.notes,
   }));
   return lines.join('\n');
 }
@@ -82,12 +95,12 @@ function renderFailureComment({ reason, headSha, previewUrl = null }) {
   ].join('\n');
 }
 
-function checkRunOutput(result) {
+function checkRunOutput(result, { areaNames = {}, notes = [] } = {}) {
   const { emoji, label } = LABELS[result.verdict];
-  const conflictLines = result.conflicts.map((c) => `- ${clean(c.area, { max: 80 })}: ${clean(c.explanation)}`);
+  const conflictLines = result.conflicts.map((c) => `- ${clean(areaLabel(c.area, areaNames), { max: 80 })}: ${clean(c.explanation)}`);
   return {
     title: `${emoji} ${label}`,
-    summary: [clean(result.summary), ...(conflictLines.length ? ['', ...conflictLines] : [])].join('\n'),
+    summary: [clean(result.summary), ...(conflictLines.length ? ['', ...conflictLines] : []), ...notes.map((n) => `\n_${clean(n, { max: 400 })}_`)].join('\n'),
   };
 }
 
@@ -97,5 +110,5 @@ function failureCheckRunOutput(reason) {
 
 module.exports = {
   MARKER, CHECK_NAME, RETRY_ACTION, LABELS,
-  renderComment, renderFailureComment, checkRunOutput, failureCheckRunOutput, clean,
+  renderComment, renderFailureComment, checkRunOutput, failureCheckRunOutput, clean, safeUrl,
 };

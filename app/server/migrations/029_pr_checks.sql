@@ -3,7 +3,8 @@
 --
 -- services/verdict/runner.js claims a row before it calls the model, so a
 -- webhook delivered twice runs the (paid) check once; a failed or stale row can
--- be claimed again by a redelivery or by Re-run on the check. comment_id is the
+-- be claimed again by a redelivery or by Re-run on the check; a run left
+-- 'running' by a crash is closed as failed at startup. comment_id is the
 -- single Takeoff comment on the PR, edited in place on every push.
 
 CREATE TABLE IF NOT EXISTS pr_checks (
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS pr_checks (
   pr_number      INTEGER NOT NULL,
   head_sha       TEXT NOT NULL,
   project_id     TEXT REFERENCES deployments(id) ON DELETE SET NULL,
+  installation_id BIGINT,                          -- the App installation that ran it
   status         TEXT NOT NULL DEFAULT 'running',  -- running | done | failed | superseded
   verdict        TEXT,                             -- matches | drifts | needs_decision
   result_json    JSONB,
@@ -27,3 +29,4 @@ CREATE TABLE IF NOT EXISTS pr_checks (
 
 CREATE INDEX IF NOT EXISTS pr_checks_pr_idx ON pr_checks (repo_full_name, pr_number, updated_at DESC);
 CREATE INDEX IF NOT EXISTS pr_checks_check_run_idx ON pr_checks (check_run_id) WHERE check_run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS pr_checks_running_idx ON pr_checks (updated_at) WHERE status = 'running';

@@ -4,7 +4,8 @@
  * Required app settings on GitHub (General → Permissions & events):
  *   Repository permissions: Metadata: read; Contents: read & write (commit
  *     takeoff.yaml and agent files); Pull requests: read & write (verdict
- *     comment); Checks: read & write (verdict check run).
+ *     comment); Checks: read & write (verdict check run); Deployments: read
+ *     (preview link in the verdict comment; optional).
  *   Subscribe to events: Push, Pull request, Check run, Check suite.
  *   The PR verdict (services/verdict) writes the comment and check run, and
  *   Check run / Check suite carry Re-run and Retry on the Takeoff check;

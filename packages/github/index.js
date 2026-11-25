@@ -299,11 +299,11 @@ function createClient({ token } = {}) {
    * with an environment_url), or null.
    */
   async function fetchPreviewUrl(owner, repo, sha) {
-    const res = await request(`/repos/${owner}/${repo}/deployments?sha=${enc(sha)}&per_page=10`);
+    const res = await request(`/repos/${owner}/${repo}/deployments?sha=${enc(sha)}&per_page=5`);
     const deployments = await res.json();
     if (!Array.isArray(deployments)) return null;
     for (const d of deployments) {
-      const sres = await request(`/repos/${owner}/${repo}/deployments/${d.id}/statuses?per_page=10`);
+      const sres = await request(`/repos/${owner}/${repo}/deployments/${d.id}/statuses?per_page=5`);
       const statuses = await sres.json();
       const hit = Array.isArray(statuses) && statuses.find((st) => st.state === 'success' && st.environment_url);
       if (hit) return hit.environment_url;

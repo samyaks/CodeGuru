@@ -2,6 +2,10 @@
 Plans trips for two people and splits the costs.
 </product>
 
+<product_agreements>
+  (none)
+</product_agreements>
+
 <touched_areas>
 <area id="billing" name="Billing & pricing">
 paths: src/billing/**, src/pages/checkout*

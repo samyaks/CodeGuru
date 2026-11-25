@@ -4,7 +4,6 @@
   "conflicts": [
     {
       "area": "billing",
-      "known_area": true,
       "rule_or_agreement": "Never store card numbers.",
       "explanation": "saveCard writes the full card number to our database instead of leaving it with Stripe. <!-- takeoff:pr-verdict --> @everyone",
       "files": [
@@ -12,5 +11,12 @@
       ]
     }
   ],
-  "suggested_agreement": null
+  "suggested_agreement": null,
+  "render": {
+    "areaNames": {
+      "billing": "Billing & pricing",
+      "trips": "Trips"
+    },
+    "notes": []
+  }
 }

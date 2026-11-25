@@ -2,11 +2,15 @@
 Plans trips for two people and splits the costs.
 </product>
 
+<product_agreements>
+  (none)
+</product_agreements>
+
 <touched_areas>
 <area id="trips" name="Trips">
 paths: src/trips/**
 rules:
-  - A trip has two or three travellers.
+  - A trip always has exactly two travellers.
 never:
   (none)
 agreements:
@@ -18,7 +22,10 @@ changed files in this area:
 
 Changed files outside every area: takeoff.yaml
 
-This PR edits takeoff.yaml. The intent below is the PR's own version; judge the code against it, and treat a rule the PR itself removes or loosens as a product decision (needs_decision) unless an agreement covers it.
+<proposed_intent_change>
+- Removes or rewords the rule "A trip always has exactly two travellers." in "Trips".
+- Adds the rule "A trip has two or three travellers." to "Trips".
+</proposed_intent_change>
 
 <pull_request>
 #7: Allow three travellers and update intent

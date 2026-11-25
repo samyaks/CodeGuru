@@ -34,6 +34,7 @@ const {
 } = require('./routes/v2/security-shares');
 const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
+const { recoverStalePrChecks } = require('./services/verdict/runner');
 const { waitlistRouter, eventsRouter } = require('./routes/telemetry');
 const { createRateLimit } = require('./lib/rate-limit');
 const { getDb, closeDb } = require('./lib/db');
@@ -276,6 +277,13 @@ async function start() {
   recoverStaleCommitReviews().catch((err) =>
     console.error('[startup] recoverStaleCommitReviews failed:', err.message)
   );
+
+  // PR verdict checks a restart left running (needs migration 029).
+  const sweepPrChecks = () => recoverStalePrChecks().catch((err) =>
+    console.error('[pr-checks] recoverStalePrChecks failed:', err.message)
+  );
+  sweepPrChecks();
+  setInterval(sweepPrChecks, 15 * 60 * 1000).unref();
 
   validateEnv();
 

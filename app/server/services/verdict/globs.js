@@ -2,77 +2,160 @@
 
 // Path globs from takeoff.yaml `areas[].paths`, matched against repo-relative
 // paths. Supports `**` (any number of directories), `*` and `?` (within one
-// segment), `{a,b}` alternatives and `[...]` classes. A pattern with no glob
-// characters also matches everything under it when it names a directory
-// ("app/billing" covers "app/billing/x.js"). A leading "./" or "/" is ignored.
+// segment), `{a,b}` alternatives and `[...]` / `[!...]` classes. A pattern with
+// no glob characters also matches everything under it when it names a
+// directory ("app/billing" covers "app/billing/x.js"). A leading "./" or "/"
+// is ignored.
+//
+// Patterns can come from the PR's own takeoff.yaml, so matching is done
+// segment by segment with dynamic programming (no regular expressions, no
+// backtracking): time is bounded by pattern length × path length.
 
+const MAX_PATTERN_LENGTH = 300;
+const MAX_BRACE_EXPANSIONS = 32;
+const CACHE_LIMIT = 500;
 const cache = new Map();
 
-function escapeRe(ch) {
-  return /[\\^$.*+?()[\]{}|/]/.test(ch) ? `\\${ch}` : ch;
-}
-
-function globToRegExp(glob) {
-  const key = String(glob);
-  if (cache.has(key)) return cache.get(key);
-  let g = key.trim().replace(/^\.\//, '').replace(/^\/+/, '');
-  if (g.endsWith('/')) g += '**';
-  const literal = !/[*?[{]/.test(g);
-  let re = '';
-  let inBraces = 0;
-  for (let i = 0; i < g.length; i += 1) {
-    const c = g[i];
-    if (c === '*') {
-      if (g[i + 1] === '*') {
-        const atStart = i === 0 || g[i - 1] === '/';
-        const atEnd = i + 2 === g.length || g[i + 2] === '/';
-        if (atStart && atEnd) {
-          // "**/" → zero or more directories; trailing "**" → anything.
-          if (i + 2 === g.length) re += '.*';
-          else { re += '(?:.*/)?'; i += 1; }
-          i += 1;
-          continue;
-        }
-        re += '[^/]*';
-        i += 1;
-        continue;
-      }
-      re += '[^/]*';
-    } else if (c === '?') {
-      re += '[^/]';
-    } else if (c === '[') {
-      const close = g.indexOf(']', i + 1);
-      if (close === -1) { re += '\\['; continue; }
-      let body = g.slice(i + 1, close);
-      if (body.startsWith('!')) body = `^${body.slice(1)}`;
-      re += `[${body.replace(/\\/g, '\\\\')}]`;
-      i = close;
-    } else if (c === '{') {
-      inBraces += 1;
-      re += '(?:';
-    } else if (c === '}' && inBraces) {
-      inBraces -= 1;
-      re += ')';
-    } else if (c === ',' && inBraces) {
-      re += '|';
+/** "src/{a,b}/x" → ["src/a/x", "src/b/x"]; one level of nesting at a time, capped. */
+function expandBraces(glob) {
+  const out = [];
+  const queue = [glob];
+  while (queue.length) {
+    const g = queue.shift();
+    const open = g.indexOf('{');
+    const close = open === -1 ? -1 : g.indexOf('}', open);
+    if (open === -1 || close === -1) {
+      out.push(g);
     } else {
-      re += escapeRe(c);
+      // innermost-last: take the last "{" before the first "}" so nesting expands inside out
+      const start = g.lastIndexOf('{', close);
+      for (const alt of g.slice(start + 1, close).split(',')) {
+        queue.push(g.slice(0, start) + alt + g.slice(close + 1));
+        if (out.length + queue.length > MAX_BRACE_EXPANSIONS) return null;
+      }
     }
   }
-  while (inBraces > 0) { re += ')'; inBraces -= 1; }
-  let out;
-  try {
-    out = new RegExp(literal ? `^${re}(?:/.*)?$` : `^${re}$`);
-  } catch {
-    out = /(?!)/; // a broken pattern matches nothing
-  }
-  cache.set(key, out);
   return out;
 }
 
+/** Tokens for one path segment: { lit } | { any } (*) | { one } (?) | { set, neg }. */
+function compileSegment(seg) {
+  const tokens = [];
+  for (let i = 0; i < seg.length; i += 1) {
+    const c = seg[i];
+    if (c === '*') {
+      if (tokens.length && tokens[tokens.length - 1].any) continue; // "**" inside a segment is "*"
+      tokens.push({ any: true });
+    } else if (c === '?') {
+      tokens.push({ one: true });
+    } else if (c === '[') {
+      const close = seg.indexOf(']', i + 2);
+      if (close === -1) { tokens.push({ lit: c }); continue; }
+      let body = seg.slice(i + 1, close);
+      const neg = body.startsWith('!') || body.startsWith('^');
+      if (neg) body = body.slice(1);
+      const ranges = [];
+      for (let j = 0; j < body.length; j += 1) {
+        if (body[j + 1] === '-' && j + 2 < body.length) { ranges.push([body[j], body[j + 2]]); j += 2; }
+        else ranges.push([body[j], body[j]]);
+      }
+      tokens.push({ set: ranges, neg });
+      i = close;
+    } else {
+      tokens.push({ lit: c });
+    }
+  }
+  return tokens;
+}
+
+function tokenMatches(t, ch) {
+  if (t.one) return true;
+  if (t.set) {
+    const hit = t.set.some(([a, b]) => ch >= a && ch <= b);
+    return t.neg ? !hit : hit;
+  }
+  return t.lit === ch;
+}
+
+/** Wildcard match of one segment, O(tokens × chars). */
+function segmentMatches(tokens, s) {
+  let prev = new Array(s.length + 1).fill(false);
+  prev[0] = true;
+  for (const t of tokens) {
+    const next = new Array(s.length + 1).fill(false);
+    if (t.any) {
+      let seen = false;
+      for (let j = 0; j <= s.length; j += 1) { seen = seen || prev[j]; next[j] = seen; }
+    } else {
+      for (let j = 1; j <= s.length; j += 1) next[j] = prev[j - 1] && tokenMatches(t, s[j - 1]);
+    }
+    prev = next;
+  }
+  return prev[s.length];
+}
+
+function compileOne(glob) {
+  let g = glob.trim().replace(/^\.\//, '').replace(/^\/+/, '');
+  if (g.endsWith('/')) g += '**';
+  const literal = !/[*?[]/.test(g);
+  const segs = [];
+  for (const part of g.split('/')) {
+    if (part === '') continue;
+    if (part === '**') {
+      if (segs.length && segs[segs.length - 1] === '**') continue; // collapse "**/**"
+      segs.push('**');
+    } else {
+      segs.push(compileSegment(part));
+    }
+  }
+  // "src/billing/**" needs something under src/billing; a plain "src/billing"
+  // matches that file or anything under that directory.
+  const plusTail = !literal && segs.length > 1 && segs[segs.length - 1] === '**';
+  if (literal) segs.push('**');
+  return { segs, plusTail };
+}
+
+/** Path segments × pattern segments, O(segs × path segments × segment cost). */
+function pathMatches({ segs, plusTail }, parts) {
+  let prev = new Array(parts.length + 1).fill(false);
+  prev[0] = true;
+  for (let si = 0; si < segs.length; si += 1) {
+    const seg = segs[si];
+    const next = new Array(parts.length + 1).fill(false);
+    if (seg === '**') {
+      const atLeastOne = plusTail && si === segs.length - 1;
+      let seen = false;
+      for (let j = 0; j <= parts.length; j += 1) {
+        if (atLeastOne) { next[j] = seen; seen = seen || prev[j]; } else { seen = seen || prev[j]; next[j] = seen; }
+      }
+    } else {
+      for (let j = 1; j <= parts.length; j += 1) next[j] = prev[j - 1] && segmentMatches(seg, parts[j - 1]);
+    }
+    prev = next;
+  }
+  return prev[parts.length];
+}
+
+function compile(glob) {
+  const key = String(glob);
+  if (cache.has(key)) return cache.get(key);
+  let compiled = [];
+  if (key.length <= MAX_PATTERN_LENGTH) {
+    const alts = expandBraces(key);
+    compiled = alts ? alts.map(compileOne) : [];
+  }
+  if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value);
+  cache.set(key, compiled);
+  return compiled;
+}
+
+function globMatches(glob, filePath) {
+  const parts = String(filePath || '').replace(/^\.\//, '').split('/').filter(Boolean);
+  return compile(glob).some((c) => pathMatches(c, parts));
+}
+
 function matchesAny(filePath, globs) {
-  const p = String(filePath || '').replace(/^\.\//, '');
-  return (Array.isArray(globs) ? globs : []).some((g) => typeof g === 'string' && globToRegExp(g).test(p));
+  return (Array.isArray(globs) ? globs : []).some((g) => typeof g === 'string' && globMatches(g, filePath));
 }
 
 /**
@@ -98,4 +181,4 @@ function touchedAreas(intent, paths) {
   return { touched, unmapped };
 }
 
-module.exports = { globToRegExp, matchesAny, touchedAreas };
+module.exports = { globMatches, matchesAny, touchedAreas, MAX_PATTERN_LENGTH };
