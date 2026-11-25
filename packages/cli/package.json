@@ -1,0 +1,18 @@
+{
+  "name": "@takeoff/cli",
+  "version": "0.1.0",
+  "description": "takeoff.yaml schema, validator, and agent-file generator",
+  "main": "lib/index.js",
+  "bin": {
+    "takeoff": "bin/takeoff.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  }
+}
