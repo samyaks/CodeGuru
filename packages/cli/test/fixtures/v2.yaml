@@ -1,0 +1,22 @@
+version: 2
+product:
+  name: Delta-V
+  summary: "Plain-language description of what the product does and for whom."
+areas:
+  - id: billing
+    name: Billing & pricing
+    paths: ["src/billing/**", "src/pages/checkout*"]
+    creators: ["samyak@example.com"]
+    rules:
+      - "Stripe holds all billing data; we store only Stripe IDs."
+    never:
+      - "Never store card numbers."
+    screens:
+      - { name: Checkout, route: /checkout }
+agreements:
+  - id: agr_2026_11_24_annual_plan
+    area: billing
+    text: "Offer an annual plan at 20% off monthly."
+    agreed_by: ["samyak@example.com", "saagar@example.com"]
+    agreed_on: 2026-11-24
+    source: "https://takeoff.app/p/abc/agreements/1"

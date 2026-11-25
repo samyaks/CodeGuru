@@ -1,0 +1,12 @@
+# an older, flatter file
+name: Delta-V
+description: Plans trips for two.
+rules:
+  - Keep pages fast.
+never:
+  - Never log tokens.
+areas:
+  - name: Billing & pricing
+    path: src/billing/**
+    rules: ["Stripe holds billing data."]
+colour: blue
