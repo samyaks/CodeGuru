@@ -2544,7 +2544,7 @@ const agreements = {
   /** Take an accepted agreement to commit it. Only one runner wins; a stuck run is taken again after 10 minutes. */
   async claimCommit(projectId, id) {
     const { rows } = await getDb().query(
-      `UPDATE agreements SET commit_state = 'committing', commit_attempted_at = now(), commit_error = NULL
+      `UPDATE agreements SET commit_state = 'committing', commit_attempted_at = date_trunc('milliseconds', now()), commit_error = NULL
         WHERE project_id = $2 AND id = $1 AND status = 'accepted'
           AND (commit_state IN ('none', 'waiting_for_write', 'failed')
             OR (commit_state = 'committing' AND commit_attempted_at < now() - ${AGREEMENT_COMMIT_STALE}))
@@ -2560,14 +2560,19 @@ const agreements = {
     );
     return rows[0] || null;
   },
-  /** Record the commit outcome. With `from`, only while the state is one of those. */
-  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId, from = null }) {
+  /**
+   * Record the commit outcome. With `from`, only while the state is one of
+   * those; with `claimedAt` (the claim's commit_attempted_at, ms precision),
+   * only while that claim is the current one.
+   */
+  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId, from = null, claimedAt = null }) {
     const { rows } = await getDb().query(
       `UPDATE agreements SET commit_state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
           commit_pr_url = COALESCE($5, commit_pr_url), commit_error = $6,
           recommendation_id = COALESCE($7, recommendation_id)
-        WHERE id = $1 AND ($8::text[] IS NULL OR commit_state = ANY($8::text[])) RETURNING *`,
-      [id, state, sha, url, prUrl, error, recommendationId ?? null, from]
+        WHERE id = $1 AND ($8::text[] IS NULL OR commit_state = ANY($8::text[]))
+          AND ($9::timestamptz IS NULL OR commit_attempted_at = $9::timestamptz) RETURNING *`,
+      [id, state, sha, url, prUrl, error, recommendationId ?? null, from, claimedAt]
     );
     return rows[0] || null;
   },

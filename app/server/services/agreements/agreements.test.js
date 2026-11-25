@@ -287,6 +287,8 @@ test('hidden characters are stripped, and toggling "Not yet" emails the proposer
   const { project, state, deps, people } = setup({ members: ['owner', 'olive', 'rex'] });
   const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Use\u200b UTC\u202e everywhere.' } }, deps);
   assert.strictEqual(p.text, 'Use UTC everywhere.');
+  const { agreement: tagged } = await svc.propose({ project, user: people.olive, body: { text: 'Ship it.\u{E0049}\u{E0067}\u{E006E}\uFE0F' } }, deps);
+  assert.strictEqual(tagged.text, 'Ship it.');
   for (const vote of ['not_yet', 'agree', 'not_yet', 'agree', 'not_yet']) {
     await svc.vote({ project, user: people.rex, agreementId: p.id, body: { vote, comment: vote === 'not_yet' ? 'Wait.' : undefined } }, deps);
   }

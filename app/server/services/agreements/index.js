@@ -26,7 +26,10 @@ const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 // Control, zero-width and direction-changing characters: they can hide what
 // an agreement says from the people voting on it (and from agents reading it).
 const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
-const clean = (t) => (typeof t === 'string' ? t.replace(INVISIBLE, '').trim() : '');
+// Tag characters (used to smuggle hidden text to AI models), variation
+// selectors and other invisible format characters.
+const INVISIBLE_ASTRAL = /[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\uFE00-\uFE0F\u034F\uFFF9-\uFFFB]/gu;
+const clean = (t) => (typeof t === 'string' ? t.replace(INVISIBLE, '').replace(INVISIBLE_ASTRAL, '').trim() : '');
 const oneLine = (t) => clean(t).replace(/\s+/g, ' ');
 /** A display name fit for an email body: one line, short. */
 const nameOf = (user) => oneLine(displayName(user) || '').slice(0, 80) || null;
@@ -200,7 +203,7 @@ async function startCommit(project, agreement, user, deps) {
     );
     if (out.status === 'recommended') {
       await deps.agreements.setCommit(agreement.id, {
-        state: 'waiting_for_write', recommendationId: out.recommendation?.id || null, from: ['none', 'failed', 'waiting_for_write', 'committing'],
+        state: 'waiting_for_write', recommendationId: out.recommendation?.id || null, from: ['none', 'failed', 'waiting_for_write'],
       });
     }
   } catch (err) {
@@ -359,7 +362,8 @@ async function vote({ project, user, agreementId, body = {} }, deps = defaultDep
     if (proposer) {
       await notifyMembers(project, 'agreement_not_yet', agreement, {
         to: [proposer],
-        dedupeKey: `not_yet:${agreement.id}:${user.id}`,
+        // At most one an hour per person per proposal, however often they switch.
+        dedupeKey: `not_yet:${agreement.id}:${user.id}:${Math.floor(deps.now().getTime() / 3600000)}`,
         subject: `Not yet: ${quote(agreement.text)}`,
         body: `${nameOf(user) || 'A teammate'} said "Not yet" to your proposal:\n\n"${agreement.text}"\n\nTheir comment: ${comment}`,
       }, deps);

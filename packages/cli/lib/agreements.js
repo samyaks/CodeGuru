@@ -43,6 +43,13 @@ function agreementId(date, text, suffix) {
   return id;
 }
 
+/** Length of `s` without trailing characters matching `re` (a linear scan, no regex backtracking). */
+function trimEndLength(s, re) {
+  let i = s.length;
+  while (i > 0 && re.test(s[i - 1])) i -= 1;
+  return i;
+}
+
 /** `entry` as a block list item, every line indented by `indent`. */
 function renderItem(entry, indent, eol) {
   const body = YAML.stringify([entry], { lineWidth: 0, indentSeq: true }).replace(/\n+$/, '');
@@ -75,7 +82,8 @@ function appendAsText(text, entry) {
       const nl = text.indexOf('\n', end);
       const lineRest = (nl === -1 ? text.slice(end) : text.slice(end, nl)).replace(/\r$/, ''); // e.g. ` # none yet`
       const after = nl === -1 ? eol : text.slice(nl).replace(/^\r?\n/, eol);
-      out = `${text.slice(0, start).replace(/[ \t]+$/, '')}${lineRest}${eol}${renderItem(entry, keyIndent, eol)}${after}`;
+      const before = text.slice(0, start);
+      out = `${before.slice(0, trimEndLength(before, /[ \t]/))}${lineRest}${eol}${renderItem(entry, keyIndent, eol)}${after}`;
     } else {
       const first = list.items[0];
       const firstStart = first?.range?.[0];
@@ -87,15 +95,19 @@ function appendAsText(text, entry) {
       const end = last?.range?.[1];
       if (typeof end !== 'number') return null;
       const head = text.slice(0, end);
-      const ws = /\s*$/.exec(head);
-      out = `${head.slice(0, ws.index)}${eol}${renderItem(entry, dash[1], eol)}${ws[0]}${text.slice(end)}`;
+      const cut = trimEndLength(head, /\s/);
+      out = `${head.slice(0, cut)}${eol}${renderItem(entry, dash[1], eol)}${head.slice(cut)}${text.slice(end)}`;
     }
   }
   // Only trust the edit if it means exactly "the old file plus this entry".
-  const parsed = YAML.parse(out);
-  const want = YAML.parse(text) || {};
-  want.agreements = [...(Array.isArray(want.agreements) ? want.agreements : []), entry];
-  return isDeepStrictEqual(parsed, want) ? out : null;
+  try {
+    const parsed = YAML.parse(out);
+    const want = YAML.parse(text) || {};
+    want.agreements = [...(Array.isArray(want.agreements) ? want.agreements : []), entry];
+    return isDeepStrictEqual(parsed, want) ? out : null;
+  } catch {
+    return null; // the edit broke the file: re-serialize instead
+  }
 }
 
 /** Fallback: re-serialize the document (comments kept, layout may change). */

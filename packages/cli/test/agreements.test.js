@@ -79,3 +79,20 @@ test('adding an agreement keeps the file layout: unindented lists, unpadded flow
   assert.ok(text.startsWith(before), text);
   assert.match(text, /\nagreements:\n- id: agr_2026_11_25_ship_dark_mode_ab12\n/);
 });
+
+test('awkward files still get the agreement: a document end marker, a flow root, a long run of spaces', () => {
+  const e = agreement({ area: undefined, agreed_by: ['sam@acme.test'] });
+  for (const src of [
+    'version: 2\nproduct:\n  name: B\n  summary: S\n...\n',
+    '{version: 2, product: {name: B, summary: S}}\n',
+  ]) {
+    const { data } = addAgreement(src, e);
+    assert.strictEqual(data.agreements[0].id, e.id, src);
+  }
+  const spaces = ' '.repeat(200000);
+  const big = `version: 2\nproduct:\n  name: B\n  summary: "x${spaces}y"\nagreements:\n  - id: agr_2026_11_24_a_b1\n    text: "A${spaces}B"\n    agreed_by: [a@b.co]\n    agreed_on: 2026-11-24\n`;
+  const t0 = Date.now();
+  addAgreement(big, e);
+  addAgreement(big.replace(/agreements:[\s\S]*$/, 'agreements: []\n'), e);
+  assert.ok(Date.now() - t0 < 3000, `took ${Date.now() - t0} ms`);
+});

@@ -117,8 +117,9 @@ function setup({ repoOpts, emailEnabled = true, members = ['owner', 'olive'] } =
       a.commit_state = 'committing'; a.commit_error = null; a.commit_attempted_at = iso(); return a;
     },
     async setAgreedBy(pid, id, emails) { const a = state.agreements.find((x) => x.project_id === pid && x.id === id && x.status === 'accepted'); if (!a) return null; a.agreed_by_emails = emails; return a; },
-    async setCommit(id, { state: s, sha = null, url = null, prUrl = null, error = null, recommendationId = null, from = null }) {
-      const a = state.agreements.find((x) => x.id === id && (!from || from.includes(x.commit_state))); if (!a) return null;
+    async setCommit(id, { state: s, sha = null, url = null, prUrl = null, error = null, recommendationId = null, from = null, claimedAt = null }) {
+      const a = state.agreements.find((x) => x.id === id && (!from || from.includes(x.commit_state))
+        && (!claimedAt || new Date(x.commit_attempted_at).getTime() === new Date(claimedAt).getTime())); if (!a) return null;
       Object.assign(a, { commit_state: s, commit_sha: sha ?? a.commit_sha, commit_url: url ?? a.commit_url, commit_pr_url: prUrl ?? a.commit_pr_url, commit_error: error, recommendation_id: recommendationId ?? a.recommendation_id }); return a;
     },
   };

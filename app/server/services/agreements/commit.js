@@ -217,13 +217,15 @@ async function commitAgreement({ project, agreementId }, deps) {
         }
       }
     }
-    await deps.agreements.setCommit(agreement.id, { state: out.state, sha: out.sha, url: out.url, prUrl: out.prUrl || null, from: ['committing'] });
+    // Lands only while this run still holds the claim (a stale takeover wins).
+    const claim = { from: ['committing'], claimedAt: agreement.commit_attempted_at || null };
+    await deps.agreements.setCommit(agreement.id, { state: out.state, sha: out.sha, url: out.url, prUrl: out.prUrl || null, ...claim });
     if (out.skipped?.length) console.warn(`[agreements] ${agreement.id}: left ${out.skipped.join(', ')} as they are (a link, not a plain file, or too big)`);
     if (deps.onCommitted) await deps.onCommitted(project.id);
     return out;
   } catch (err) {
     const message = friendly(err, project);
-    await deps.agreements.setCommit(agreement.id, { state: 'failed', error: message, from: ['committing'] }).catch(() => {});
+    await deps.agreements.setCommit(agreement.id, { state: 'failed', error: message, from: ['committing'], claimedAt: agreement.commit_attempted_at || null }).catch(() => {});
     throw new AppError(message, 502, err instanceof AgreementError ? `AGREEMENT_${String(err.code).toUpperCase()}` : 'COMMIT_FAILED');
   }
 }

@@ -52,7 +52,9 @@ function CommitStatus({ a, busy, onRetry }: { a: Agreement; busy: boolean; onRet
     case 'waiting_for_write':
       return retry ? (
         <span className={styles.actions}>
-          <span className={cx('type-small', styles.muted)}>The request for someone with write access was dismissed.</span>
+          <span className={cx('type-small', styles.muted)}>
+            {c.recommendationId ? 'The request for someone with write access was dismissed.' : 'Not in takeoff.yaml yet.'}
+          </span>
           {retry}
         </span>
       ) : <span className={cx('type-small', styles.muted)}>Waiting for someone with write access to confirm it under “Who’s on this project”.</span>;
@@ -109,9 +111,15 @@ export function AgreementsSection({ projectId }: { projectId: string }) {
 
   // Confirming a recommendation under the team list commits an agreement.
   useEffect(() => {
-    const onChange = () => { void load(); };
+    // Removing someone can complete a proposal; that settles just after, so look twice.
+    let later: number | undefined;
+    const onChange = () => {
+      void load();
+      window.clearTimeout(later);
+      later = window.setTimeout(() => { void load(); }, 3000);
+    };
     window.addEventListener(TEAM_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(TEAM_CHANGED_EVENT, onChange);
+    return () => { window.removeEventListener(TEAM_CHANGED_EVENT, onChange); window.clearTimeout(later); };
   }, [load]);
 
   // While a commit is running, look again every few seconds.

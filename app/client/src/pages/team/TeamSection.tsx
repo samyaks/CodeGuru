@@ -15,7 +15,7 @@ import {
 } from '../../services/teamApi';
 import styles from './Team.module.css';
 
-/** Fired after a recommendation is confirmed or dismissed (AgreementsSection listens). */
+/** Fired after a recommendation is confirmed or dismissed, or a member removed (AgreementsSection listens). */
 export const TEAM_CHANGED_EVENT = 'takeoff:team-changed';
 
 const LABEL_TEXT: Record<MemberLabel, string> = { creator: 'Creator', builder: 'Builder' };
@@ -175,6 +175,7 @@ export function TeamSection({ projectId }: { projectId: string }) {
                             await removeMember(projectId, m.userId);
                             if (isYou) { window.location.href = '/dashboard'; return; }
                             await load();
+                            window.dispatchEvent(new Event(TEAM_CHANGED_EVENT));
                           });
                         }}
                       >
