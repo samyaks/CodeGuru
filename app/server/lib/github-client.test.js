@@ -51,3 +51,21 @@ test('per-call headers merge with auth instead of replacing it', async () => {
   assert.strictEqual(seen[0].headers.Accept, 'application/vnd.github.v3.diff');
   assert.strictEqual(seen[0].headers.Authorization, 'Bearer server-token');
 });
+
+test('a sha or branch that walks out of the repo is refused before any request', async () => {
+  const seen = captureFetch();
+  await assert.rejects(() => github.fetchCommitDetail('acme', 'a', '../../b/commits/main'), (err) => err.status === 400);
+  await assert.rejects(() => github.fetchRepoTree('acme', 'a', '..%2F..%2Fb'), (err) => err.status === 400);
+  await assert.rejects(() => github.fetchFileContent('acme', 'a', 'src/../../../b/contents/x'), (err) => err.status === 400);
+  assert.strictEqual(seen.length, 0);
+  await github.fetchRepoTree('acme', 'a', 'feature/x');
+  assert.strictEqual(seen.length, 1);
+  assert.match(seen[0].url, /\/repos\/acme\/a\/git\/trees\/feature\/x\?recursive=1$/);
+});
+
+test('query values are encoded, so a branch can’t add parameters', async () => {
+  const seen = captureFetch();
+  global.fetch = (orig => async (url, opts) => { const r = await orig(url, opts); r.json = async () => []; return r; })(global.fetch);
+  await github.fetchCommits('acme', 'a', { branch: 'main&per_page=1' });
+  assert.match(seen[0].url, /sha=main%26per_page%3D1&per_page=50$/);
+});

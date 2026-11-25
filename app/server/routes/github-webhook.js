@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
+const { getGithubApp } = require('../lib/github-app');
 
 // Two senders share this endpoint:
 //   - per-repo hooks (services/github-webhook-manager.js), signed with
@@ -14,7 +15,7 @@ const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 // only when the App signed the delivery. Push payloads are otherwise the same.
 
 const ZERO_SHA = '0000000000000000000000000000000000000000';
-const INSTALLATION_EVENTS = new Set(['installation', 'installation_repositories']);
+const INSTALLATION_EVENTS = new Set(['installation', 'installation_repositories', 'github_app_authorization']);
 
 function defaultDeps() {
   return {
@@ -25,6 +26,7 @@ function defaultDeps() {
     processedPushes,
     runCommitReviewJobSafe,
     processPushV2,
+    forgetInstallation: (id) => getGithubApp().forgetInstallation(id),
     secrets: () => ({
       appSecret: process.env.GITHUB_APP_WEBHOOK_SECRET || null,
       repoHookSecret: process.env.GITHUB_WEBHOOK_SECRET || null,
@@ -274,20 +276,36 @@ async function handlePush({ payload, deliveryId, source, installationId }, deps)
   }
 }
 
-// Revoke what an uninstall, suspension or repo removal takes away: users'
-// grants through that installation, and projects reading through it. Only
-// deliveries the App signed are trusted to name an installation. Everything is
-// archived too.
+// Revoke what an uninstall, repo removal or revoked authorization takes away:
+// users' grants and projects reading through the installation. Only
+// deliveries the App signed are trusted. A suspension keeps grants (minting
+// fails while suspended, and an unsuspend needs nothing restored) but drops
+// cached tokens. Everything is archived too.
 async function revokeAccess({ event, payload }, deps) {
+  const forget = (id) => { try { if (deps.forgetInstallation) deps.forgetInstallation(id); } catch { /* best effort */ } };
+  if (event === 'github_app_authorization') {
+    const githubUserId = Number(payload.sender?.id);
+    if (payload.action !== 'revoked' || !githubUserId) return;
+    const grants = await deps.githubRepoAccess.deleteForGithubUser(githubUserId);
+    console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'authorization_revoked', githubUserId, grants }));
+    return;
+  }
   const installationId = Number(payload.installation?.id);
   if (!installationId) return;
-  if (event === 'installation' && (payload.action === 'deleted' || payload.action === 'suspend')) {
+  if (event === 'installation' && payload.action === 'suspend') {
+    forget(installationId);
+    console.log(JSON.stringify({ event: 'github_app_suspended', installationId }));
+    return;
+  }
+  if (event === 'installation' && payload.action === 'deleted') {
+    forget(installationId);
     const grants = await deps.githubRepoAccess.deleteForInstallation(installationId);
     const projects = await deps.deployments.clearInstallation(installationId);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: payload.action, installationId, grants, projects }));
     return;
   }
   if (event === 'installation_repositories' && payload.action === 'removed') {
+    forget(installationId);
     const removed = Array.isArray(payload.repositories_removed) ? payload.repositories_removed : [];
     const ids = removed.map((r) => Number(r.id)).filter(Number.isFinite);
     const fullNames = removed.map((r) => r.full_name).filter(Boolean);
@@ -297,8 +315,8 @@ async function revokeAccess({ event, payload }, deps) {
   }
 }
 
-async function handleInstallationEvent({ event, payload, deliveryId, source }, deps) {
-  if (source === 'app') {
+async function handleInstallationEvent({ event, payload, deliveryId, source, signedByApp }, deps) {
+  if (signedByApp && (source === 'app' || event === 'github_app_authorization')) {
     try {
       await revokeAccess({ event, payload }, deps);
     } catch (err) {
@@ -362,7 +380,7 @@ function createWebhookHandler(deps = defaultDeps()) {
     if (INSTALLATION_EVENTS.has(event)) {
       res.status(200).json({ ok: true, logged: event });
       try {
-        await handleInstallationEvent({ event, payload, deliveryId, source }, deps);
+        await handleInstallationEvent({ event, payload, deliveryId, source, signedByApp: sender === 'app' || sender === 'unsigned' }, deps);
       } catch (err) {
         console.error(`github webhook ${event} handling:`, err.message);
       }

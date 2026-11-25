@@ -19,12 +19,24 @@ CREATE TABLE IF NOT EXISTS github_repo_access (
   repo_full_name TEXT NOT NULL,
   private BOOLEAN NOT NULL DEFAULT false,
   account_login TEXT,
+  -- The GitHub account that authorized the listing, so a revoked
+  -- authorization (github_app_authorization: revoked) drops its grants.
+  github_user_id BIGINT,
   granted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, repo_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_github_repo_access_github_user
+  ON github_repo_access (github_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_github_repo_access_user_repo
   ON github_repo_access (user_id, LOWER(repo_full_name));
 
 ALTER TABLE deployments
   ADD COLUMN IF NOT EXISTS github_installation_id BIGINT;
+
+-- deployments.repo_private: whether the repo was private at the last scan.
+-- The unauthenticated public story (/api/story/:slug) hides private repos.
+-- NULL means scanned before this column existed.
+ALTER TABLE deployments
+  ADD COLUMN IF NOT EXISTS repo_private BOOLEAN;

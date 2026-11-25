@@ -15,7 +15,27 @@ function headers(token) {
   return h;
 }
 
+/**
+ * Refuses a path with a `.` or `..` segment (raw or percent-encoded). Callers
+ * splice route params such as a sha or branch into `/repos/:owner/:repo/...`;
+ * without this, `../../other-repo/...` would reach a different repo with the
+ * same credentials (fetch collapses dot segments).
+ */
+function assertSafePath(urlPath) {
+  const pathPart = String(urlPath).replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+  for (const raw of pathPart.split('/')) {
+    let seg = raw;
+    try { seg = decodeURIComponent(raw); } catch { /* keep raw */ }
+    if (seg === '.' || seg === '..' || seg.includes('/') || seg.includes('\\')) {
+      const err = new Error(`Refusing GitHub API path with a traversal segment: ${pathPart}`);
+      err.status = 400;
+      throw err;
+    }
+  }
+}
+
 async function githubFetch(urlPath, opts = {}) {
+  assertSafePath(urlPath);
   const { token, ...fetchOpts } = opts;
   const url = urlPath.startsWith('http') ? urlPath : `${GITHUB_API}${urlPath}`;
   const res = await fetch(url, { ...fetchOpts, headers: { ...headers(token), ...fetchOpts.headers } });
@@ -61,11 +81,22 @@ function parsePRUrl(prUrl) {
  * GitHub App installation token for private repos). `token` may also be an
  * async getter, so short-lived tokens are re-resolved on every request.
  */
-function createClient({ token } = {}) {
-  const request = async (urlPath, opts = {}) => githubFetch(urlPath, {
-    ...opts,
-    token: typeof token === 'function' ? await token() : token,
-  });
+function createClient({ token, onUnauthorized } = {}) {
+  const resolveToken = async () => (typeof token === 'function' ? token() : token);
+  const request = async (urlPath, opts = {}) => {
+    try {
+      return await githubFetch(urlPath, { ...opts, token: await resolveToken() });
+    } catch (err) {
+      // A cached token that GitHub no longer accepts (e.g. the installation
+      // was just removed): drop it and try once more with a fresh one.
+      if (err && err.status === 401 && onUnauthorized) {
+        await onUnauthorized();
+        return githubFetch(urlPath, { ...opts, token: await resolveToken() });
+      }
+      throw err;
+    }
+  };
+  const q = (v) => encodeURIComponent(String(v));
 
   async function fetchPullRequest(owner, repo, prNumber) {
     const res = await request(`/repos/${owner}/${repo}/pulls/${prNumber}`);
@@ -109,7 +140,7 @@ function createClient({ token } = {}) {
   }
 
   async function fetchFileContent(owner, repo, filePath, ref) {
-    const query = ref ? `?ref=${ref}` : '';
+    const query = ref ? `?ref=${q(ref)}` : '';
     const res = await request(`/repos/${owner}/${repo}/contents/${filePath}${query}`);
     const data = await res.json();
 
@@ -146,14 +177,14 @@ function createClient({ token } = {}) {
 
   async function fetchRepoPulls(owner, repo, { state = 'open', page = 1, perPage = 20 } = {}) {
     const res = await request(
-      `/repos/${owner}/${repo}/pulls?state=${state}&sort=updated&direction=desc&per_page=${perPage}&page=${page}`
+      `/repos/${owner}/${repo}/pulls?state=${q(state)}&sort=updated&direction=desc&per_page=${perPage}&page=${page}`
     );
     return res.json();
   }
 
   async function fetchCommits(owner, repo, { branch = 'main', perPage = 50, since = null } = {}) {
-    let url = `/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}`;
-    if (since) url += `&since=${since}`;
+    let url = `/repos/${owner}/${repo}/commits?sha=${q(branch)}&per_page=${perPage}`;
+    if (since) url += `&since=${q(since)}`;
 
     const res = await request(url);
     const commits = await res.json();

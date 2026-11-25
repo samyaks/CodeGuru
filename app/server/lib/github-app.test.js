@@ -104,6 +104,7 @@ test('listUserGrants paginates installations and their repositories', async () =
     assert.strictEqual(opts.headers.Authorization, 'Bearer user-token');
     const u = new URL(url);
     const page = Number(u.searchParams.get('page'));
+    if (u.pathname === '/user') return jsonResponse({ id: 555, login: 'octo' });
     if (u.pathname === '/user/installations') {
       return jsonResponse({ total_count: 1, installations: [{ id: 9, account: { login: 'acme' } }] });
     }
@@ -116,7 +117,7 @@ test('listUserGrants paginates installations and their repositories', async () =
   const grants = await app.listUserGrants('user-token');
   assert.strictEqual(grants.length, 130);
   assert.deepStrictEqual(grants[0], {
-    installationId: 9, accountLogin: 'acme', repoId: 1, repoFullName: 'acme/r1', private: true,
+    installationId: 9, accountLogin: 'acme', repoId: 1, repoFullName: 'acme/r1', private: true, githubUserId: 555,
   });
   assert.strictEqual(calls.filter((c) => c.includes('/repositories')).length, 2);
 });
@@ -145,4 +146,51 @@ test('a 404 or 403 minting an installation token marks the installation as gone'
   }
   const flaky = createGithubApp(CONFIG, { fetchImpl: async () => jsonResponse({ message: 'boom' }, 500) });
   await assert.rejects(() => flaky.getInstallationToken(77), (err) => !err.installationGone);
+});
+
+test('installation tokens are scoped to one repo, read-only, and cached per scope', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return jsonResponse({ token: `tok-${bodies.length}`, expires_at: new Date(Date.now() + 3600e3).toISOString() });
+  };
+  const app = createGithubApp(CONFIG, { fetchImpl });
+  assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-1');
+  assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-1');
+  assert.strictEqual(await app.getInstallationToken(77, { repo: 'api' }), 'tok-2');
+  assert.deepStrictEqual(bodies[0], { repositories: ['web'], permissions: { contents: 'read', metadata: 'read' } });
+  assert.deepStrictEqual(bodies[1].repositories, ['api']);
+
+  app.forgetInstallation(77);
+  assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-3');
+});
+
+test('a client whose cached token is rejected mints a fresh one and retries once', async () => {
+  let mints = 0;
+  let dataCalls = 0;
+  const realFetch = global.fetch;
+  const fetchImpl = async () => {
+    mints += 1;
+    return jsonResponse({ token: `tok-${mints}`, expires_at: new Date(Date.now() + 3600e3).toISOString() });
+  };
+  global.fetch = async (url, opts) => {
+    dataCalls += 1;
+    const ok = opts.headers.Authorization === 'Bearer tok-2';
+    return {
+      ok,
+      status: ok ? 200 : 401,
+      headers: { get: () => null },
+      json: async () => ({ private: true }),
+      text: async () => 'Bad credentials',
+    };
+  };
+  try {
+    const app = createGithubApp(CONFIG, { fetchImpl });
+    const client = app.clientForInstallation(77, { repo: 'web' });
+    assert.deepStrictEqual(await client.fetchRepoMeta('acme', 'web'), { private: true });
+    assert.strictEqual(mints, 2);
+    assert.strictEqual(dataCalls, 2);
+  } finally {
+    global.fetch = realFetch;
+  }
 });

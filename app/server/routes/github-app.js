@@ -90,26 +90,25 @@ router.get('/callback', callbackRateLimit, asyncHandler(async (req, res) => {
   res.clearCookie(STATE_COOKIE, { path: '/' });
   const back = (status) => res.redirect(`${base}${withStatus(saved?.returnTo || '/dashboard', status)}`);
 
-  // A state we issued must come back intact. Installs started from GitHub's
-  // own app page carry no state; for those the OAuth code proves the GitHub
-  // identity and the Takeoff session proves ours, and the worst a forged
-  // redirect can do is grant the victim access to the forger's repos.
+  // A state we issued must come back intact.
   if (typeof state === 'string' && state && (!saved || saved.nonce !== state)) return back('state_mismatch');
   if (!req.user) return back('signin_required');
   // An org member asked an org owner to install; nothing to sync until approved.
   if (setupAction === 'request') return back('requested');
+  // Installs started from GitHub's own app page carry no state, and a forged
+  // link could carry someone else's code. Never use a stateless code: start
+  // our own authorize flow, which issues state (GitHub skips the consent
+  // screen for an app the user already authorized).
+  if (!state) return res.redirect(`${req.baseUrl}/authorize`);
   if (typeof code !== 'string' || !code) return back('missing_code');
 
   try {
     const app = getGithubApp();
     const userToken = await app.exchangeUserCode(code);
     const grants = await app.listUserGrants(userToken);
-    // A callback that carries our state proves this browser started the flow,
-    // so its listing replaces the user's grants (dropping revoked ones). A
-    // stateless one (installs begun on GitHub's own page) could be a forged
-    // link carrying someone else's code, so it may only add grants.
-    if (state) await githubRepoAccess.replaceForUser(req.user.id, grants);
-    else await githubRepoAccess.mergeForUser(req.user.id, grants);
+    // The state proves this browser started the flow, so the listing replaces
+    // the user's grants (dropping revoked ones).
+    await githubRepoAccess.replaceForUser(req.user.id, grants);
     console.log(JSON.stringify({
       event: 'github_app_connected',
       userId: req.user.id,
