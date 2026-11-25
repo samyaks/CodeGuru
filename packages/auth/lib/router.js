@@ -50,7 +50,8 @@ function createAuthRouter(config) {
   // OAuth callback — GET /auth/callback
   router.get('/auth/callback', async (req, res, next) => {
     const code = req.query.code;
-    console.log(`[Auth] /auth/callback hit — code=${code ? code.substring(0, 10) + '...' : 'MISSING'}, query=${JSON.stringify(req.query)}`);
+    // The query can carry next=/invite/<token> (an invite secret): log its keys only.
+    console.log(`[Auth] /auth/callback hit — code=${code ? 'present' : 'MISSING'}, query keys=${Object.keys(req.query).join(',') || 'none'}`);
 
     if (!code) {
       console.log('[Auth] No code param — falling through to SPA for hash-based auth');

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { safeNext, takeAfterSignIn } from '../lib/safe-next';
 
 export default function AuthCallback() {
   const [error, setError] = useState<string | null>(null);
@@ -11,9 +12,22 @@ export default function AuthCallback() {
 
     const queryParams = new URLSearchParams(window.location.search);
     const code = queryParams.get('code');
-    const authError = queryParams.get('error_description') || queryParams.get('error');
+    // An invite's magic link carries ?next=/invite/...; a GitHub sign-in
+    // started from an invite page remembers it in sessionStorage. Always take
+    // the remembered one, so it can't redirect a later sign-in.
+    const remembered = takeAfterSignIn();
+    const next = safeNext(queryParams.get('next')) || remembered || '/dashboard';
+    // Supabase puts errors in the query or, for email links, in the hash
+    // (an expired or already-used link: error_code=otp_expired).
+    const authError = queryParams.get('error_description') || queryParams.get('error')
+      || params.get('error_description') || params.get('error');
 
     if (authError) {
+      // From an invite, go back to it: the page can send a fresh sign-in link.
+      if (next.startsWith('/invite/')) {
+        window.location.replace(`${next.split(/[?#]/)[0]}?signin=failed`);
+        return;
+      }
       setError(authError);
       return;
     }
@@ -28,7 +42,7 @@ export default function AuthCallback() {
       })
         .then((res) => {
           if (!res.ok) throw new Error('Failed to set session');
-          window.location.href = '/dashboard';
+          window.location.href = next;
         })
         .catch(() => setError('Failed to complete sign in. Please try again.'));
       return;

@@ -28,7 +28,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { recordServerEvent } = require('../lib/telemetry');
 const { seedFromAnalysis } = require('../lib/auto-entries');
-const { checkProjectAccess } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
 const { buildTakeoffCostPlan } = require('../lib/cost-budget');
 const { toCommitSnapshot } = require('../services/dashboard-cards');
@@ -952,7 +952,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
   checkProjectAccess(project, req);
 
-  res.json(project);
+  res.json(projectForViewer(project, req));
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
@@ -1013,7 +1013,7 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   // triggerReanalyzeForProject throws AppError.{badRequest,conflict} for the
   // same gates as the old inline body; asyncHandler propagates them to the
@@ -1113,7 +1113,7 @@ router.get('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const vars = project.env_vars && typeof project.env_vars === 'object' ? project.env_vars : {};
   res.json({ vars });
@@ -1125,7 +1125,7 @@ router.post('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const { vars } = req.body;
   if (!vars || typeof vars !== 'object') throw AppError.badRequest('vars must be an object');
@@ -1198,7 +1198,7 @@ router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => 
 router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   await suggestions.deleteByProjectId(req.params.id);
   await deployments.update(req.params.id, { suggestions_count: 0 });

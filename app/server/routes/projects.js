@@ -6,7 +6,7 @@ const { clientForProject } = require('../services/github-access');
 const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../services/github-webhook-manager');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
-const { checkProjectAccess } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { listDashboardCards } = require('../services/dashboard-cards');
 
 const router = express.Router();
@@ -46,7 +46,7 @@ router.get('/:id', readLimit, asyncHandler(async (req, res) => {
   ]);
 
   res.json({
-    ...project,
+    ...projectForViewer(project, req),
     entries,
     context_files: analysisRow?.context_files ?? null,
     completion_pct: analysisRow?.completion_pct ?? null,
@@ -193,7 +193,7 @@ router.post('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) =>
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   if (!project.owner || !project.repo || project.repo_url?.startsWith('local://')) {
     throw AppError.badRequest('Webhook connect is only available for GitHub-linked projects');
@@ -215,7 +215,7 @@ router.delete('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) 
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const userToken = req.cookies?.['gh-provider-token'] || null;
   const result = await disconnectWebhook({
@@ -235,7 +235,7 @@ router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   if (project.railway_project_id) {
     try {

@@ -97,3 +97,9 @@ Postgres, not ANSI SQL.
   per (repo, PR, head sha): verdict, the parsed result, the one Takeoff comment
   and the check run. `services/verdict/runner.js` claims the row first, so a
   duplicate delivery doesn't pay for a second model call.
+- `031_project_members.sql` — Takeoff projects, members, invites (Milestone 2).
+  `project_members` (owner stays `deployments.user_id`; labels `creator` /
+  `builder` never gate access), `project_invites` (by email or GitHub login;
+  only a hash of the token is stored), `recommendations` (a committing action
+  from a member without GitHub write access, confirmed by one who has it) and
+  `user_github_links` (the GitHub account each user connected).

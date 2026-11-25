@@ -355,6 +355,17 @@ const deployments = {
     const { rows } = await getDb().query('SELECT * FROM deployments WHERE slug = $1', [slug]);
     return rows[0] || null;
   },
+  /** Projects `userId` owns or is a member of, newest first. */
+  async findByMember(userId, { limit = 20, offset = 0 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT d.* FROM deployments d
+        WHERE d.user_id = $1
+           OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = d.id AND m.user_id = $1)
+        ORDER BY d.created_at DESC LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+    return rows;
+  },
   async findByUserId(userId, { limit = 20, offset = 0 } = {}) {
     const { rows } = await getDb().query(
       'SELECT * FROM deployments WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
@@ -2264,6 +2275,252 @@ const processedPushes = {
   },
 };
 
+// ── Projects, members, invites (Takeoff Milestone 2, migration 031) ─────
+// The owner is deployments.user_id; everyone else is a project_members row.
+
+const MEMBER_LABELS = Object.freeze(['creator', 'builder']);
+
+const projectMembers = {
+  /** Ids of the projects `userId` is a member of (owners not included). */
+  async projectIdsForUser(userId) {
+    const { rows } = await getDb().query('SELECT project_id FROM project_members WHERE user_id = $1', [userId]);
+    return rows.map((r) => r.project_id);
+  },
+  async list(projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_members WHERE project_id = $1 ORDER BY joined_at, user_id',
+      [projectId]
+    );
+    return rows;
+  },
+  async get(projectId, userId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [projectId, userId]
+    );
+    return rows[0] || null;
+  },
+  async setLabels(projectId, userId, labels) {
+    const { rows } = await getDb().query(
+      `UPDATE project_members SET labels = $3::TEXT[], updated_at = now()
+        WHERE project_id = $1 AND user_id = $2 RETURNING *`,
+      [projectId, userId, labels]
+    );
+    return rows[0] || null;
+  },
+  /** The owner's own row, made on first use so the owner has labels too. */
+  async ensure(projectId, userId, { email = null, displayName = null, labels = [] } = {}) {
+    const { rows } = await getDb().query(
+      `INSERT INTO project_members (project_id, user_id, email, display_name, labels)
+        VALUES ($1, $2, $3, $4, $5::TEXT[])
+        ON CONFLICT (project_id, user_id) DO UPDATE
+          SET email = COALESCE(EXCLUDED.email, project_members.email),
+              display_name = COALESCE(EXCLUDED.display_name, project_members.display_name)
+        RETURNING *`,
+      [projectId, userId, email, displayName, labels]
+    );
+    return rows[0];
+  },
+  async remove(projectId, userId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [projectId, userId]
+    );
+    return rowCount > 0;
+  },
+};
+
+const projectInvites = {
+  async create({ id, projectId, email = null, githubLogin = null, githubUserId = null, tokenHash, invitedBy, invitedByName = null, expiresAt }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO project_invites (id, project_id, email, github_login, github_user_id, token_hash, invited_by, invited_by_name, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT DO NOTHING
+        RETURNING *`,
+      [id, projectId, email, githubLogin, githubUserId, tokenHash, invitedBy, invitedByName, expiresAt]
+    );
+    return rows[0] || null;
+  },
+  /** The open invite for this address, if one exists (for "invite again"). */
+  async findOpen(projectId, { email = null, githubLogin = null }) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_invites
+        WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+          AND (($2::TEXT IS NOT NULL AND LOWER(email) = LOWER($2::TEXT))
+            OR ($3::TEXT IS NOT NULL AND LOWER(github_login) = LOWER($3::TEXT)))`,
+      [projectId, email, githubLogin]
+    );
+    return rows[0] || null;
+  },
+  /** A new token for an open invite (the old link stops working). */
+  async rotateToken(id, tokenHash, expiresAt, { githubUserId = null } = {}) {
+    // The original inviter stays on the invite (they can still cancel it).
+    const { rows } = await getDb().query(
+      `UPDATE project_invites SET token_hash = $2, expires_at = $3,
+          github_user_id = COALESCE($4, github_user_id)
+        WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING *`,
+      [id, tokenHash, expiresAt, githubUserId]
+    );
+    return rows[0] || null;
+  },
+  async findByTokenHash(tokenHash) {
+    const { rows } = await getDb().query('SELECT * FROM project_invites WHERE token_hash = $1', [tokenHash]);
+    return rows[0] || null;
+  },
+  async listOpen(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_invites
+        WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+        ORDER BY created_at DESC LIMIT 200`,
+      [projectId]
+    );
+    return rows;
+  },
+  async revoke(projectId, id) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET revoked_at = now()
+        WHERE project_id = $1 AND id = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [projectId, id]
+    );
+    return rowCount > 0;
+  },
+  /** Cancel the open invites someone sent (when they leave or are removed). */
+  async revokeByInviter(projectId, userId) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET revoked_at = now()
+        WHERE project_id = $1 AND invited_by = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [projectId, userId]
+    );
+    return rowCount;
+  },
+  /** Undo markLinkSent after a send that failed, so a retry isn't blocked. */
+  async clearLinkSent(id) {
+    await getDb().query('UPDATE project_invites SET last_link_sent_at = NULL WHERE id = $1', [id]);
+  },
+  /**
+   * Note a sign-in link send, at most one per `minSeconds` per invite.
+   * @returns {Promise<boolean>} false when one was sent too recently
+   */
+  async markLinkSent(id, minSeconds = 60) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET last_link_sent_at = now()
+        WHERE id = $1 AND (last_link_sent_at IS NULL OR last_link_sent_at < now() - ($2 || ' seconds')::interval)`,
+      [id, String(minSeconds)]
+    );
+    return rowCount > 0;
+  },
+  /**
+   * Use the invite and add the member, in one transaction. The invite is
+   * claimed first (still open and unexpired), so a link works once.
+   * @returns {Promise<{ member: object, alreadyMember: boolean }|null>} null when the invite can't be used
+   */
+  async accept({ id, userId, email, displayName = null, labels }) {
+    return withTransaction(async (client) => {
+      const { rows: inv } = await client.query(
+        `UPDATE project_invites SET accepted_at = now(), accepted_by = $2
+          WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+          RETURNING *`,
+        [id, userId]
+      );
+      if (!inv[0]) return null;
+      const { rows } = await client.query(
+        `INSERT INTO project_members (project_id, user_id, email, display_name, labels, invited_by)
+          VALUES ($1, $2, $3, $4, $5::TEXT[], $6)
+          ON CONFLICT (project_id, user_id) DO NOTHING
+          RETURNING *`,
+        [inv[0].project_id, userId, email, displayName, labels, inv[0].invited_by]
+      );
+      if (rows[0]) return { member: rows[0], alreadyMember: false };
+      const { rows: existing } = await client.query(
+        'SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2',
+        [inv[0].project_id, userId]
+      );
+      return { member: existing[0], alreadyMember: true };
+    });
+  },
+};
+
+const recommendations = {
+  async create({ id, projectId, actionType, payload, summary, createdBy }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO recommendations (id, project_id, action_type, payload, summary, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [id, projectId, actionType, JSON.stringify(payload || {}), summary, createdBy]
+    );
+    return rows[0];
+  },
+  async get(projectId, id) {
+    const { rows } = await getDb().query('SELECT * FROM recommendations WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] || null;
+  },
+  async listPending(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM recommendations WHERE project_id = $1 AND status IN ('pending', 'confirming')
+        ORDER BY created_at DESC LIMIT 100`,
+      [projectId]
+    );
+    return rows;
+  },
+  /**
+   * Take a pending recommendation to run it. Only one confirmer wins; a run
+   * that died mid-way is taken again after 10 minutes.
+   */
+  async claimForConfirm(projectId, id, userId) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'confirming', decided_by = $3, decided_at = now()
+        WHERE project_id = $1 AND id = $2
+          AND (status = 'pending' OR (status = 'confirming' AND decided_at < now() - interval '10 minutes'))
+        RETURNING *`,
+      [projectId, id, userId]
+    );
+    return rows[0] || null;
+  },
+  async finish(id, { status, result = null, error = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = $2, result = $3, error = $4, decided_at = now()
+        WHERE id = $1 AND status = 'confirming' RETURNING *`,
+      [id, status, result ? JSON.stringify(result) : null, error]
+    );
+    return rows[0] || null;
+  },
+  /** Back to pending after a confirm that failed, keeping why, so someone can try again. */
+  async release(id, error = null) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'pending', decided_by = NULL, decided_at = NULL, error = $2
+        WHERE id = $1 AND status = 'confirming' RETURNING *`,
+      [id, error]
+    );
+    return rows[0] || null;
+  },
+  async dismiss(projectId, id, userId) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'dismissed', decided_by = $3, decided_at = now()
+        WHERE project_id = $1 AND id = $2 AND status = 'pending' RETURNING *`,
+      [projectId, id, userId]
+    );
+    return rows[0] || null;
+  },
+};
+
+const userGithubLinks = {
+  async upsert(userId, { githubUserId, githubLogin }) {
+    await getDb().query(
+      `INSERT INTO user_github_links (user_id, github_user_id, github_login)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id) DO UPDATE
+          SET github_user_id = EXCLUDED.github_user_id, github_login = EXCLUDED.github_login, linked_at = now()`,
+      [userId, githubUserId, githubLogin]
+    );
+  },
+  async get(userId) {
+    const { rows } = await getDb().query('SELECT * FROM user_github_links WHERE user_id = $1', [userId]);
+    return rows[0] || null;
+  },
+  async deleteForGithubUser(githubUserId) {
+    await getDb().query('DELETE FROM user_github_links WHERE github_user_id = $1', [githubUserId]);
+  },
+};
+
 // ── PR verdict checks (Takeoff Milestone 4, migration 030) ─────────
 //
 // One row per (repo, PR, head sha). claim() is the dedupe: only the delivery
@@ -2933,6 +3190,7 @@ module.exports = {
   commitReviews,
   productMap,
   shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
+  projectMembers, projectInvites, recommendations, userGithubLinks, MEMBER_LABELS,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.
