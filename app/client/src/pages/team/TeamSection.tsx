@@ -113,7 +113,7 @@ export function TeamSection({ projectId }: { projectId: string }) {
           ? `We emailed ${out.invite.email} a sign-in link. You can also send them the invite link below.`
           : `We couldn’t email ${out.invite.email} just now. Send them the invite link below.`);
       } else {
-        setNote(`Send ${out.invite.githubLogin} the invite link below. They’ll sign in with that GitHub account.`);
+        setNote(`Send ${out.invite.githubLogin} the invite link below. We don’t email GitHub invites. They’ll sign in with that GitHub account.`);
       }
       await load();
     });
@@ -316,9 +316,21 @@ export function TeamSection({ projectId }: { projectId: string }) {
                 })}
               </ul>
               {!team.you.githubConnected ? (
-                <p className={cx('type-small', styles.muted)}>
-                  To confirm these, connect the GitHub account that has write access to this repo.
-                </p>
+                <div className={styles.inviteRow}>
+                  <p className={cx('type-small', styles.muted)}>
+                    To confirm these, connect the GitHub account that has write access to this repo.
+                  </p>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    onClick={() => {
+                      const back = `${window.location.pathname}${window.location.search}`;
+                      window.location.href = `/api/github-app/authorize?returnTo=${encodeURIComponent(back)}`;
+                    }}
+                  >
+                    Connect GitHub
+                  </Button>
+                </div>
               ) : null}
             </div>
           ) : null}

@@ -28,7 +28,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { recordServerEvent } = require('../lib/telemetry');
 const { seedFromAnalysis } = require('../lib/auto-entries');
-const { checkProjectAccess, checkProjectOwner } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
 const { buildTakeoffCostPlan } = require('../lib/cost-budget');
 const { toCommitSnapshot } = require('../services/dashboard-cards');
@@ -952,7 +952,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
   checkProjectAccess(project, req);
 
-  res.json(project);
+  res.json(projectForViewer(project, req));
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
@@ -1198,7 +1198,7 @@ router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => 
 router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   await suggestions.deleteByProjectId(req.params.id);
   await deployments.update(req.params.id, { suggestions_count: 0 });

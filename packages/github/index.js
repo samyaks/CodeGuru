@@ -326,6 +326,18 @@ function createClient({ token, onUnauthorized } = {}) {
     }
   }
 
+  /** A GitHub account by login: { id, login }, or null when there's none. */
+  async function fetchUserByLogin(username) {
+    try {
+      const res = await request(`/users/${enc(username)}`);
+      const data = await res.json();
+      return data && data.id ? { id: Number(data.id), login: String(data.login) } : null;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
   async function createIssueComment(owner, repo, issueNumber, body) {
     const res = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, jsonBody('POST', { body }));
     return res.json();
@@ -366,6 +378,7 @@ function createClient({ token, onUnauthorized } = {}) {
   return {
     fetchAllPRFiles,
     fetchCollaboratorPermission,
+    fetchUserByLogin,
     fetchFileTextOrNull,
     findIssueCommentWithMarker,
     createIssueComment,

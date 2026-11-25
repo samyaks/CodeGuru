@@ -34,7 +34,25 @@ function defaultDeps() {
     now: () => new Date(),
     appUrl: appUrlFromEnv(),
     sendSignInLink: null, // set by the routes when Supabase is configured
+    lookupGithubUser: lookupGithubUserViaApp,
   };
+}
+
+/**
+ * The GitHub account id behind a login, asked through the project's App
+ * installation. undefined when we can't ask (no installation, GitHub down);
+ * null when GitHub has no such account.
+ */
+async function lookupGithubUserViaApp(project, login) {
+  if (!project.github_installation_id) return undefined;
+  try {
+    const { getGithubApp } = require('../../lib/github-app');
+    const gh = getGithubApp().clientForInstallation(Number(project.github_installation_id), { repo: project.repo });
+    return await gh.fetchUserByLogin(login);
+  } catch (err) {
+    console.warn('[team] GitHub user lookup failed:', err.message);
+    return undefined;
+  }
 }
 
 /** The app's public origin, for links in emails. */
@@ -42,10 +60,10 @@ function appUrlFromEnv(env = process.env) {
   const direct = (env.TAKEOFF_APP_URL || env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
   if (direct) return direct;
   try {
-    return env.SUPABASE_REDIRECT_URL ? new URL(env.SUPABASE_REDIRECT_URL).origin : null;
-  } catch {
-    return null;
-  }
+    if (env.SUPABASE_REDIRECT_URL) return new URL(env.SUPABASE_REDIRECT_URL).origin;
+  } catch { /* fall through */ }
+  // Same default as app.js uses for FRONTEND_URL outside production.
+  return env.NODE_ENV === 'production' ? null : 'http://localhost:3000';
 }
 
 const newToken = () => crypto.randomBytes(32).toString('base64url');
@@ -98,7 +116,8 @@ function maskEmail(email) {
 }
 
 const isOwner = (project, user) => !!(user?.id && project.user_id && project.user_id === user.id);
-const emailConfirmed = (user) => !!(user?.email && (user.email_confirmed_at || user.confirmed_at));
+// email_confirmed_at only: Supabase's confirmed_at is also set by a phone confirmation.
+const emailConfirmed = (user) => !!(user?.email && user.email_confirmed_at);
 
 function publicMember(row, { ownerId } = {}) {
   return {
@@ -179,10 +198,19 @@ async function createInvite({ project, user, body }, deps = defaultDeps()) {
   if (target.email && user.email && target.email === String(user.email).toLowerCase()) {
     throw AppError.badRequest('That\'s you. You\'re already on this project.');
   }
+  let githubUserId = null;
   if (target.githubLogin) {
     const me = await githubIdentity(user, deps);
     if (me && me.githubLogin.toLowerCase() === target.githubLogin.toLowerCase()) {
       throw AppError.badRequest('That\'s you. You\'re already on this project.');
+    }
+    // Pin the account, so a login that's later renamed and reused by someone
+    // else can't accept this invite.
+    const found = deps.lookupGithubUser ? await deps.lookupGithubUser(project, target.githubLogin) : undefined;
+    if (found === null) throw AppError.badRequest(`There's no GitHub account named ${target.githubLogin}.`);
+    if (found) {
+      githubUserId = found.id;
+      target.githubLogin = found.login;
     }
   }
   if (target.email) {
@@ -196,19 +224,27 @@ async function createInvite({ project, user, body }, deps = defaultDeps()) {
   const tokenHash = hashToken(token);
   const expiresAt = new Date(deps.now().getTime() + INVITE_TTL_DAYS * 86400000).toISOString();
   const inviter = { invitedBy: user.id, invitedByName: displayName(user) };
+  const recentlyEmailed = (inv) => inv.email && inv.last_link_sent_at
+    && deps.now().getTime() - new Date(inv.last_link_sent_at).getTime() < LINK_RESEND_SECONDS * 1000;
 
   let row = null;
   const open = await deps.projectInvites.findOpen(project.id, target);
-  if (open) row = await deps.projectInvites.rotateToken(open.id, tokenHash, expiresAt, inviter);
+  if (open) {
+    // A new link kills the one just emailed; don't do that inside the resend window.
+    if (recentlyEmailed(open)) {
+      throw AppError.tooManyRequests('They were just sent an invite. To send a fresh link, try again in a minute.');
+    }
+    row = await deps.projectInvites.rotateToken(open.id, tokenHash, expiresAt, { githubUserId });
+  }
   if (!row) {
     row = await deps.projectInvites.create({
-      id: deps.newId(), projectId: project.id, ...target, tokenHash, expiresAt, ...inviter,
+      id: deps.newId(), projectId: project.id, ...target, githubUserId, tokenHash, expiresAt, ...inviter,
     });
   }
   if (!row) {
     // Lost a race with another invite to the same address: take that one.
     const raced = await deps.projectInvites.findOpen(project.id, target);
-    if (raced) row = await deps.projectInvites.rotateToken(raced.id, tokenHash, expiresAt, inviter);
+    if (raced && !recentlyEmailed(raced)) row = await deps.projectInvites.rotateToken(raced.id, tokenHash, expiresAt, { githubUserId });
   }
   if (!row) throw AppError.conflict('Couldn\'t make that invite just now. Try again.');
 
@@ -237,6 +273,7 @@ async function sendInviteEmail(invite, token, deps) {
     return { ok: true, error: null };
   } catch (err) {
     console.warn('[team] invite email failed:', err.message);
+    await deps.projectInvites.clearLinkSent(invite.id).catch(() => {});
     return { ok: false, error: 'send_failed' };
   }
 }
@@ -277,7 +314,11 @@ async function matchInvitee(invite, user, deps) {
   }
   const identity = await githubIdentity(user, deps);
   if (!identity) return { matches: false, reason: 'github_not_connected' };
-  const ok = identity.githubLogin.toLowerCase() === String(invite.github_login).toLowerCase();
+  // The account id decides when both sides know it (logins get renamed and
+  // reused); otherwise the login has to match.
+  const ok = invite.github_user_id && identity.githubUserId
+    ? Number(invite.github_user_id) === Number(identity.githubUserId)
+    : identity.githubLogin.toLowerCase() === String(invite.github_login).toLowerCase();
   return { matches: ok, reason: ok ? null : 'github_mismatch' };
 }
 
@@ -314,6 +355,7 @@ async function requestSignInLink({ token }, deps = defaultDeps()) {
     await deps.sendSignInLink(invite.email, signInRedirect(deps.appUrl, token));
   } catch (err) {
     console.warn('[team] sign-in link failed:', err.message);
+    await deps.projectInvites.clearLinkSent(invite.id).catch(() => {});
     throw AppError.internal('Couldn\'t send the sign-in email. Try again in a minute.');
   }
   return { sent: true, to: maskEmail(invite.email) };
@@ -372,6 +414,8 @@ async function removeMember({ project, user, memberId }, deps = defaultDeps()) {
   }
   const removed = await deps.projectMembers.remove(project.id, memberId);
   if (!removed) throw AppError.notFound('Member not found');
+  // Invites they sent stop working too.
+  await deps.projectInvites.revokeByInviter(project.id, memberId);
   return { removed: true };
 }
 

@@ -9,10 +9,11 @@
 function signinGithubIdentity(user) {
   const ids = Array.isArray(user?.identities) ? user.identities : [];
   const gh = ids.find((i) => i && i.provider === 'github');
-  const login = gh?.identity_data?.user_name || gh?.identity_data?.preferred_username
-    || (user?.app_metadata?.provider === 'github' ? user?.user_metadata?.user_name : null);
+  // Only the identity GitHub verified. user_metadata is editable by the user
+  // (supabase.auth.updateUser), so it never says who someone is on GitHub.
+  const login = gh?.identity_data?.user_name || gh?.identity_data?.preferred_username;
   if (!login || typeof login !== 'string') return null;
-  const id = Number(gh?.identity_data?.provider_id || gh?.id || user?.user_metadata?.provider_id) || null;
+  const id = Number(gh?.identity_data?.provider_id || gh?.id) || null;
   return { githubLogin: login, githubUserId: id, source: 'signin' };
 }
 
@@ -25,7 +26,7 @@ async function githubIdentity(user, deps) {
   return signinGithubIdentity(user);
 }
 
-/** Display name for people lists: full name, else GitHub login, else email. */
+/** Display name for people lists: full name, else GitHub login, else email. (User-set: a label, not proof of who someone is.) */
 function displayName(user) {
   const m = user?.user_metadata || {};
   return (typeof m.full_name === 'string' && m.full_name.trim())

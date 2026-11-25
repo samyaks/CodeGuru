@@ -6,7 +6,7 @@ const { clientForProject } = require('../services/github-access');
 const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../services/github-webhook-manager');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
-const { checkProjectAccess, checkProjectOwner } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { listDashboardCards } = require('../services/dashboard-cards');
 
 const router = express.Router();
@@ -46,7 +46,7 @@ router.get('/:id', readLimit, asyncHandler(async (req, res) => {
   ]);
 
   res.json({
-    ...project,
+    ...projectForViewer(project, req),
     entries,
     context_files: analysisRow?.context_files ?? null,
     completion_pct: analysisRow?.completion_pct ?? null,

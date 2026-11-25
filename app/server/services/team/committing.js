@@ -79,7 +79,15 @@ const publicRecommendation = (r) => r && ({
 async function performCommittingAction({ project, user, type, payload = {} }, deps = defaultDeps()) {
   const action = getAction(type);
   const summary = String(action.summarize(payload) || type).slice(0, 500);
-  const access = await writeAccess(project, user, deps);
+  let access;
+  try {
+    access = await writeAccess(project, user, deps);
+  } catch (err) {
+    // Can't ask GitHub right now: keep the change as a recommendation rather than lose it.
+    console.warn('[team] write access check failed:', err.message);
+    const identity = await githubIdentity(user, deps);
+    access = { canWrite: false, githubConnected: !!identity, githubLogin: identity?.githubLogin || null, reason: 'github_check_failed' };
+  }
   if (access.canWrite) {
     const result = await action.run({ project, payload, actor: { userId: user.id, githubLogin: access.githubLogin } });
     return { status: 'done', result: result ?? null };
@@ -115,12 +123,22 @@ async function confirmRecommendation({ project, user, recommendationId }, deps =
     const done = await deps.recommendations.finish(rec.id, { status: 'confirmed', result: result ?? null });
     return publicRecommendation(done || { ...rec, status: 'confirmed' });
   } catch (err) {
-    await deps.recommendations.finish(rec.id, { status: 'failed', error: String(err.message || err).slice(0, 1000) }).catch(() => {});
+    // Back to pending with the reason, so it stays on the list and can be tried again.
+    await deps.recommendations.release(rec.id, String(err.message || err).slice(0, 1000)).catch(() => {});
     throw err;
   }
 }
 
+/** The member who recommended it, or anyone with write access, can dismiss it. */
 async function dismissRecommendation({ project, user, recommendationId }, deps = defaultDeps()) {
+  const existing = await deps.recommendations.get(project.id, recommendationId);
+  if (!existing) throw AppError.notFound('Recommendation not found');
+  if (existing.created_by !== user.id) {
+    const access = await writeAccess(project, user, deps);
+    if (!access.canWrite) {
+      throw AppError.forbidden('Only the person who recommended this, or someone with write access to the repo, can dismiss it.');
+    }
+  }
   const rec = await deps.recommendations.dismiss(project.id, recommendationId, user.id);
   if (!rec) throw AppError.conflict('This recommendation was already confirmed or dismissed.');
   return publicRecommendation(rec);

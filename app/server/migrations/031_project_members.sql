@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS project_invites (
   project_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
   email TEXT,
   github_login TEXT,
+  github_user_id BIGINT,                         -- the account behind github_login when invited (logins can be renamed and reused)
   token_hash TEXT NOT NULL UNIQUE,
   invited_by TEXT NOT NULL,
   invited_by_name TEXT,

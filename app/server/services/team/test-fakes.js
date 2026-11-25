@@ -8,7 +8,7 @@ const NOW = new Date('2026-11-25T12:00:00Z');
 
 // In-memory stand-ins for the db.js stores, with the same guards as the SQL.
 function fakeDb() {
-  const state = { members: [], invites: [], recs: [], links: new Map(), sent: [] };
+  const state = { members: [], invites: [], recs: [], links: new Map(), sent: [], githubUsers: new Map([['octo', { id: 9, login: 'Octo' }]]) };
   let n = 0;
   const projectMembers = {
     async projectIdsForUser(uid) { return state.members.filter((m) => m.user_id === uid).map((m) => m.project_id); },
@@ -25,22 +25,28 @@ function fakeDb() {
   };
   const isOpen = (i) => !i.accepted_at && !i.revoked_at;
   const projectInvites = {
-    async create({ id, projectId, email, githubLogin, tokenHash, invitedBy, invitedByName, expiresAt }) {
+    async create({ id, projectId, email, githubLogin, githubUserId = null, tokenHash, invitedBy, invitedByName, expiresAt }) {
       const clash = state.invites.find((i) => i.project_id === projectId && isOpen(i)
         && ((email && i.email === email) || (githubLogin && i.github_login?.toLowerCase() === githubLogin.toLowerCase())));
       if (clash) return null;
-      const row = { id, project_id: projectId, email, github_login: githubLogin, token_hash: tokenHash, invited_by: invitedBy, invited_by_name: invitedByName, expires_at: expiresAt, created_at: NOW.toISOString(), accepted_at: null, revoked_at: null, last_link_sent_at: null };
+      const row = { id, project_id: projectId, email, github_login: githubLogin, github_user_id: githubUserId, token_hash: tokenHash, invited_by: invitedBy, invited_by_name: invitedByName, expires_at: expiresAt, created_at: NOW.toISOString(), accepted_at: null, revoked_at: null, last_link_sent_at: null };
       state.invites.push(row); return row;
     },
     async findOpen(pid, { email, githubLogin }) {
       return state.invites.find((i) => i.project_id === pid && isOpen(i)
         && ((email && i.email?.toLowerCase() === email.toLowerCase()) || (githubLogin && i.github_login?.toLowerCase() === githubLogin.toLowerCase()))) || null;
     },
-    async rotateToken(id, tokenHash, expiresAt, { invitedBy, invitedByName } = {}) {
+    async rotateToken(id, tokenHash, expiresAt, { githubUserId = null } = {}) {
       const row = state.invites.find((i) => i.id === id && isOpen(i)); if (!row) return null;
-      Object.assign(row, { token_hash: tokenHash, expires_at: expiresAt, invited_by: invitedBy ?? row.invited_by, invited_by_name: invitedByName ?? row.invited_by_name });
+      Object.assign(row, { token_hash: tokenHash, expires_at: expiresAt, github_user_id: githubUserId ?? row.github_user_id });
       return row;
     },
+    async revokeByInviter(pid, uid) {
+      let n = 0;
+      for (const i of state.invites) if (i.project_id === pid && i.invited_by === uid && isOpen(i)) { i.revoked_at = NOW.toISOString(); n += 1; }
+      return n;
+    },
+    async clearLinkSent(id) { const row = state.invites.find((i) => i.id === id); if (row) row.last_link_sent_at = null; },
     async findByTokenHash(h) { return state.invites.find((i) => i.token_hash === h) || null; },
     async listOpen(pid) { return state.invites.filter((i) => i.project_id === pid && isOpen(i) && new Date(i.expires_at) > NOW); },
     async revoke(pid, id) { const row = state.invites.find((i) => i.project_id === pid && i.id === id && isOpen(i)); if (!row) return false; row.revoked_at = NOW.toISOString(); return true; },
@@ -74,6 +80,10 @@ function fakeDb() {
       const r = state.recs.find((x) => x.id === id && x.status === 'confirming'); if (!r) return null;
       Object.assign(r, { status, result, error }); return r;
     },
+    async release(id, error = null) {
+      const r = state.recs.find((x) => x.id === id && x.status === 'confirming'); if (!r) return null;
+      Object.assign(r, { status: 'pending', decided_by: null, error }); return r;
+    },
     async dismiss(pid, id, uid) {
       const r = state.recs.find((x) => x.project_id === pid && x.id === id && x.status === 'pending'); if (!r) return null;
       r.status = 'dismissed'; r.decided_by = uid; return r;
@@ -92,6 +102,7 @@ function fakeDb() {
     now: () => NOW,
     appUrl: 'https://takeoff.test',
     sendSignInLink: async (email, redirectTo) => { state.sent.push({ email, redirectTo }); },
+    lookupGithubUser: async (_project, login) => (state.githubUsers.has(login.toLowerCase()) ? state.githubUsers.get(login.toLowerCase()) : null),
   };
   return { state, deps, project };
 }

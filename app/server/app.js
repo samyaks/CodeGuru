@@ -41,7 +41,7 @@ const { loadMemberships } = require('./lib/memberships');
 const { createTeamRoutes } = require('./routes/team');
 const { createInviteRoutes } = require('./routes/invites');
 const { getDb, closeDb } = require('./lib/db');
-const { requestLogger } = require('./lib/logger');
+const { requestLogger, redactUrl } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
 
 const { createClient, createAuthRouter, requireAuth, optionalAuth, COOKIE_OPTIONS } = require('@codeguru/auth');
@@ -177,9 +177,9 @@ if (supabase) {
   // team paths don't run auth twice.
   app.use('/api/projects/:id/team', requireAuth(supabase), withMembers, createTeamRoutes({ sendSignInLink }));
   app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
-  app.use('/api/projects', optionalAuth(supabase), withMembers, projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
+  app.use('/api/projects', optionalAuth(supabase), withMembers, projectRoutes);
   app.use('/api/product-map', optionalAuth(supabase), withMembers, productMapRoutes);
   // v2 (Takeoff) — additive routes alongside v1 until Phase 6b cutover
   app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), withMembers, v2GapsRoutes);
@@ -244,7 +244,7 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use((err, req, res, _next) => {
   if (err instanceof AppError) {
-    if (err.statusCode >= 500) console.error(`[AppError] ${req.method} ${req.originalUrl}:`, err);
+    if (err.statusCode >= 500) console.error(`[AppError] ${req.method} ${redactUrl(req.originalUrl)}:`, err);
     return res.status(err.statusCode).json({ error: err.message, code: err.code });
   }
 
@@ -266,7 +266,7 @@ app.use((err, req, res, _next) => {
   }
 
   console.error(
-    `[UnhandledError] ${req.method} ${req.originalUrl}\n  name=${err.name}\n  code=${err.code}\n  message=${err.message}\n  stack=${err.stack}`
+    `[UnhandledError] ${req.method} ${redactUrl(req.originalUrl)}\n  name=${err.name}\n  code=${err.code}\n  message=${err.message}\n  stack=${err.stack}`
   );
   const message = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
   res.status(500).json({ error: message, code: 'INTERNAL_ERROR' });

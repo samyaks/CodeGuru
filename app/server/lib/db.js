@@ -2331,13 +2331,13 @@ const projectMembers = {
 };
 
 const projectInvites = {
-  async create({ id, projectId, email = null, githubLogin = null, tokenHash, invitedBy, invitedByName = null, expiresAt }) {
+  async create({ id, projectId, email = null, githubLogin = null, githubUserId = null, tokenHash, invitedBy, invitedByName = null, expiresAt }) {
     const { rows } = await getDb().query(
-      `INSERT INTO project_invites (id, project_id, email, github_login, token_hash, invited_by, invited_by_name, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO project_invites (id, project_id, email, github_login, github_user_id, token_hash, invited_by, invited_by_name, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT DO NOTHING
         RETURNING *`,
-      [id, projectId, email, githubLogin, tokenHash, invitedBy, invitedByName, expiresAt]
+      [id, projectId, email, githubLogin, githubUserId, tokenHash, invitedBy, invitedByName, expiresAt]
     );
     return rows[0] || null;
   },
@@ -2353,12 +2353,13 @@ const projectInvites = {
     return rows[0] || null;
   },
   /** A new token for an open invite (the old link stops working). */
-  async rotateToken(id, tokenHash, expiresAt, { invitedBy = null, invitedByName = null } = {}) {
+  async rotateToken(id, tokenHash, expiresAt, { githubUserId = null } = {}) {
+    // The original inviter stays on the invite (they can still cancel it).
     const { rows } = await getDb().query(
       `UPDATE project_invites SET token_hash = $2, expires_at = $3,
-          invited_by = COALESCE($4, invited_by), invited_by_name = COALESCE($5, invited_by_name)
+          github_user_id = COALESCE($4, github_user_id)
         WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING *`,
-      [id, tokenHash, expiresAt, invitedBy, invitedByName]
+      [id, tokenHash, expiresAt, githubUserId]
     );
     return rows[0] || null;
   },
@@ -2382,6 +2383,19 @@ const projectInvites = {
       [projectId, id]
     );
     return rowCount > 0;
+  },
+  /** Cancel the open invites someone sent (when they leave or are removed). */
+  async revokeByInviter(projectId, userId) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET revoked_at = now()
+        WHERE project_id = $1 AND invited_by = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [projectId, userId]
+    );
+    return rowCount;
+  },
+  /** Undo markLinkSent after a send that failed, so a retry isn't blocked. */
+  async clearLinkSent(id) {
+    await getDb().query('UPDATE project_invites SET last_link_sent_at = NULL WHERE id = $1', [id]);
   },
   /**
    * Note a sign-in link send, at most one per `minSeconds` per invite.
@@ -2469,13 +2483,14 @@ const recommendations = {
     );
     return rows[0] || null;
   },
-  /** Back to pending after a confirm that couldn't run (e.g. no write access after all). */
-  async release(id) {
-    await getDb().query(
-      `UPDATE recommendations SET status = 'pending', decided_by = NULL, decided_at = NULL
-        WHERE id = $1 AND status = 'confirming'`,
-      [id]
+  /** Back to pending after a confirm that failed, keeping why, so someone can try again. */
+  async release(id, error = null) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'pending', decided_by = NULL, decided_at = NULL, error = $2
+        WHERE id = $1 AND status = 'confirming' RETURNING *`,
+      [id, error]
     );
+    return rows[0] || null;
   },
   async dismiss(projectId, id, userId) {
     const { rows } = await getDb().query(

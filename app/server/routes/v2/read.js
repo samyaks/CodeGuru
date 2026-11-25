@@ -2,7 +2,7 @@ const express = require('express');
 const { deployments, projectReads, readClaims } = require('../../lib/db');
 const { AppError } = require('../../lib/app-error');
 const { asyncHandler } = require('../../lib/async-handler');
-const { checkProjectAccess } = require('../../lib/helpers');
+const { checkProjectAccess, checkProjectOwner } = require('../../lib/helpers');
 const { createRateLimit } = require('../../lib/rate-limit');
 // Safe to require at module load: run-read only lazily requires the LLM
 // synthesis modules inside its functions.
@@ -142,6 +142,8 @@ router.post('/unlock', requireUser, writeLimit, asyncHandler(async (req, res) =>
 // the fresh read. Settled claims survive regeneration by design.
 router.post('/regenerate', requireUser, writeLimit, asyncHandler(async (req, res) => {
   const project = await loadProjectAndAuthorize(req);
+  // Re-runs the model pipeline on the owner's budget, like reanalyze.
+  checkProjectOwner(project, req);
 
   // Required lazily: ensure-invariants pulls in the intent generation stack,
   // which only this handler needs. Old projects analyzed before the intent

@@ -35,6 +35,7 @@ export default function InvitePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const signInFailed = new URLSearchParams(window.location.search).get('signin') === 'failed';
 
   const load = useCallback(async () => {
     try {
@@ -125,6 +126,9 @@ export default function InvitePage() {
       {!invite.signedIn ? (
         invite.kind === 'email' ? (
           <>
+            {signInFailed && !sentTo ? (
+              <p role="status" className="type-body">That sign-in link expired or was already used. Send yourself a new one.</p>
+            ) : null}
             <p className="type-body">This invite is for {invite.invitedFor}. We’ll email that address a link to sign in.</p>
             {sentTo ? (
               <p role="status" className="type-body">Check {sentTo} for the sign-in link. It brings you back here.</p>

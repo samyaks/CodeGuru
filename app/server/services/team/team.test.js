@@ -15,6 +15,8 @@ const sam = { id: 'sam', email: 'sam@acme.test', email_confirmed_at: 'x', user_m
 const eve = { id: 'eve', email: 'eve@evil.test', email_confirmed_at: 'x', user_metadata: {} };
 
 const tokenOf = (out) => out.path.split('/').pop();
+// Kim, a second member, for flows where someone else re-invites.
+const sam2 = (state) => { state.members.push({ project_id: 'p1', user_id: 'kim', email: 'kim@acme.test', labels: ['builder'] }); return { id: 'kim', email: 'kim@acme.test', email_confirmed_at: 'x' }; };
 
 test('parseInviteTarget accepts emails and GitHub usernames, rejects junk', () => {
   assert.deepStrictEqual(members.parseInviteTarget({ target: ' Sam@Acme.Test ' }), { email: 'sam@acme.test', githubLogin: null });
@@ -52,8 +54,9 @@ test('an email invite stores only a hash, emails a link back to the invite, and 
 
   // Someone else signed in can't use it.
   await assert.rejects(members.acceptInvite({ token, user: eve, labels: ['builder'] }, deps), (e) => e.statusCode === 403 && e.code === 'INVITE_MISMATCH');
-  // Unconfirmed email doesn't count.
+  // Unconfirmed email doesn't count, and a phone confirmation isn't an email one.
   await assert.rejects(members.acceptInvite({ token, user: { ...sam, email_confirmed_at: null }, labels: ['builder'] }, deps), (e) => e.statusCode === 403);
+  await assert.rejects(members.acceptInvite({ token, user: { ...sam, email_confirmed_at: null, confirmed_at: 'x' }, labels: ['builder'] }, deps), (e) => e.statusCode === 403);
   // Labels are required.
   await assert.rejects(members.acceptInvite({ token, user: sam, labels: [] }, deps), /at least one/);
 
@@ -72,19 +75,25 @@ test('an email invite stores only a hash, emails a link back to the invite, and 
 test('inviting the same address again makes a new link and the old one stops working', async () => {
   const { state, deps, project } = fakeDb();
   const first = await members.createInvite({ project, user: owner, body: { email: 'sam@acme.test' } }, deps);
-  const second = await members.createInvite({ project, user: owner, body: { email: 'SAM@acme.test' } }, deps);
+  // Inside a minute of the email, a new link would kill the one just sent: refused.
+  await assert.rejects(members.createInvite({ project, user: owner, body: { email: 'SAM@acme.test' } }, deps), (e) => e.statusCode === 429);
+  assert.strictEqual(state.invites[0].token_hash, members.hashToken(tokenOf(first)));
+  state.invites[0].last_link_sent_at = '2026-11-25T11:58:00Z';
+  const second = await members.createInvite({ project, user: sam2(state), body: { email: 'SAM@acme.test' } }, deps);
   assert.strictEqual(state.invites.length, 1);
   assert.notStrictEqual(tokenOf(first), tokenOf(second));
-  // The resend inside a minute is held back; the link can still be copied.
-  assert.strictEqual(second.emailSent, false);
-  assert.strictEqual(second.emailError, 'rate_limited');
+  assert.strictEqual(second.emailSent, true);
+  assert.strictEqual(state.invites[0].invited_by, 'owner', 'the original inviter stays on the invite');
   await assert.rejects(members.previewInvite({ token: tokenOf(first), user: null }, deps), /isn't valid/);
   assert.strictEqual((await members.previewInvite({ token: tokenOf(second), user: null }, deps)).state, 'open');
 });
 
 test('a GitHub invite is accepted only by that GitHub account', async () => {
   const { state, deps, project } = fakeDb();
-  const out = await members.createInvite({ project, user: owner, body: { target: '@Octo' } }, deps);
+  await assert.rejects(members.createInvite({ project, user: owner, body: { target: '@nobody-here' } }, deps), /no GitHub account named/);
+  const out = await members.createInvite({ project, user: owner, body: { target: '@octo' } }, deps);
+  assert.strictEqual(out.invite.githubLogin, 'Octo', 'GitHub\'s spelling of the login');
+  assert.strictEqual(state.invites[0].github_user_id, 9);
   assert.strictEqual(out.emailSent, false);
   assert.strictEqual(state.sent.length, 0);
   const token = tokenOf(out);
@@ -92,6 +101,12 @@ test('a GitHub invite is accepted only by that GitHub account', async () => {
   const octoSignin = { id: 'octo', email: 'o@x.test', identities: [{ provider: 'github', identity_data: { user_name: 'octo', provider_id: '9' } }] };
   const imposter = { id: 'imp', email: 'i@x.test', identities: [{ provider: 'github', identity_data: { user_name: 'octo-2', provider_id: '10' } }] };
   await assert.rejects(members.acceptInvite({ token, user: imposter, labels: ['creator'] }, deps), (e) => e.code === 'INVITE_MISMATCH');
+  // Someone now holding the login "octo" but a different account (a rename and reuse) is refused.
+  const reused = { id: 'reuse', email: 'r@x.test', identities: [{ provider: 'github', identity_data: { user_name: 'octo', provider_id: '555' } }] };
+  await assert.rejects(members.acceptInvite({ token, user: reused, labels: ['creator'] }, deps), (e) => e.code === 'INVITE_MISMATCH');
+  // user_metadata is editable by the user, so it never proves a GitHub login.
+  const spoof = { id: 'spoof', email: 's@x.test', app_metadata: { provider: 'github' }, user_metadata: { user_name: 'octo', provider_id: '9' } };
+  await assert.rejects(members.acceptInvite({ token, user: spoof, labels: ['creator'] }, deps), (e) => e.code === 'GITHUB_NOT_CONNECTED');
   assert.strictEqual((await members.previewInvite({ token, user: octoSignin }, deps)).matches, true);
   assert.deepStrictEqual(await members.acceptInvite({ token, user: octoSignin, labels: ['creator', 'builder'] }, deps), { projectId: 'p1', alreadyMember: false });
   await assert.rejects(members.requestSignInLink({ token }, deps), /can't be used/);
@@ -154,7 +169,9 @@ test('the owner removes members, members can leave, nobody removes the owner', a
   state.members.push({ project_id: 'p1', user_id: 'sam', labels: ['builder'] }, { project_id: 'p1', user_id: 'kim', labels: ['builder'] });
   await assert.rejects(members.removeMember({ project, user: sam, memberId: 'kim' }, deps), (e) => e.statusCode === 403);
   await assert.rejects(members.removeMember({ project, user: sam, memberId: 'owner' }, deps), /can't be removed/);
+  const sent = await members.createInvite({ project, user: sam, body: { email: 'friend@acme.test' } }, deps);
   assert.deepStrictEqual(await members.removeMember({ project, user: sam, memberId: 'sam' }, deps), { removed: true });
+  assert.strictEqual((await members.previewInvite({ token: tokenOf(sent), user: null }, deps)).state, 'revoked', 'their open invites stop working');
   assert.deepStrictEqual(await members.removeMember({ project, user: owner, memberId: 'kim' }, deps), { removed: true });
 });
 
@@ -165,11 +182,23 @@ test('accepting as the owner sets labels without using the invite', async () => 
   assert.strictEqual(state.invites[0].accepted_at, null);
 });
 
+test('a failed send can be retried straight away', async () => {
+  const { deps, project, state } = fakeDb();
+  deps.sendSignInLink = async () => { throw new Error('smtp down'); };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const out = await members.createInvite({ project, user: owner, body: { email: 'sam@acme.test' } }, deps);
+    assert.deepStrictEqual([out.emailSent, out.emailError], [false, 'send_failed']);
+    assert.strictEqual(state.invites[0].last_link_sent_at, null);
+  } finally { console.warn = warn; }
+});
+
 test('appUrlFromEnv prefers TAKEOFF_APP_URL, then FRONTEND_URL, then the Supabase redirect origin', () => {
   assert.strictEqual(members.appUrlFromEnv({ TAKEOFF_APP_URL: 'https://a.test/', FRONTEND_URL: 'https://b.test' }), 'https://a.test');
   assert.strictEqual(members.appUrlFromEnv({ FRONTEND_URL: 'https://b.test' }), 'https://b.test');
   assert.strictEqual(members.appUrlFromEnv({ SUPABASE_REDIRECT_URL: 'https://c.test/auth/callback' }), 'https://c.test');
-  assert.strictEqual(members.appUrlFromEnv({}), null);
+  assert.strictEqual(members.appUrlFromEnv({ NODE_ENV: 'production' }), null);
+  assert.strictEqual(members.appUrlFromEnv({}), 'http://localhost:3000');
 });
 
 // ── Committing actions ──────────────────────────────────────────────
@@ -232,8 +261,10 @@ test('a member without write access gets a recommendation; a member with write a
   const direct = await committing.performCommittingAction({ project: db.project, user: owner, type: 'test.commit_note', payload: { text: 'now' } }, deps);
   assert.deepStrictEqual(direct, { status: 'done', result: { sha: 'abc' } });
 
-  // Dismissed recommendations can't be confirmed later.
+  // Dismissed recommendations can't be confirmed later. Only the recommender
+  // or someone with write access may dismiss.
   const rec2 = await committing.performCommittingAction({ project: db.project, user: sam, type: 'test.commit_note', payload: { text: 'maybe' } }, deps);
+  await assert.rejects(committing.dismissRecommendation({ project: db.project, user: { id: 'kim' }, recommendationId: rec2.recommendation.id }, deps), (e) => e.statusCode === 403);
   assert.strictEqual((await committing.dismissRecommendation({ project: db.project, user: sam, recommendationId: rec2.recommendation.id }, deps)).status, 'dismissed');
   await assert.rejects(committing.confirmRecommendation({ project: db.project, user: owner, recommendationId: rec2.recommendation.id }, deps), (e) => e.statusCode === 409);
   committing._actions.delete('test.commit_note');
@@ -253,12 +284,24 @@ test('a failed run marks the recommendation failed; a renamed GitHub login held 
 
   const rec = await db.deps.recommendations.create({ id: 'r1', projectId: 'p1', actionType: 'test.boom', payload: {}, summary: 'Boom', createdBy: 'sam' });
   await assert.rejects(committing.confirmRecommendation({ project: db.project, user: owner, recommendationId: rec.id }, deps), /GitHub said no/);
-  assert.strictEqual(db.state.recs[0].status, 'failed');
+  assert.strictEqual(db.state.recs[0].status, 'pending', 'stays on the list to try again');
   assert.strictEqual(db.state.recs[0].error, 'GitHub said no');
 
   await assert.rejects(committing.performCommittingAction({ project: db.project, user: owner, type: 'nope' }, deps), /Unknown action/);
   assert.throws(() => committing.registerCommittingAction('Bad Type', { summarize() {}, run() {} }), /bad action type/);
   committing._actions.delete('test.boom');
+});
+
+test('when GitHub can\'t be asked, the change is kept as a recommendation', async () => {
+  const db = fakeDb();
+  committing.registerCommittingAction('test.keep', { summarize: () => 'Keep', run: async () => { throw new Error('must not run'); } });
+  await db.deps.userGithubLinks.upsert('owner', { githubUserId: 1, githubLogin: 'olive' });
+  const deps = { ...committingDeps(db, {}).deps, clientForInstallation: () => ({ fetchCollaboratorPermission: async () => { throw new Error('token mint failed'); } }) };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const out = await committing.performCommittingAction({ project: db.project, user: owner, type: 'test.keep' }, deps);
+    assert.deepStrictEqual([out.status, out.reason, out.githubConnected], ['recommended', 'github_check_failed', true]);
+  } finally { console.warn = warn; committing._actions.delete('test.keep'); }
 });
 
 test('no App installation on the project means no write access, with a reason', async () => {

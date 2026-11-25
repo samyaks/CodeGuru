@@ -1,14 +1,20 @@
-// Where to go after signing in: only a same-site path, never another origin.
+// Where to go after signing in: only a path on this site, never another origin.
 
 const KEY = 'takeoff:after-signin';
+const BASE = 'https://takeoff.invalid';
 
 export function safeNext(value: string | null | undefined): string | null {
   if (typeof value !== 'string' || !value.startsWith('/')) return null;
-  if (value.startsWith('//') || value.startsWith('/\\') || /[\u0000-\u001f]/.test(value)) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\\]/.test(value)) return null;
   try {
-    const url = new URL(value, 'https://takeoff.invalid');
-    if (url.origin !== 'https://takeoff.invalid') return null;
-    return `${url.pathname}${url.search}${url.hash}`;
+    const url = new URL(value, BASE);
+    if (url.origin !== BASE) return null;
+    const out = `${url.pathname}${url.search}${url.hash}`;
+    // Check what the browser would actually navigate to: "/.//evil.test"
+    // normalises to "//evil.test", which is another site.
+    if (!out.startsWith('/') || out.startsWith('//') || new URL(out, BASE).origin !== BASE) return null;
+    return out;
   } catch {
     return null;
   }
