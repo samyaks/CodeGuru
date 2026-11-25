@@ -158,7 +158,7 @@ test('installation tokens are scoped to one repo, read-only, and cached per scop
   assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-1');
   assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-1');
   assert.strictEqual(await app.getInstallationToken(77, { repo: 'api' }), 'tok-2');
-  assert.deepStrictEqual(bodies[0], { repositories: ['web'], permissions: { contents: 'read', metadata: 'read' } });
+  assert.deepStrictEqual(bodies[0], { repositories: ['web'], permissions: { contents: 'read', metadata: 'read', pull_requests: 'read' } });
   assert.deepStrictEqual(bodies[1].repositories, ['api']);
 
   app.forgetInstallation(77);
@@ -193,4 +193,22 @@ test('a client whose cached token is rejected mints a fresh one and retries once
   } finally {
     global.fetch = realFetch;
   }
+});
+
+test('a mint the installation refuses (422) retries without pull_requests, then counts as gone', async () => {
+  const bodies = [];
+  let refuseAll = false;
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    bodies.push(body);
+    if (refuseAll || body.permissions.pull_requests) return jsonResponse({ message: 'Unprocessable' }, 422);
+    return jsonResponse({ token: 'tok-base', expires_at: new Date(Date.now() + 3600e3).toISOString() });
+  };
+  const app = createGithubApp(CONFIG, { fetchImpl });
+  assert.strictEqual(await app.getInstallationToken(77, { repo: 'web' }), 'tok-base');
+  assert.deepStrictEqual(bodies.map((b) => Object.keys(b.permissions).sort()), [
+    ['contents', 'metadata', 'pull_requests'], ['contents', 'metadata'],
+  ]);
+  refuseAll = true;
+  await assert.rejects(() => app.getInstallationToken(77, { repo: 'gone' }), (err) => err.installationGone === true);
 });

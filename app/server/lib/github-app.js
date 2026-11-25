@@ -32,7 +32,10 @@ const GITHUB_API = 'https://api.github.com';
 // starts on a cached token never runs past expiry.
 const TOKEN_REFRESH_MARGIN_MS = 15 * 60 * 1000;
 const MAX_PAGES = 10;
-const READ_PERMISSIONS = Object.freeze({ contents: 'read', metadata: 'read' }); // 100 per page → up to 1,000 installations / repos each
+// Read access a scan or PR review needs. An installation that hasn't approved
+// pull_requests yet (it was added later) is minted without it.
+const READ_PERMISSIONS = Object.freeze({ contents: 'read', metadata: 'read', pull_requests: 'read' });
+const BASE_PERMISSIONS = Object.freeze({ contents: 'read', metadata: 'read' }); // 100 per page → up to 1,000 installations / repos each
 
 function base64url(input) {
   return Buffer.from(input).toString('base64url');
@@ -111,19 +114,29 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
   async function mintInstallationToken(installationId, scope) {
     const key = scopeKey(installationId, scope);
     const jwt = createAppJwt({ appId: config.appId, privateKey: config.privateKey, now: now() });
+    const mint = (permissions) => githubJson(`/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
+      method: 'POST',
+      token: jwt,
+      body: {
+        ...(scope.repo ? { repositories: [scope.repo] } : {}),
+        permissions,
+      },
+    });
     let data;
     try {
-      data = await githubJson(`/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
-        method: 'POST',
-        token: jwt,
-        body: {
-          ...(scope.repo ? { repositories: [scope.repo] } : {}),
-          permissions: scope.permissions,
-        },
-      });
+      try {
+        data = await mint(scope.permissions);
+      } catch (err) {
+        // 422: a permission the installation hasn't approved, or a repo it no
+        // longer covers. Retry read scopes without pull_requests first.
+        const readScope = scope.permissions === READ_PERMISSIONS;
+        if (err.status !== 422 || !readScope) throw err;
+        data = await mint(BASE_PERMISSIONS);
+      }
     } catch (err) {
-      // 404: uninstalled. 403: suspended. Either way this installation can't be read through any more.
-      if (err.status === 404 || err.status === 403) err.installationGone = true;
+      // 404: uninstalled. 403: suspended. 422: the repo isn't in this
+      // installation any more. Either way it can't be read through here.
+      if (err.status === 404 || err.status === 403 || err.status === 422) err.installationGone = true;
       tokenCache.delete(key);
       throw err;
     }

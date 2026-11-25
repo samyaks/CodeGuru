@@ -227,8 +227,9 @@ async function runTakeoff(id, repoUrl) {
     const tAnalyze = startTimer('analyze_repo', id);
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    }, id, { github: gh, publicOnly: false });
-    // clientForProject already refused a private repo the owner hasn't granted.
+    }, id, { github: gh, publicOnly: !(project && project.owner && project.repo) });
+    // clientForProject already refused a private repo the owner hasn't granted
+    // (it only falls back to the bare server client for a row with no repo).
     if (typeof codebaseModel?.meta?.private === 'boolean' && codebaseModel.meta.private !== project?.repo_private) {
       await deployments.update(id, { repo_private: codebaseModel.meta.private });
     }

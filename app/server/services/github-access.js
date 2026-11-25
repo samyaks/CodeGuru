@@ -180,7 +180,7 @@ function clientForProject(project, deps = defaultDeps()) {
   const client = {};
   for (const [name, fn] of Object.entries(publicClient)) {
     if (typeof fn !== 'function') { client[name] = fn; continue; }
-    client[name] = REPO_SCOPED(name)
+    client[name] = name.startsWith('fetch') && REPO_SCOPED(name)
       ? async (...args) => (await resolve())[name](...args)
       : fn;
   }
