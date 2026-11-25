@@ -2502,6 +2502,170 @@ const recommendations = {
   },
 };
 
+// ── Agreements (Milestone 3) ────────────────────────────────────────────
+
+const AGREEMENT_COMMIT_STALE = "interval '10 minutes'";
+
+const agreements = {
+  async create({ id, projectId, areaId = null, text, source = null, proposedBy, proposedByName = null }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO agreements (id, project_id, area_id, text, source, proposed_by, proposed_by_name)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [id, projectId, areaId, text, source, proposedBy, proposedByName]
+    );
+    return rows[0];
+  },
+  async get(projectId, id) {
+    const { rows } = await getDb().query('SELECT * FROM agreements WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] || null;
+  },
+  async getById(id) {
+    const { rows } = await getDb().query('SELECT * FROM agreements WHERE id = $1', [id]);
+    return rows[0] || null;
+  },
+  async list(projectId, { limit = 100 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM agreements WHERE project_id = $1
+        ORDER BY (status = 'proposed') DESC, proposed_at DESC LIMIT $2`,
+      [projectId, limit]
+    );
+    return rows;
+  },
+  /** proposed → accepted/declined/withdrawn, once. Returns the row, or null when it was already decided. */
+  async decide(projectId, id, { status, decidedBy, via, note = null, agreedByEmails = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET status = $3, decided_by = $4, decided_at = now(), decided_via = $5,
+          decision_note = $6, agreed_by_emails = $7
+        WHERE project_id = $1 AND id = $2 AND status = 'proposed' RETURNING *`,
+      [projectId, id, status, decidedBy, via, note, agreedByEmails]
+    );
+    return rows[0] || null;
+  },
+  /** Take an accepted agreement to commit it. Only one runner wins; a stuck run is taken again after 10 minutes. */
+  async claimCommit(projectId, id) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET commit_state = 'committing', commit_attempted_at = date_trunc('milliseconds', now()), commit_error = NULL
+        WHERE project_id = $2 AND id = $1 AND status = 'accepted'
+          AND (commit_state IN ('none', 'waiting_for_write', 'failed')
+            OR (commit_state = 'committing' AND commit_attempted_at < now() - ${AGREEMENT_COMMIT_STALE}))
+        RETURNING *`,
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+  async setAgreedBy(projectId, id, emails) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET agreed_by_emails = $3::text[] WHERE project_id = $1 AND id = $2 AND status = 'accepted' RETURNING *`,
+      [projectId, id, emails]
+    );
+    return rows[0] || null;
+  },
+  /**
+   * Record the commit outcome. With `from`, only while the state is one of
+   * those; with `claimedAt` (the claim's commit_attempted_at, ms precision),
+   * only while that claim is the current one.
+   */
+  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId, from = null, claimedAt = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET commit_state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
+          commit_pr_url = COALESCE($5, commit_pr_url), commit_error = $6,
+          recommendation_id = COALESCE($7, recommendation_id)
+        WHERE id = $1 AND ($8::text[] IS NULL OR commit_state = ANY($8::text[]))
+          AND ($9::timestamptz IS NULL OR commit_attempted_at = $9::timestamptz) RETURNING *`,
+      [id, state, sha, url, prUrl, error, recommendationId ?? null, from, claimedAt]
+    );
+    return rows[0] || null;
+  },
+};
+
+const agreementVotes = {
+  async upsert(agreementId, userId, { vote, comment = null }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO agreement_votes (agreement_id, user_id, vote, comment)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (agreement_id, user_id) DO UPDATE
+          SET vote = EXCLUDED.vote, comment = EXCLUDED.comment, voted_at = now()
+        RETURNING *`,
+      [agreementId, userId, vote, comment]
+    );
+    return rows[0];
+  },
+  async listFor(agreementIds) {
+    if (!agreementIds.length) return [];
+    const { rows } = await getDb().query(
+      'SELECT * FROM agreement_votes WHERE agreement_id = ANY($1::text[]) ORDER BY voted_at ASC',
+      [agreementIds]
+    );
+    return rows;
+  },
+};
+
+const notificationOutbox = {
+  /** Queue one email. A `dedupeKey` already queued is skipped (returns false). */
+  async enqueue({ id, projectId, userId, email, kind, subject, body, link = null, dedupeKey = null }) {
+    const { rowCount } = await getDb().query(
+      `INSERT INTO notification_outbox (id, project_id, recipient_user_id, recipient_email, kind, subject, body, link, dedupe_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+      [id, projectId, userId, email, kind, subject, body, link, dedupeKey]
+    );
+    return rowCount > 0;
+  },
+  /** Recipients with something unsent who can still get email this hour (no digest in the last hour). */
+  async pendingRecipients({ limit = 200 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT o.recipient_email, MIN(o.created_at) AS oldest FROM notification_outbox o
+        WHERE o.sent_at IS NULL AND o.attempts < 5
+          AND NOT EXISTS (SELECT 1 FROM notification_outbox d
+            WHERE d.recipient_email = o.recipient_email AND d.digest_id IS NOT NULL AND d.sent_at >= now() - interval '1 hour')
+        GROUP BY o.recipient_email ORDER BY oldest LIMIT $1`,
+      [limit]
+    );
+    return rows.map((r) => r.recipient_email);
+  },
+  /** Claim `email`'s unsent emails for sending, so two servers don't both send them. */
+  async claimUnsent(email) {
+    const { rows } = await getDb().query(
+      `UPDATE notification_outbox SET claimed_at = now()
+        WHERE id IN (SELECT id FROM notification_outbox
+          WHERE recipient_email = $1 AND sent_at IS NULL AND attempts < 5
+            AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
+          ORDER BY created_at ASC LIMIT 100 FOR UPDATE SKIP LOCKED)
+        RETURNING *`,
+      [email]
+    );
+    return rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  },
+  async releaseClaims(ids) {
+    if (!ids.length) return;
+    await getDb().query('UPDATE notification_outbox SET claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL', [ids]);
+  },
+  /** What went to `email` since `since`: single emails and digests, counted apart. */
+  async sentSince(email, since) {
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*) FILTER (WHERE digest_id IS NULL)::int AS singles,
+              COUNT(DISTINCT digest_id)::int AS digests
+         FROM notification_outbox
+        WHERE recipient_email = $1 AND sent_at IS NOT NULL AND sent_at >= $2`,
+      [email, since]
+    );
+    return { singles: rows[0]?.singles || 0, digests: rows[0]?.digests || 0 };
+  },
+  async markSent(ids, digestId = null) {
+    if (!ids.length) return;
+    await getDb().query(
+      'UPDATE notification_outbox SET sent_at = now(), digest_id = $2 WHERE id = ANY($1::text[]) AND sent_at IS NULL',
+      [ids, digestId]
+    );
+  },
+  async markFailed(ids, error) {
+    if (!ids.length) return;
+    await getDb().query(
+      'UPDATE notification_outbox SET attempts = attempts + 1, last_error = $2, claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL',
+      [ids, String(error).slice(0, 500)]
+    );
+  },
+};
+
 const userGithubLinks = {
   async upsert(userId, { githubUserId, githubLogin }) {
     await getDb().query(
@@ -3191,6 +3355,7 @@ module.exports = {
   productMap,
   shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
   projectMembers, projectInvites, recommendations, userGithubLinks, MEMBER_LABELS,
+  agreements, agreementVotes, notificationOutbox,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

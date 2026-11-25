@@ -51,7 +51,7 @@ async function githubFetch(urlPath, opts = {}) {
     if (res.status === 404 && token === undefined && !process.env.GITHUB_TOKEN) {
       message = `Repository not found. If this is a private repo, set GITHUB_TOKEN in .env. If public, you may have hit the unauthenticated rate limit (60 req/hr). Original: ${body}`;
     }
-    if (res.status === 403) {
+    if (res.status === 403 && /rate limit/i.test(body)) {
       message = `GitHub API rate limit exceeded. Set GITHUB_TOKEN in .env to increase limits. Original: ${body}`;
     }
     const err = new Error(message);
@@ -375,7 +375,72 @@ function createClient({ token, onUnauthorized } = {}) {
     return null;
   }
 
+  // ── Writing commits (Git Data API). Needs Contents: write. ──────────────
+
+  /** A branch: { name, protected, commit: { sha } }. */
+  async function fetchBranch(owner, repo, branch) {
+    const res = await request(`/repos/${owner}/${repo}/branches/${branch.split("/").map(enc).join("/")}`);
+    return res.json();
+  }
+
+  /** The commit a git commit sha points at: { sha, tree: { sha } }. */
+  async function fetchGitCommit(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/git/commits/${enc(sha)}`);
+    return res.json();
+  }
+
+  /** The entries directly in tree `sha` (not recursive): [{ path, mode, type, sha, size }]. */
+  async function fetchTreeEntries(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/git/trees/${enc(sha)}`);
+    const data = await res.json();
+    return Array.isArray(data.tree) ? data.tree : [];
+  }
+
+  /** A tree on top of `baseTree` with text files replaced: files = [{ path, content }]. */
+  async function createTextTree(owner, repo, baseTree, files) {
+    const tree = files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content }));
+    const res = await request(`/repos/${owner}/${repo}/git/trees`, jsonBody('POST', { base_tree: baseTree, tree }));
+    return res.json();
+  }
+
+  async function createGitCommit(owner, repo, { message, tree, parents }) {
+    const res = await request(`/repos/${owner}/${repo}/git/commits`, jsonBody('POST', { message, tree, parents }));
+    return res.json();
+  }
+
+  /** Move a branch to `sha`. Not forced unless asked, so a branch that moved on is refused (422). */
+  async function updateBranchRef(owner, repo, branch, sha, { force = false } = {}) {
+    const res = await request(`/repos/${owner}/${repo}/git/refs/heads/${branch.split('/').map(enc).join('/')}`, jsonBody('PATCH', { sha, force: !!force }));
+    return res.json();
+  }
+
+  async function createBranchRef(owner, repo, branch, sha) {
+    const res = await request(`/repos/${owner}/${repo}/git/refs`, jsonBody('POST', { ref: `refs/heads/${branch}`, sha }));
+    return res.json();
+  }
+
+  async function createPullRequest(owner, repo, { title, head, base, body }) {
+    const res = await request(`/repos/${owner}/${repo}/pulls`, jsonBody('POST', { title, head, base, body }));
+    return res.json();
+  }
+
+  /** The open PR from `head` (a branch in the same repo) into `base`, or null. */
+  async function findOpenPullByHead(owner, repo, head, base) {
+    const res = await request(`/repos/${owner}/${repo}/pulls?state=open&head=${enc(`${owner}:${head}`)}&base=${enc(base)}&per_page=1`);
+    const list = await res.json();
+    return Array.isArray(list) && list.length ? list[0] : null;
+  }
+
   return {
+    fetchBranch,
+    fetchGitCommit,
+    fetchTreeEntries,
+    createTextTree,
+    createGitCommit,
+    updateBranchRef,
+    createBranchRef,
+    createPullRequest,
+    findOpenPullByHead,
     fetchAllPRFiles,
     fetchCollaboratorPermission,
     fetchUserByLogin,

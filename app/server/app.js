@@ -39,6 +39,12 @@ const { waitlistRouter, eventsRouter } = require('./routes/telemetry');
 const { createRateLimit } = require('./lib/rate-limit');
 const { loadMemberships } = require('./lib/memberships');
 const { createTeamRoutes } = require('./routes/team');
+const { createAgreementRoutes } = require('./routes/agreements');
+const agreementService = require('./services/agreements');
+const agreementNotify = require('./services/agreements/notify');
+
+// The agreement commit is a committing action; register it before any route runs.
+agreementService.registerCommitAction();
 const { createInviteRoutes } = require('./routes/invites');
 const { getDb, closeDb } = require('./lib/db');
 const { requestLogger, redactUrl } = require('./lib/logger');
@@ -177,6 +183,7 @@ if (supabase) {
   // Members and invites (Milestone 2). Mounted before projectRoutes so the
   // team paths don't run auth twice.
   app.use('/api/projects/:id/team', requireAuth(supabase), withMembers, createTeamRoutes({ sendSignInLink }));
+  app.use('/api/projects/:id/agreements', requireAuth(supabase), withMembers, createAgreementRoutes());
   app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
   app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
@@ -205,8 +212,8 @@ if (supabase) {
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });
-  app.use(['/api/projects/:id/team', '/api/invites'], (req, res) => {
-    res.status(503).json({ error: 'Authentication must be configured for project members and invites.' });
+  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/invites'], (req, res) => {
+    res.status(503).json({ error: 'Authentication must be configured for project members, agreements and invites.' });
   });
   app.use('/api/projects', projectRoutes);
   app.use('/api/projects/:projectId/story', (req, res) => {
@@ -315,6 +322,14 @@ async function start() {
   setInterval(sweepPrChecks, 15 * 60 * 1000).unref();
 
   validateEnv();
+
+  // Agreement emails (Milestone 3) go out in the background once a provider is set.
+  const emailTransport = agreementNotify.transportFromEnv();
+  if (emailTransport) {
+    const { notificationOutbox } = require('./lib/db');
+    agreementNotify.startFlusher({ transport: emailTransport, notificationOutbox, now: () => new Date() });
+    console.log('Agreement emails: on');
+  }
 
   server = app.listen(PORT, () => {
     console.log(`Takeoff server running on port ${PORT}`);

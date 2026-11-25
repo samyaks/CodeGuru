@@ -23,8 +23,12 @@ const inviteLimit = createRateLimit({ windowMs: 60 * 60000, max: 30, keyFn: byUs
  * @param {(email: string, redirectTo: string) => Promise<void>} [opts.sendSignInLink]
  * @param {object} [opts.deps] overrides for the member service deps (tests)
  */
-function createTeamRoutes({ sendSignInLink = null, deps = null } = {}) {
+function createTeamRoutes({ sendSignInLink = null, deps = null, settleAgreements } = {}) {
   const router = express.Router({ mergeParams: true });
+  // After someone leaves, proposals everyone left has agreed to are accepted.
+  const settle = settleAgreements !== undefined
+    ? settleAgreements
+    : (deps ? null : (args) => require('../services/agreements').settleOpen(args));
   const teamDeps = () => ({ ...members.defaultDeps(), sendSignInLink, ...(deps || {}) });
 
   async function loadProject(req) {
@@ -61,7 +65,13 @@ function createTeamRoutes({ sendSignInLink = null, deps = null } = {}) {
 
   router.delete('/members/:userId', writeLimit, asyncHandler(async (req, res) => {
     const project = await loadProject(req);
-    res.json(await members.removeMember({ project, user: req.user, memberId: req.params.userId }, teamDeps()));
+    const out = await members.removeMember({ project, user: req.user, memberId: req.params.userId }, teamDeps());
+    if (settle) {
+      // The commit runs as whoever is still here: the remover, else the owner.
+      const actor = req.params.userId !== req.user.id ? req.user : (project.user_id ? { id: project.user_id } : null);
+      if (actor) void Promise.resolve(settle({ project, actor })).catch(() => {});
+    }
+    res.json(out);
   }));
 
   router.post('/recommendations/:rid/confirm', writeLimit, asyncHandler(async (req, res) => {

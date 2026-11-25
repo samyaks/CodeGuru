@@ -8,4 +8,5 @@ module.exports = {
   ...require('./migrate'),
   ...require('./generate'),
   ...require('./sync'),
+  ...require('./agreements'),
 };

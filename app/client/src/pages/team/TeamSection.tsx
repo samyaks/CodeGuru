@@ -15,6 +15,9 @@ import {
 } from '../../services/teamApi';
 import styles from './Team.module.css';
 
+/** Fired after a recommendation is confirmed or dismissed, or a member removed (AgreementsSection listens). */
+export const TEAM_CHANGED_EVENT = 'takeoff:team-changed';
+
 const LABEL_TEXT: Record<MemberLabel, string> = { creator: 'Creator', builder: 'Builder' };
 const LABEL_HINT: Record<MemberLabel, string> = {
   creator: 'decides what the product should do',
@@ -172,6 +175,7 @@ export function TeamSection({ projectId }: { projectId: string }) {
                             await removeMember(projectId, m.userId);
                             if (isYou) { window.location.href = '/dashboard'; return; }
                             await load();
+                            window.dispatchEvent(new Event(TEAM_CHANGED_EVENT));
                           });
                         }}
                       >
@@ -296,6 +300,7 @@ export function TeamSection({ projectId }: { projectId: string }) {
                                 throw err;
                               } finally {
                                 await load();
+                                window.dispatchEvent(new Event(TEAM_CHANGED_EVENT));
                               }
                             })}
                           >
@@ -305,7 +310,11 @@ export function TeamSection({ projectId }: { projectId: string }) {
                             variant="quiet"
                             size="sm"
                             disabled={busy === `dismiss:${r.id}`}
-                            onClick={() => void run(`dismiss:${r.id}`, async () => { await dismissRecommendation(projectId, r.id); await load(); })}
+                            onClick={() => void run(`dismiss:${r.id}`, async () => {
+                              await dismissRecommendation(projectId, r.id);
+                              await load();
+                              window.dispatchEvent(new Event(TEAM_CHANGED_EVENT));
+                            })}
                           >
                             Dismiss
                           </Button>
