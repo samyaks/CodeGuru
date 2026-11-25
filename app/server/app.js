@@ -13,6 +13,7 @@ const projectRoutes = require('./routes/projects');
 const buildStoryRoutes = require('./routes/build-story');
 const publicStoryRoutes = require('./routes/public-story');
 const reviewRoutes = require('./routes/reviews');
+const githubAppRoutes = require('./routes/github-app');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
 const projectAnalyticsRoutes = require('./routes/project-analytics');
@@ -150,6 +151,7 @@ if (supabase) {
   // signed-in visitors' rows carry a user_id.
   app.use('/api/waitlist', optionalAuth(supabase), waitlistRouter);
   app.use('/api/events', optionalAuth(supabase), eventsRouter);
+  app.use('/api/github-app', optionalAuth(supabase), githubAppRoutes);
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
   app.use('/api/projects', optionalAuth(supabase), projectRoutes);
   app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
@@ -172,6 +174,7 @@ if (supabase) {
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/waitlist', waitlistRouter);
   app.use('/api/events', eventsRouter);
+  app.use('/api/github-app', githubAppRoutes);
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });

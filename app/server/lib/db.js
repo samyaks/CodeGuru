@@ -330,7 +330,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
   'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
-  'suggestions_count', 'security_score',
+  'suggestions_count', 'security_score', 'github_installation_id', 'repo_private',
 ]);
 
 const deployments = {
@@ -397,6 +397,86 @@ const deployments = {
          AND repo_url NOT LIKE 'local://%'
        ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
       [owner, repo]
+    );
+    return rows;
+  },
+};
+
+// Projects stop reading through an installation that is gone or no longer covers their repo.
+deployments.clearInstallation = async function clearInstallation(installationId) {
+  const { rowCount } = await getDb().query(
+    'UPDATE deployments SET github_installation_id = NULL WHERE github_installation_id = $1',
+    [installationId]);
+  return rowCount;
+};
+deployments.clearInstallationForRepos = async function clearInstallationForRepos(installationId, fullNames) {
+  if (!fullNames.length) return 0;
+  const { rowCount } = await getDb().query(
+    `UPDATE deployments SET github_installation_id = NULL
+      WHERE github_installation_id = $1 AND LOWER(owner || '/' || repo) = ANY($2::text[])`,
+    [installationId, fullNames.map((n) => n.toLowerCase())]);
+  return rowCount;
+};
+
+// ── GitHub App repo access ────────────────────────────────────────
+
+const GRANT_UPSERT_SQL = `INSERT INTO github_repo_access
+     (user_id, installation_id, repo_id, repo_full_name, private, account_login, github_user_id, granted_at)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+   ON CONFLICT (user_id, repo_id) DO UPDATE SET
+     installation_id = EXCLUDED.installation_id,
+     repo_full_name = EXCLUDED.repo_full_name,
+     private = EXCLUDED.private,
+     account_login = EXCLUDED.account_login,
+     github_user_id = EXCLUDED.github_user_id,
+     granted_at = now()`;
+
+const githubRepoAccess = {
+  /** Replace everything a user can read via the app with a fresh listing. */
+  async replaceForUser(userId, grants) {
+    await withTransaction(async (client) => {
+      await client.query('DELETE FROM github_repo_access WHERE user_id = $1', [userId]);
+      for (const g of grants) {
+        await client.query(GRANT_UPSERT_SQL,
+          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin, g.githubUserId ?? null]);
+      }
+    });
+  },
+  /** A GitHub user revoked their authorization of the app: drop what they granted. */
+  async deleteForGithubUser(githubUserId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE github_user_id = $1', [githubUserId]);
+    return rowCount;
+  },
+  /** The app was uninstalled: nobody reads through this installation any more. */
+  async deleteForInstallation(installationId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1', [installationId]);
+    return rowCount;
+  },
+  /** Repos were removed from an installation. */
+  async deleteForRepos(installationId, repoIds) {
+    if (!repoIds.length) return 0;
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1 AND repo_id = ANY($2::bigint[])',
+      [installationId, repoIds]);
+    return rowCount;
+  },
+  async findForUserRepo(userId, owner, repo) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM github_repo_access
+        WHERE user_id = $1 AND LOWER(repo_full_name) = LOWER($2)
+        LIMIT 1`,
+      [userId, `${owner}/${repo}`],
+    );
+    return rows[0] || null;
+  },
+  async listForUser(userId) {
+    const { rows } = await getDb().query(
+      `SELECT repo_full_name, private, account_login, granted_at
+         FROM github_repo_access WHERE user_id = $1
+        ORDER BY LOWER(repo_full_name)`,
+      [userId],
     );
     return rows;
   },
@@ -2139,6 +2219,51 @@ const webhookEvents = {
   },
 };
 
+// ── Processed pushes (webhook dedupe) ─────────────────────────────
+
+// A claim that never completed (crash, deploy) can be taken over after this
+// long. Well past the longest push run (commits run one at a time with LLM
+// calls), so a slow run is never processed twice.
+const PUSH_CLAIM_STALE_MINUTES = 60;
+
+const processedPushes = {
+  /**
+   * True when this delivery should process the push: it is the first, or the
+   * earlier claim never completed and has gone stale. False when another
+   * delivery is working on it or finished it. Migration 026 adds the table.
+   */
+  async claim({ projectId, ref, before, after, deliveryId, source }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO processed_pushes (project_id, ref, before_sha, after_sha, delivery_id, source)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (project_id, ref, before_sha, after_sha) DO UPDATE
+          SET delivery_id = EXCLUDED.delivery_id, source = EXCLUDED.source, received_at = now()
+          WHERE processed_pushes.completed_at IS NULL
+            AND processed_pushes.received_at < now() - ($7 || ' minutes')::interval
+        RETURNING project_id`,
+      [projectId, ref, before, after, deliveryId ?? null, source, String(PUSH_CLAIM_STALE_MINUTES)]
+    );
+    return rows.length > 0;
+  },
+  /** Processing finished; later deliveries of this push are true duplicates. */
+  async complete({ projectId, ref, before, after }) {
+    await getDb().query(
+      `UPDATE processed_pushes SET completed_at = now()
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4`,
+      [projectId, ref, before, after]
+    );
+  },
+  /** Processing failed; let a redelivery try again. */
+  async release({ projectId, ref, before, after }) {
+    await getDb().query(
+      `DELETE FROM processed_pushes
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4
+          AND completed_at IS NULL`,
+      [projectId, ref, before, after]
+    );
+  },
+};
+
 // ── Intent statements (Takeoff intent substrate) ──────────────────
 //
 // The first-class "what this app is meant to do" object. Gaps and
@@ -2673,11 +2798,11 @@ const readClaims = {
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
-  analyses, deployments, buildEntries, projectServices, projectEvents,
+  analyses, deployments, githubRepoAccess, buildEntries, projectServices, projectEvents,
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents, securityShares,
+  shippedItems, webhookEvents, processedPushes, securityShares,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

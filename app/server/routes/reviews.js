@@ -10,6 +10,7 @@ const { createRateLimit } = require('../lib/rate-limit');
 const { validatePagination } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { resolveRepoAccess } = require('../services/github-access');
 
 const router = express.Router();
 
@@ -18,6 +19,14 @@ const reviewRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'To
 router.post('/', reviewRateLimit, asyncHandler(async (req, res) => {
   const { repoUrl, prNumber, type = 'pr', branch } = req.body;
   if (!repoUrl) throw AppError.badRequest('repoUrl is required');
+  if (prNumber != null && prNumber !== '' && !/^[1-9]\d{0,9}$/.test(String(prNumber))) {
+    throw AppError.badRequest('prNumber must be a pull request number');
+  }
+  // A git ref: no dot segments, no "..", nothing outside the usual characters.
+  if (branch != null && branch !== '' && (typeof branch !== 'string' || branch.length > 255
+      || !/^[A-Za-z0-9._\/-]+$/.test(branch) || branch.includes('..') || branch.split('/').some((s) => s === '' || s === '.'))) {
+    throw AppError.badRequest('branch is not a valid branch name');
+  }
 
   if (type === 'pr' && !prNumber) {
     const parsed = github.parsePRUrl(repoUrl);
@@ -35,6 +44,7 @@ router.post('/', reviewRateLimit, asyncHandler(async (req, res) => {
 }));
 
 async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch, userId }) {
+  const access = await resolveRepoAccess({ userId: userId || null, owner, repo });
   const id = uuidv4();
   await reviews.create({
     id, type, repo_url: repoUrl, owner, repo,
@@ -44,14 +54,14 @@ async function createReview(res, { repoUrl, prNumber, type, owner, repo, branch,
   });
 
   setImmediate(() => {
-    startReview(id).catch((err) => {
+    startReview(id, access.client).catch((err) => {
       console.error(`startReview ${id} unhandled:`, err);
     });
   });
   res.status(201).json({ reviewId: id, status: 'pending', message: 'Review created' });
 }
 
-async function startReview(reviewId) {
+async function startReview(reviewId, gh) {
   try {
     await reviews.updateStatus(reviewId, 'in_progress');
     broadcast(reviewId, { type: 'review-started', reviewId });
@@ -60,8 +70,8 @@ async function startReview(reviewId) {
     if (!review) return;
 
     const result = review.type === 'pr'
-      ? await runPRReview(reviewId, review)
-      : await runRepoReview(reviewId, review);
+      ? await runPRReview(reviewId, review, gh)
+      : await runRepoReview(reviewId, review, gh);
 
     const { report, fileContents } = result;
     const files = await reviewFiles.findByReviewId(reviewId);
@@ -95,12 +105,12 @@ async function startReview(reviewId) {
   }
 }
 
-async function runPRReview(reviewId, review) {
+async function runPRReview(reviewId, review, gh) {
   broadcast(reviewId, { type: 'progress', phase: 'fetching', message: `Fetching PR #${review.pr_number}...` });
 
   const [prMeta, prFiles] = await Promise.all([
-    github.fetchPullRequest(review.owner, review.repo, review.pr_number),
-    github.fetchPRFiles(review.owner, review.repo, review.pr_number),
+    gh.fetchPullRequest(review.owner, review.repo, review.pr_number),
+    gh.fetchPRFiles(review.owner, review.repo, review.pr_number),
   ]);
 
   broadcast(reviewId, { type: 'progress', phase: 'fetched', message: `Fetched ${prFiles.length} changed files`, fileCount: prFiles.length });
@@ -122,23 +132,23 @@ async function runPRReview(reviewId, review) {
   return { report, fileContents };
 }
 
-async function runRepoReview(reviewId, review) {
+async function runRepoReview(reviewId, review, gh) {
   broadcast(reviewId, { type: 'progress', phase: 'fetching', message: `Fetching repo tree for ${review.owner}/${review.repo}...` });
 
   let branch = review.branch;
   if (!branch) {
     try {
-      const meta = await github.fetchRepoMeta(review.owner, review.repo);
+      const meta = await gh.fetchRepoMeta(review.owner, review.repo);
       branch = meta.default_branch || 'main';
     } catch { branch = 'main'; }
   }
 
   let tree;
   try {
-    tree = await github.fetchRepoTree(review.owner, review.repo, branch);
+    tree = await gh.fetchRepoTree(review.owner, review.repo, branch);
   } catch {
     branch = branch === 'main' ? 'master' : 'main';
-    tree = await github.fetchRepoTree(review.owner, review.repo, branch);
+    tree = await gh.fetchRepoTree(review.owner, review.repo, branch);
   }
 
   const codeFiles = tree.filter((f) => f.type === 'blob' && !f.path.includes('node_modules') && !f.path.includes('.lock'));
@@ -147,14 +157,14 @@ async function runRepoReview(reviewId, review) {
   const deployInfo = detectDeploymentFiles(tree);
   const deployFileContents = await Promise.all(
     deployInfo.allPaths.slice(0, 10).map((p) =>
-      github.fetchFileContent(review.owner, review.repo, p, branch).catch(() => ({ path: p, content: null, size: 0 }))
+      gh.fetchFileContent(review.owner, review.repo, p, branch).catch(() => ({ path: p, content: null, size: 0 }))
     )
   );
 
   const sample = codeFiles.slice(0, 20);
   const fileContents = await Promise.all(
     sample.map((f) =>
-      github.fetchFileContent(review.owner, review.repo, f.path, branch).catch(() => ({ path: f.path, content: null, size: 0 }))
+      gh.fetchFileContent(review.owner, review.repo, f.path, branch).catch(() => ({ path: f.path, content: null, size: 0 }))
     )
   );
 
