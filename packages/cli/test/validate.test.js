@@ -147,3 +147,9 @@ test('path patterns the PR check cannot match are errors', () => {
   assert.ok(msgs.some((m) => /more than 32 alternatives/.test(m)), msgs.join('\n'));
   assert.strictEqual(r.ok, false);
 });
+
+test('nested brace groups are counted the way the PR check expands them', () => {
+  const nested = '{x,y,{a,b,c,d,e,f,g,h,i,j,k,l}}/**';
+  const r = validateText(fixture('v2.yaml').replace('"src/pages/checkout*"', `"${nested}"`));
+  assert.deepStrictEqual(errorsOf(r), []);
+});

@@ -11,32 +11,10 @@
 // segment by segment with dynamic programming (no regular expressions, no
 // backtracking): time is bounded by pattern length × path length.
 
-const MAX_PATTERN_LENGTH = 300;
-const MAX_BRACE_EXPANSIONS = 32;
+const { expandBraces, MAX_PATH_PATTERN: MAX_PATTERN_LENGTH } = require('@takeoff/cli');
+
 const CACHE_LIMIT = 500;
 const cache = new Map();
-
-/** "src/{a,b}/x" → ["src/a/x", "src/b/x"]; one level of nesting at a time, capped. */
-function expandBraces(glob) {
-  const out = [];
-  const queue = [glob];
-  while (queue.length) {
-    const g = queue.shift();
-    const open = g.indexOf('{');
-    const close = open === -1 ? -1 : g.indexOf('}', open);
-    if (open === -1 || close === -1) {
-      out.push(g);
-    } else {
-      // innermost-last: take the last "{" before the first "}" so nesting expands inside out
-      const start = g.lastIndexOf('{', close);
-      for (const alt of g.slice(start + 1, close).split(',')) {
-        queue.push(g.slice(0, start) + alt + g.slice(close + 1));
-        if (out.length + queue.length > MAX_BRACE_EXPANSIONS) return null;
-      }
-    }
-  }
-  return out;
-}
 
 /** Tokens for one path segment: { lit } | { any } (*) | { one } (?) | { set, neg }. */
 function compileSegment(seg) {

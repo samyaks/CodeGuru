@@ -280,24 +280,34 @@ async function runPrCheck(input, deps = defaultDeps()) {
     .then((landed) => { if (!landed) log({ event: 'pr_check_finish_superseded', ...ctx }); })
     .catch((e) => log({ event: 'pr_check_finish_failed', message: e.message, ...ctx }));
 
+  const started = {
+    status: 'in_progress',
+    started_at: new Date().toISOString(),
+    output: { title: 'Checking against takeoff.yaml', summary: 'Takeoff is comparing this PR with the product intent.' },
+  };
   let checkRunId = null;
-  try {
-    const run = await gh.createCheckRun(owner, repo, {
-      name: CHECK_NAME,
-      head_sha: headSha,
-      external_id: String(prNumber),
-      status: 'in_progress',
-      started_at: new Date().toISOString(),
-      output: { title: 'Checking against takeoff.yaml', summary: 'Takeoff is comparing this PR with the product intent.' },
-    });
-    checkRunId = run?.id ? Number(run.id) : null;
-    // Saved now, so a restart mid-check leaves something the sweep can close.
-    if (checkRunId) {
-      await deps.prChecks.setCheckRun(key, attempt, checkRunId)
-        .catch((e) => log({ event: 'pr_check_set_run_failed', message: e.message, ...ctx }));
+  // An attempt a restart left behind still has its check run open: reuse it,
+  // so this attempt closes it rather than leaving it "in progress" for good.
+  if (claim.check_run_id) {
+    try {
+      await gh.updateCheckRun(owner, repo, Number(claim.check_run_id), started);
+      checkRunId = Number(claim.check_run_id);
+    } catch (err) {
+      log({ event: 'pr_check_run_reuse_failed', status: err.status || null, message: err.message, ...ctx });
     }
-  } catch (err) {
-    log({ event: 'pr_check_run_create_failed', status: err.status || null, message: err.message, ...ctx });
+  }
+  if (!checkRunId) {
+    try {
+      const run = await gh.createCheckRun(owner, repo, { name: CHECK_NAME, head_sha: headSha, external_id: String(prNumber), ...started });
+      checkRunId = run?.id ? Number(run.id) : null;
+      // Saved now, so a restart mid-check leaves something the sweep can close.
+      if (checkRunId) {
+        await deps.prChecks.setCheckRun(key, attempt, checkRunId)
+          .catch((e) => log({ event: 'pr_check_set_run_failed', message: e.message, ...ctx }));
+      }
+    } catch (err) {
+      log({ event: 'pr_check_run_create_failed', status: err.status || null, message: err.message, ...ctx });
+    }
   }
   const previewUrl = await gh.fetchPreviewUrl(owner, repo, headSha).catch(() => null);
 

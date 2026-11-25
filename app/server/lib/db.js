@@ -2284,7 +2284,9 @@ const prChecks = {
         VALUES ($1, $2, $3, $4, $7)
         ON CONFLICT (repo_full_name, pr_number, head_sha) DO UPDATE
           SET status = 'running', attempts = pr_checks.attempts + 1, error = NULL,
-              check_run_id = NULL,
+              -- A stale running attempt's check run is still open: keep it, so
+              -- the new attempt reuses and closes it.
+              check_run_id = CASE WHEN pr_checks.status = 'running' THEN pr_checks.check_run_id END,
               project_id = COALESCE(EXCLUDED.project_id, pr_checks.project_id),
               installation_id = COALESCE(EXCLUDED.installation_id, pr_checks.installation_id),
               updated_at = now(), completed_at = NULL
@@ -2332,7 +2334,8 @@ const prChecks = {
   /** This sha's verdict is now on the PR's comment. Pass the locked client inside withCommentLock. */
   async setComment({ repo, prNumber, headSha }, commentId, db = getDb()) {
     await db.query(
-      `UPDATE pr_checks SET comment_id = $4, comment_at = now()
+      // clock_timestamp(): now() is the transaction's start, before the lock wait.
+      `UPDATE pr_checks SET comment_id = $4, comment_at = clock_timestamp()
         WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3`,
       [repo, prNumber, headSha, commentId]
     );

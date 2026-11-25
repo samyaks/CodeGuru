@@ -507,7 +507,7 @@ test('globs from takeoff.yaml cannot stall the server', () => {
   const started = Date.now();
   assert.ok(globMatches(`${'**/'.repeat(40)}x`, `${'a/'.repeat(300)}x`));
   assert.ok(!globMatches(`src/${'*a'.repeat(60)}b`, `src/${'a'.repeat(2000)}`));
-  assert.ok(!globMatches(`{${'a,'.repeat(100)}b}`, 'b'), 'brace bombs match nothing');
+  assert.ok(!globMatches(`{${Array.from({ length: 100 }, (_, i) => `a${i}`).join(',')},b}`, 'b'), 'brace bombs match nothing');
   assert.ok(Date.now() - started < 1000, `took ${Date.now() - started}ms`);
 });
 
@@ -683,4 +683,33 @@ test('model call asks for high effort and uses fallbacks on Sonnet 5.5', async (
   assert.strictEqual(seen[0][0], 'beta');
   assert.strictEqual(seen[0][1].output_config.effort, 'high');
   assert.strictEqual(seen[0][1].fallbacks, 'default');
+});
+
+test('a re-claimed stale check reuses and closes the check run it left open', async () => {
+  const w = world(readCase('matches'));
+  w.gh.state.checkRuns.push({ id: 5, status: 'in_progress', name: 'Takeoff' });
+  const claim = w.prChecks.claim;
+  w.prChecks.claim = async (...a) => ({ ...(await claim(...a)), check_run_id: 5 });
+  await runPrCheck(job(), w.deps);
+  assert.strictEqual(w.gh.state.checkRuns.length, 1);
+  assert.strictEqual(w.gh.state.checkRuns[0].status, 'completed');
+});
+
+test('the validator and the matcher agree on nested brace patterns', () => {
+  const { expandBraces } = require('@takeoff/cli');
+  const nested = 'src/{x,y,{a,b,c,d,e,f,g,h,i,j,k,l}}/z';
+  assert.strictEqual(expandBraces(nested).length, 14);
+  assert.strictEqual(globMatches(nested, 'src/k/z'), true);
+  assert.strictEqual(globMatches(nested, 'src/y/z'), true);
+  const { uncheckablePatterns } = require('./globs');
+  assert.deepStrictEqual(uncheckablePatterns({ areas: [{ id: 'x', paths: [nested] }] }), []);
+  assert.strictEqual(expandBraces('{a,b,c,d,e,f}/{a,b,c,d,e,f}'), null);
+  assert.strictEqual(expandBraces('{a,a,a,a,a,a,a,a}'.repeat(8)), null); // duplicates still cost work
+  assert.deepStrictEqual(expandBraces('src/{a/x'), ['src/{a/x']);
+});
+
+test('fencing leaves comparisons in code as written', () => {
+  const { fence } = require('./prompt');
+  assert.strictEqual(fence('if (a < 5 && b <= c && d << 1)'), 'if (a < 5 && b <= c && d << 1)');
+  assert.strictEqual(fence('x < /diff> y <／diff>'), 'x ‹ /diff> y ‹／diff>');
 });

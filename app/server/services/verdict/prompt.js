@@ -63,10 +63,11 @@ const MAX_COMMITS = 100;
 const MAX_COMMIT_CHARS = 200;
 const cut = (t, n) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
-// Text from the PR or takeoff.yaml can't open or close a tag: every "<"
-// (and look-alikes) in it becomes "‹".
+// Text from the PR or takeoff.yaml can't open or close a tag: a "<" (or a
+// look-alike) that could start one becomes "‹". Comparisons such as "a < 5"
+// or "x <= y" are left as written so the code reads true.
 function fence(text) {
-  return String(text ?? '').replace(/[<\uFF1C\uFE64]/g, '‹');
+  return String(text ?? '').replace(/[<\uFF1C\uFE64](?=\s*\/?\s*[^\s\d=<>-])/g, '‹');
 }
 /** A file name on one line (git allows newlines in names), cut to a sane length. */
 const fname = (f) => {
