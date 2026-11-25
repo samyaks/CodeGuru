@@ -118,25 +118,41 @@ async function confirmRecommendation({ project, user, recommendationId }, deps =
   }
   const rec = await deps.recommendations.claimForConfirm(project.id, recommendationId, user.id);
   if (!rec) throw AppError.conflict('This recommendation was already confirmed or dismissed.');
+  let result;
   try {
-    const result = await action.run({ project, payload: rec.payload || {}, actor: { userId: user.id, githubLogin: access.githubLogin } });
-    const done = await deps.recommendations.finish(rec.id, { status: 'confirmed', result: result ?? null });
-    return publicRecommendation(done || { ...rec, status: 'confirmed' });
+    result = await action.run({ project, payload: rec.payload || {}, actor: { userId: user.id, githubLogin: access.githubLogin } });
   } catch (err) {
-    // Back to pending with the reason, so it stays on the list and can be tried again.
+    // The action failed: back to pending with the reason, so it stays on the
+    // list and can be tried again.
     await deps.recommendations.release(rec.id, String(err.message || err).slice(0, 1000)).catch(() => {});
     throw err;
   }
+  // The action already ran (it may have written to the repo), so a failure
+  // from here on must not put it back to pending, or the next confirm would
+  // run it again at once. Try the write once more; if it still fails, the
+  // claim stays held like a crash mid-run, so actions must be idempotent.
+  const outcome = { status: 'confirmed', result: result ?? null };
+  const done = await deps.recommendations.finish(rec.id, outcome)
+    .catch(() => deps.recommendations.finish(rec.id, outcome));
+  return publicRecommendation(done || { ...rec, status: 'confirmed' });
 }
 
-/** The member who recommended it, or anyone with write access, can dismiss it. */
+/** The member who recommended it, the project owner, or anyone with write access can dismiss it. */
 async function dismissRecommendation({ project, user, recommendationId }, deps = defaultDeps()) {
   const existing = await deps.recommendations.get(project.id, recommendationId);
   if (!existing) throw AppError.notFound('Recommendation not found');
-  if (existing.created_by !== user.id) {
-    const access = await writeAccess(project, user, deps);
+  const isOwner = !!(project.user_id && project.user_id === user.id);
+  if (existing.created_by !== user.id && !isOwner) {
+    let access;
+    try {
+      access = await writeAccess(project, user, deps);
+    } catch (err) {
+      console.warn('[team] write access check failed:', err.message);
+      const e = new AppError('Could not check your GitHub access just now. Try again in a minute.', 503, 'GITHUB_UNAVAILABLE');
+      throw e;
+    }
     if (!access.canWrite) {
-      throw AppError.forbidden('Only the person who recommended this, or someone with write access to the repo, can dismiss it.');
+      throw AppError.forbidden('Only the person who recommended this, the project owner, or someone with write access to the repo can dismiss it.');
     }
   }
   const rec = await deps.recommendations.dismiss(project.id, recommendationId, user.id);

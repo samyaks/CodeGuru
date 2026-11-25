@@ -43,12 +43,23 @@ function defaultDeps() {
  * installation. undefined when we can't ask (no installation, GitHub down);
  * null when GitHub has no such account.
  */
+const GITHUB_LOOKUP_TIMEOUT_MS = 5000;
+
 async function lookupGithubUserViaApp(project, login) {
   if (!project.github_installation_id) return undefined;
   try {
     const { getGithubApp } = require('../../lib/github-app');
     const gh = getGithubApp().clientForInstallation(Number(project.github_installation_id), { repo: project.repo });
-    return await gh.fetchUserByLogin(login);
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timed out')), GITHUB_LOOKUP_TIMEOUT_MS);
+      if (timer.unref) timer.unref();
+    });
+    try {
+      return await Promise.race([gh.fetchUserByLogin(login), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (err) {
     console.warn('[team] GitHub user lookup failed:', err.message);
     return undefined;

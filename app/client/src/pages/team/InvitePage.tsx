@@ -138,6 +138,9 @@ export default function InvitePage() {
           </>
         ) : (
           <>
+            {signInFailed ? (
+              <p role="status" className="type-body">Signing in with GitHub didn’t finish. Try again.</p>
+            ) : null}
             <p className="type-body">This invite is for the GitHub account {invite.invitedFor}. Sign in with it to join.</p>
             <div><Button variant="primary" onClick={githubSignIn}>Sign in with GitHub</Button></div>
           </>

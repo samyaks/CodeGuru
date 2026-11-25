@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS project_invites (
   CHECK ((email IS NULL) <> (github_login IS NULL))
 );
 
+-- For databases that ran an earlier draft of this migration.
+ALTER TABLE project_invites ADD COLUMN IF NOT EXISTS github_user_id BIGINT;
+ALTER TABLE project_invites ADD COLUMN IF NOT EXISTS invited_by_name TEXT;
+ALTER TABLE project_invites ADD COLUMN IF NOT EXISTS last_link_sent_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_project_invites_project ON project_invites (project_id, created_at DESC);
 -- One open invite per address per project.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_invites_open_email

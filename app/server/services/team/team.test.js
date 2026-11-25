@@ -292,6 +292,31 @@ test('a failed run marks the recommendation failed; a renamed GitHub login held 
   committing._actions.delete('test.boom');
 });
 
+test('a run that succeeds is never run twice, even if saving the result fails; the owner can always dismiss', async () => {
+  const db = fakeDb();
+  let runs = 0;
+  committing.registerCommittingAction('test.once', { summarize: () => 'Once', run: async () => { runs += 1; return { sha: 'x' }; } });
+  await db.deps.userGithubLinks.upsert('kim', { githubUserId: 3, githubLogin: 'kim-gh' });
+  const { deps } = committingDeps(db, { 'kim-gh': { permission: 'write', canPush: true, githubUserId: 3 } });
+  const brokenDeps = { ...deps, recommendations: { ...deps.recommendations, finish: async () => { throw new Error('db down'); } } };
+  const rec = await db.deps.recommendations.create({ id: 'r9', projectId: 'p1', actionType: 'test.once', payload: {}, summary: 'Once', createdBy: 'sam' });
+  await assert.rejects(committing.confirmRecommendation({ project: db.project, user: { id: 'kim' }, recommendationId: rec.id }, brokenDeps), /db down/);
+  assert.strictEqual(runs, 1);
+  assert.strictEqual(db.state.recs.find((r) => r.id === 'r9').status, 'confirming', 'not put back to pending');
+  await assert.rejects(committing.confirmRecommendation({ project: db.project, user: { id: 'kim' }, recommendationId: rec.id }, deps), (e) => e.statusCode === 409);
+  assert.strictEqual(runs, 1, 'ran once');
+
+  // The owner dismisses without GitHub; anyone else gets a 503, not a 500, when GitHub can't be asked.
+  const rec2 = await db.deps.recommendations.create({ id: 'r10', projectId: 'p1', actionType: 'test.once', payload: {}, summary: 'Once', createdBy: 'sam' });
+  const downDeps = { ...deps, clientForInstallation: () => ({ fetchCollaboratorPermission: async () => { throw new Error('GitHub down'); } }) };
+  const warn = console.warn; console.warn = () => {};
+  try {
+    await assert.rejects(committing.dismissRecommendation({ project: db.project, user: { id: 'kim' }, recommendationId: rec2.id }, downDeps), (e) => e.statusCode === 503);
+  } finally { console.warn = warn; }
+  assert.strictEqual((await committing.dismissRecommendation({ project: db.project, user: owner, recommendationId: rec2.id }, downDeps)).status, 'dismissed');
+  committing._actions.delete('test.once');
+});
+
 test('when GitHub can\'t be asked, the change is kept as a recommendation', async () => {
   const db = fakeDb();
   committing.registerCommittingAction('test.keep', { summarize: () => 'Keep', run: async () => { throw new Error('must not run'); } });
