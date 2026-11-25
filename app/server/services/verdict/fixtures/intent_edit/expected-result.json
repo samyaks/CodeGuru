@@ -1,0 +1,15 @@
+{
+  "verdict": "needs_decision",
+  "summary": "Trips can now have three travellers, and the PR changes the Trips rule in takeoff.yaml to match.",
+  "conflicts": [],
+  "suggested_agreement": "Trips can have two or three travellers.",
+  "render": {
+    "areaNames": {
+      "billing": "Billing & pricing",
+      "trips": "Trips"
+    },
+    "notes": [
+      "This PR also edits takeoff.yaml, so a person should confirm the new intent. Removes or rewords the rule \"A trip always has exactly two travellers.\" in \"Trips\". Adds the rule \"A trip has two or three travellers.\" to \"Trips\"."
+    ]
+  }
+}

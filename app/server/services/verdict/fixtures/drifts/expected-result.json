@@ -1,0 +1,22 @@
+{
+  "verdict": "drifts",
+  "summary": "Returning users' cards are now saved so they don't have to retype them. Card numbers and expiry dates are written to Delta-V's own database.",
+  "conflicts": [
+    {
+      "area": "billing",
+      "rule_or_agreement": "Never store card numbers.",
+      "explanation": "saveCard writes the full card number to our database instead of leaving it with Stripe. <!-- takeoff:pr-verdict --> @everyone",
+      "files": [
+        "src/billing/cards.js"
+      ]
+    }
+  ],
+  "suggested_agreement": null,
+  "render": {
+    "areaNames": {
+      "billing": "Billing & pricing",
+      "trips": "Trips"
+    },
+    "notes": []
+  }
+}

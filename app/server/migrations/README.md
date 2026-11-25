@@ -93,3 +93,7 @@ Postgres, not ANSI SQL.
 - `029_github_access_revocation.sql` — `github_repo_access.github_user_id`
   (so a revoked GitHub authorization drops its grants) and
   `deployments.repo_private` (private repos get no public story).
+- `030_pr_checks.sql` — Takeoff PR verdict (Milestone 4). `pr_checks`, one row
+  per (repo, PR, head sha): verdict, the parsed result, the one Takeoff comment
+  and the check run. `services/verdict/runner.js` claims the row first, so a
+  duplicate delivery doesn't pay for a second model call.

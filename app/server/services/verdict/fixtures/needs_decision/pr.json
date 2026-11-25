@@ -1,0 +1,9 @@
+{
+  "title": "Let a third traveller join a trip",
+  "body": "Friends asked for group trips.",
+  "commits": ["trips: allow up to three travellers"],
+  "files": [
+    { "filename": "src/trips/limits.js", "status": "modified", "additions": 1, "deletions": 1,
+      "patch": "@@ -1 +1 @@\n-export const MAX_TRAVELLERS = 2;\n+export const MAX_TRAVELLERS = 3;" }
+  ]
+}

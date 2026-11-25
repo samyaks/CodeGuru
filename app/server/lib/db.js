@@ -2264,6 +2264,136 @@ const processedPushes = {
   },
 };
 
+// ── PR verdict checks (Takeoff Milestone 4, migration 030) ─────────
+//
+// One row per (repo, PR, head sha). claim() is the dedupe: only the delivery
+// whose claim lands calls the model. The stale window is longer than a run can
+// take (one model call is capped at about 8 minutes with its retry).
+const PR_CHECK_STALE_MINUTES = 30;
+
+const prChecks = {
+  /**
+   * The claimed row, or null when another run holds it or finished it. A row
+   * that failed, or is stuck running past the stale window, is claimed again.
+   * `force` (Re-run on the check) also re-claims a finished row. The returned
+   * `attempts` identifies this claim: later writes only land while it holds.
+   */
+  async claim({ repo, prNumber, headSha, projectId, installationId = null, force = false }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO pr_checks (repo_full_name, pr_number, head_sha, project_id, installation_id)
+        VALUES ($1, $2, $3, $4, $7)
+        ON CONFLICT (repo_full_name, pr_number, head_sha) DO UPDATE
+          SET status = 'running', attempts = pr_checks.attempts + 1, error = NULL,
+              -- A stale running attempt's check run is still open: keep it, so
+              -- the new attempt reuses and closes it.
+              check_run_id = CASE WHEN pr_checks.status = 'running' THEN pr_checks.check_run_id END,
+              project_id = COALESCE(EXCLUDED.project_id, pr_checks.project_id),
+              installation_id = COALESCE(EXCLUDED.installation_id, pr_checks.installation_id),
+              updated_at = now(), completed_at = NULL
+          WHERE pr_checks.status = 'failed'
+             OR (pr_checks.status = 'running' AND pr_checks.updated_at < now() - ($5 || ' minutes')::interval)
+             OR ($6 AND pr_checks.status <> 'running')
+        RETURNING *`,
+      [repo, prNumber, headSha, projectId ?? null, String(PR_CHECK_STALE_MINUTES), !!force, installationId]
+    );
+    return rows[0] || null;
+  },
+  async get({ repo, prNumber, headSha }) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3',
+      [repo, prNumber, headSha]
+    );
+    return rows[0] || null;
+  },
+  /** Record this attempt's in-progress check run as soon as it exists, so a sweep can close it. */
+  async setCheckRun({ repo, prNumber, headSha }, attempts, checkRunId) {
+    await getDb().query(
+      `UPDATE pr_checks SET check_run_id = $5, updated_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
+          AND status = 'running' AND attempts = $4`,
+      [repo, prNumber, headSha, attempts, checkRunId]
+    );
+  },
+  /**
+   * Finish this attempt. Only lands while the row is still this attempt's and
+   * running, so a late run never overwrites a newer claim or the sweep.
+   * @returns {Promise<boolean>} whether it landed
+   */
+  async finish({ repo, prNumber, headSha }, { status, verdict = null, result = null, commentId = null, checkRunId = null, model = null, error = null }, attempts) {
+    const { rowCount } = await getDb().query(
+      `UPDATE pr_checks
+          SET status = $4, verdict = $5, result_json = $6, comment_id = COALESCE($7, comment_id),
+              check_run_id = COALESCE($8, check_run_id), model = COALESCE($9, model), error = $10,
+              updated_at = now(), completed_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
+          AND status = 'running' AND attempts = $11`,
+      [repo, prNumber, headSha, status, verdict, result ? JSON.stringify(result) : null, commentId, checkRunId, model, error, attempts]
+    );
+    return rowCount > 0;
+  },
+  /** This sha's verdict is now on the PR's comment. Pass the locked client inside withCommentLock. */
+  async setComment({ repo, prNumber, headSha }, commentId, db = getDb()) {
+    await db.query(
+      // clock_timestamp(): now() is the transaction's start, before the lock wait.
+      `UPDATE pr_checks SET comment_id = $4, comment_at = clock_timestamp()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3`,
+      [repo, prNumber, headSha, commentId]
+    );
+  },
+  /** The row whose verdict the PR's Takeoff comment shows now, if any. */
+  async latestComment({ repo, prNumber }, db = getDb()) {
+    const { rows } = await db.query(
+      `SELECT head_sha, comment_id FROM pr_checks
+        WHERE repo_full_name = $1 AND pr_number = $2 AND comment_id IS NOT NULL
+        ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
+      [repo, prNumber]
+    );
+    return rows[0] ? { headSha: rows[0].head_sha, commentId: Number(rows[0].comment_id) } : null;
+  },
+  /**
+   * Run `fn(client)` holding a per-PR lock, so two checks of one PR never both
+   * post the first comment, and which sha the comment shows is decided and
+   * recorded atomically. A transaction-scoped advisory lock, which works
+   * through the transaction pooler too. Waiting is capped so a burst can't
+   * tie up the pool.
+   */
+  async withCommentLock({ repo, prNumber }, fn) {
+    const client = await getDb().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL lock_timeout = '20s'");
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pr_comment:${repo}#${prNumber}`]);
+      const out = await fn(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+  /**
+   * Take over runs left 'running' past the stale window (e.g. a restart
+   * mid-check): marks them failed in one statement and returns them, so a
+   * run claimed or finished meanwhile is never touched.
+   */
+  async failStale() {
+    const { rows } = await getDb().query(
+      `UPDATE pr_checks SET status = 'failed', error = 'interrupted', updated_at = now(), completed_at = now()
+        WHERE (repo_full_name, pr_number, head_sha) IN (
+          SELECT repo_full_name, pr_number, head_sha FROM pr_checks
+           WHERE status = 'running' AND updated_at < now() - ($1 || ' minutes')::interval
+           ORDER BY updated_at LIMIT 100
+           FOR UPDATE SKIP LOCKED)
+          AND status = 'running'
+        RETURNING *`,
+      [String(PR_CHECK_STALE_MINUTES)]
+    );
+    return rows;
+  },
+};
+
 // ── Intent statements (Takeoff intent substrate) ──────────────────
 //
 // The first-class "what this app is meant to do" object. Gaps and
@@ -2802,7 +2932,7 @@ module.exports = {
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents, processedPushes, securityShares,
+  shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

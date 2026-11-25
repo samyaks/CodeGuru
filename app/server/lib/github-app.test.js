@@ -212,3 +212,23 @@ test('a mint the installation refuses (422) retries without pull_requests, then 
   refuseAll = true;
   await assert.rejects(() => app.getInstallationToken(77, { repo: 'gone' }), (err) => err.installationGone === true);
 });
+
+test('optional permissions are dropped when the installation has not approved them', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    bodies.push(body);
+    if (body.permissions.deployments) return jsonResponse({ message: 'Unprocessable' }, 422);
+    return jsonResponse({ token: 'tok-w', expires_at: new Date(Date.now() + 3600e3).toISOString() });
+  };
+  const app = createGithubApp(CONFIG, { fetchImpl });
+  const permissions = { contents: 'read', metadata: 'read', pull_requests: 'write', checks: 'write' };
+  const scope = { repo: 'web', permissions, optional: { deployments: 'read' } };
+  assert.strictEqual(await app.getInstallationToken(77, scope), 'tok-w');
+  assert.deepStrictEqual(bodies.map((b) => b.permissions), [{ ...permissions, deployments: 'read' }, permissions]);
+  // Cached under its own scope: no second mint, and not shared with plain writes.
+  await app.getInstallationToken(77, scope);
+  assert.strictEqual(bodies.length, 2);
+  await app.getInstallationToken(77, { repo: 'web', permissions });
+  assert.strictEqual(bodies.length, 3);
+});

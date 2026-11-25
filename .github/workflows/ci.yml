@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   typecheck-and-build:
@@ -28,7 +27,7 @@ jobs:
       - name: Test @takeoff/cli
         run: npm test --prefix packages/cli
 
-      - name: Test GitHub App access and webhooks
+      - name: Test GitHub App access, webhooks and PR verdict
         working-directory: app
         run: >-
           node --test
@@ -40,6 +39,7 @@ jobs:
           server/routes/github-app.test.js
           server/routes/github-webhook.test.js
           server/routes/public-story.test.js
+          server/services/verdict/verdict.test.js
 
       - name: TypeScript check (client)
         run: npm run typecheck

@@ -8,6 +8,8 @@ const {
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isStr = (v) => typeof v === 'string' && v.trim() !== '';
 
+const { expandBraces, MAX_PATH_PATTERN, MAX_BRACE_ALTERNATIVES } = require('./braces');
+
 function fmtPath(path) {
   return path.reduce((s, p) => (typeof p === 'number' ? `${s}[${p}]` : (s ? `${s}.${p}` : String(p))), '');
 }
@@ -157,6 +159,11 @@ function validateArea(area, path, areaIds, ctx) {
     item: (v, p) => {
       if (v.startsWith('/')) ctx.warn(p, 'Paths are relative to the repo root; drop the leading `/`.');
       if (v.includes('\\')) ctx.warn(p, 'Use `/` in paths, not `\\`.');
+      // The PR check can't match these, so they would cover nothing.
+      if (v.length > MAX_PATH_PATTERN) ctx.error(p, `Path patterns can be at most ${MAX_PATH_PATTERN} characters.`);
+      else if (!expandBraces(v)) {
+        ctx.error(p, `This pattern expands to more than ${MAX_BRACE_ALTERNATIVES} alternatives; split it into several paths.`);
+      }
     },
   });
   validateStringList(area.creators, [...path, 'creators'], 'creators', ctx, {

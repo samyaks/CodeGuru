@@ -137,3 +137,19 @@ test('screens: name and an app route are required; bad shapes and repeats are re
   assert.ok(only(r, 'areas[0].screens[4]').some((i) => i.severity === 'error'));
   assert.strictEqual(only(r, 'areas[0].screens[0].route').length, 0);
 });
+
+test('path patterns the PR check cannot match are errors', () => {
+  const long = `src/${'a'.repeat(300)}/**`;
+  const wide = '{a,b,c,d,e,f}/{a,b,c,d,e,f}/**';
+  const r = validateText(fixture('v2.yaml').replace('"src/pages/checkout*"', `"${long}", "${wide}"`));
+  const msgs = errorsOf(r).map((i) => i.message);
+  assert.ok(msgs.some((m) => /at most 300 characters/.test(m)), msgs.join('\n'));
+  assert.ok(msgs.some((m) => /more than 32 alternatives/.test(m)), msgs.join('\n'));
+  assert.strictEqual(r.ok, false);
+});
+
+test('nested brace groups are counted the way the PR check expands them', () => {
+  const nested = '{x,y,{a,b,c,d,e,f,g,h,i,j,k,l}}/**';
+  const r = validateText(fixture('v2.yaml').replace('"src/pages/checkout*"', `"${nested}"`));
+  assert.deepStrictEqual(errorsOf(r), []);
+});

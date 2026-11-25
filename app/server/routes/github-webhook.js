@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
+const { runPrCheck, prCheckJobs } = require('../services/verdict/runner');
 const { getGithubApp } = require('../lib/github-app');
 
 // Two senders share this endpoint:
@@ -16,6 +17,8 @@ const { getGithubApp } = require('../lib/github-app');
 
 const ZERO_SHA = '0000000000000000000000000000000000000000';
 const INSTALLATION_EVENTS = new Set(['installation', 'installation_repositories', 'github_app_authorization']);
+// PR verdict (Milestone 4): a PR push, or Re-run / Retry on the Takeoff check.
+const PR_CHECK_EVENTS = new Set(['pull_request', 'check_run', 'check_suite']);
 
 function defaultDeps() {
   return {
@@ -26,6 +29,9 @@ function defaultDeps() {
     processedPushes,
     runCommitReviewJobSafe,
     processPushV2,
+    runPrCheck,
+    prCheckJobs,
+    appId: process.env.GITHUB_APP_ID || null,
     forgetInstallation: (id) => getGithubApp().forgetInstallation(id),
     secrets: () => ({
       appSecret: process.env.GITHUB_APP_WEBHOOK_SECRET || null,
@@ -383,6 +389,23 @@ function createWebhookHandler(deps = defaultDeps()) {
         await handleInstallationEvent({ event, payload, deliveryId, source, signedByApp: sender === 'app' || sender === 'unsigned' }, deps);
       } catch (err) {
         console.error(`github webhook ${event} handling:`, err.message);
+      }
+      return;
+    }
+
+    if (PR_CHECK_EVENTS.has(event)) {
+      const jobs = deps.prCheckJobs({ event, payload, source, installationId, appId: deps.appId });
+      if (!jobs || !jobs.length) {
+        return res.status(200).json({ ok: true, ignored: payload.action ? `${event}.${payload.action}` : event });
+      }
+      res.status(202).json({ ok: true, accepted: true });
+      // One PR at a time; each check claims its own pr_checks row first.
+      for (const job of jobs) {
+        try {
+          await deps.runPrCheck({ ...job, deliveryId });
+        } catch (err) {
+          console.error(`github webhook ${event} PR check #${job.prNumber}:`, err.message);
+        }
       }
       return;
     }
