@@ -33,6 +33,7 @@ function loadRoutes() {
   return {
     analyze: require('./analyze'),
     railway: require('./railway').router,
+    railwayCallback: require('./railway').callbackRouter,
     deploy: require('./deploy'),
   };
 }
@@ -42,6 +43,7 @@ async function withServer(fn) {
   const routes = loadRoutes();
   const app = express();
   app.use(express.json());
+  app.use(require('cookie-parser')());
   app.use((req, _res, next) => {
     const id = req.get('x-test-user');
     req.user = id ? { id } : null;
@@ -50,6 +52,7 @@ async function withServer(fn) {
   });
   app.use('/api/analyze', routes.analyze);
   app.use('/api/railway', routes.railway);
+  app.use('/auth/railway', routes.railwayCallback);
   app.use('/api/deploy', routes.deploy);
   app.use((err, _req, res, _next) => {
     if (err instanceof AppError) return res.status(err.statusCode).json({ error: err.message, code: err.code });
@@ -57,13 +60,13 @@ async function withServer(fn) {
   });
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, p, { as, memberOf } = {}) => {
+  const call = async (method, p, { as, memberOf, cookie } = {}) => {
     const ctrl = new AbortController();
     const res = await fetch(base + p, {
       method,
       redirect: 'manual',
       signal: ctrl.signal,
-      headers: { ...(as ? { 'x-test-user': as } : {}), ...(memberOf ? { 'x-test-member-of': memberOf } : {}) },
+      headers: { ...(as ? { 'x-test-user': as } : {}), ...(memberOf ? { 'x-test-member-of': memberOf } : {}), ...(cookie ? { cookie } : {}) },
     });
     const isStream = (res.headers.get('content-type') || '').includes('text/event-stream');
     const json = isStream ? null : await res.json().catch(() => null);
@@ -109,6 +112,10 @@ test('Railway links: members can see status, only the owner connects or disconne
     assert.strictEqual((await call('DELETE', '/api/railway/disconnect/a2', { as: 'eve' })).status, 404);
     assert.strictEqual((await call('DELETE', '/api/railway/disconnect/a2', { as: 'sam', memberOf: 'a2' })).status, 403);
     assert.strictEqual((await call('POST', '/api/railway/relookup/a2', { as: 'sam', memberOf: 'a2' })).status, 403);
+    // A forged nonce cookie can't finish the OAuth flow onto someone else's analysis.
+    process.env.RAILWAY_CLIENT_ID ||= 'x'; process.env.RAILWAY_CLIENT_SECRET ||= 'y'; process.env.RAILWAY_OAUTH_REDIRECT_URL ||= 'http://127.0.0.1/cb';
+    const forged = await call('GET', '/auth/railway/callback?code=c&state=a2.n1', { as: 'eve', cookie: 'railway_oauth_nonce_a2=n1' });
+    assert.strictEqual(forged.status, 404);
     assert.strictEqual(updates.length, 0, 'nothing changed');
     assert.strictEqual((await call('DELETE', '/api/railway/disconnect/a2', { as: 'olive' })).status, 200);
   });
@@ -117,10 +124,13 @@ test('Railway links: members can see status, only the owner connects or disconne
 test('only the owner can watch a deploy stream', { skip }, async () => {
   projectRows.set('p1', { id: 'p1', user_id: 'olive', status: 'failed', error: 'boom', build_logs: 'SECRET=1' });
   projectRows.set('p0', { id: 'p0', user_id: null, status: 'pending' });
+  // Watching a live or failed deploy replays its last event, which arms a
+  // five-minute buffer timer; the owner's happy path uses a pending deploy.
+  projectRows.set('p2', { id: 'p2', user_id: 'olive', status: 'building' });
   await withServer(async ({ call }) => {
     assert.strictEqual((await call('GET', '/api/deploy/p1/stream', { as: 'eve' })).status, 403);
     assert.strictEqual((await call('GET', '/api/deploy/p1/stream', { as: 'sam', memberOf: 'p1' })).status, 403);
     assert.strictEqual((await call('GET', '/api/deploy/p0/stream', { as: 'eve' })).status, 403);
-    assert.strictEqual((await call('GET', '/api/deploy/p1/stream', { as: 'olive' })).isStream, true);
+    assert.strictEqual((await call('GET', '/api/deploy/p2/stream', { as: 'olive' })).isStream, true);
   });
 });

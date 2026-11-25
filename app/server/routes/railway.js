@@ -322,8 +322,10 @@ callbackRouter.get('/callback', callbackRateLimit, async (req, res, next) => {
       throw AppError.badRequest('OAuth state mismatch. Please retry the connection.');
     }
 
-    const analysis = await analyses.findById(stateAnalysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found for callback');
+    // The nonce cookie is not signed, so anyone can set one in their own
+    // browser: the signed-in user finishing the flow must also own the
+    // analysis, or they could attach their Railway account to someone else's.
+    const analysis = await checkAnalysisManage(await analyses.findById(stateAnalysisId), req, { deployments });
 
     const tokens = await exchangeCode(code);
     const accessToken = tokens.access_token;

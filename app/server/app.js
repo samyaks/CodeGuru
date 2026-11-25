@@ -120,7 +120,6 @@ app.use(collectRoutes);
 app.use('/api/github/webhook', githubWebhookRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
-app.use('/auth/railway', railwayCallbackRouter);
 // Public security-report share read endpoint. Mounted before the
 // authed `/api/v2/...` routes so `optionalAuth` doesn't accidentally
 // gate it. The route itself enforces the share's active-state filter.
@@ -167,6 +166,7 @@ if (supabase) {
   // Analyses and their Railway links: owner (or project member, to read) only.
   app.use('/api/analyze', optionalAuth(supabase), withMembers, analyzeRoutes);
   app.use('/api/railway', optionalAuth(supabase), withMembers, railwayRouter);
+  app.use('/auth/railway', optionalAuth(supabase), withMembers, railwayCallbackRouter);
   app.use('/api/takeoff', optionalAuth(supabase), withMembers, takeoffRoutes);
   // Public: waitlist + first-party funnel events. optionalAuth only so
   // signed-in visitors' rows carry a user_id.
@@ -197,6 +197,7 @@ if (supabase) {
 } else {
   app.use('/api/analyze', analyzeRoutes);
   app.use('/api/railway', railwayRouter);
+  app.use('/auth/railway', railwayCallbackRouter);
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/waitlist', waitlistRouter);
   app.use('/api/events', eventsRouter);
