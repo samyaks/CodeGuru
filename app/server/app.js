@@ -120,7 +120,6 @@ app.use(collectRoutes);
 app.use('/api/github/webhook', githubWebhookRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
-app.use('/api/railway', railwayRouter);
 app.use('/auth/railway', railwayCallbackRouter);
 // Public security-report share read endpoint. Mounted before the
 // authed `/api/v2/...` routes so `optionalAuth` doesn't accidentally
@@ -165,7 +164,9 @@ const sendSignInLink = supabase
 
 // Routes with optional/required auth depending on Supabase config
 if (supabase) {
-  app.use('/api/analyze', optionalAuth(supabase), analyzeRoutes);
+  // Analyses and their Railway links: owner (or project member, to read) only.
+  app.use('/api/analyze', optionalAuth(supabase), withMembers, analyzeRoutes);
+  app.use('/api/railway', optionalAuth(supabase), withMembers, railwayRouter);
   app.use('/api/takeoff', optionalAuth(supabase), withMembers, takeoffRoutes);
   // Public: waitlist + first-party funnel events. optionalAuth only so
   // signed-in visitors' rows carry a user_id.
@@ -195,6 +196,7 @@ if (supabase) {
   app.use('/api/v2/security-shares', requireAuth(supabase), withMembers, v2SecurityShareSlugRoutes);
 } else {
   app.use('/api/analyze', analyzeRoutes);
+  app.use('/api/railway', railwayRouter);
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/waitlist', waitlistRouter);
   app.use('/api/events', eventsRouter);

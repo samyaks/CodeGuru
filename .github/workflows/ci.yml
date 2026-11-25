@@ -42,6 +42,8 @@ jobs:
           server/services/verdict/verdict.test.js
           server/services/team/team.test.js
           server/routes/team.test.js
+          server/lib/analysis-access.test.js
+          server/routes/access-gaps.test.js
 
       - name: TypeScript check (client)
         run: npm run typecheck
@@ -51,7 +53,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build
