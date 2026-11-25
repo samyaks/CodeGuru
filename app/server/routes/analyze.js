@@ -1,6 +1,6 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const { analyses, analysisFiles, analysisLlmCalls } = require('../lib/db');
+const { analyses, analysisFiles, analysisLlmCalls, deployments } = require('../lib/db');
 const { addConnection, broadcast } = require('../lib/sse');
 const github = require('../services/github');
 const { analyzeRepo } = require('../services/analyzer');
@@ -11,10 +11,17 @@ const { createRateLimit } = require('../lib/rate-limit');
 const { validateRepoUrl, validatePagination } = require('../lib/validate');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
+const { checkAnalysisView, publicAnalysis } = require('../lib/analysis-access');
 
 const router = express.Router();
 
 const analyzeRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'Too many analysis requests. Please try again in a minute.' });
+
+const accessDeps = () => ({ deployments });
+
+async function loadAnalysis(req) {
+  return checkAnalysisView(await analyses.findById(req.params.id), req, accessDeps());
+}
 
 function slimCodebaseModel(m) {
   if (!m) return m;
@@ -107,15 +114,17 @@ async function runAnalysis(id, repoUrl, githubClient) {
 }
 
 router.get('/:id', asyncHandler(async (req, res) => {
-  const analysis = await analyses.findById(req.params.id);
-  if (!analysis) throw AppError.notFound('Analysis not found');
+  const analysis = await loadAnalysis(req);
 
-  res.json(analysis);
+  res.json(publicAnalysis(analysis));
 }));
 
 router.get('/', asyncHandler(async (req, res) => {
   const { limit, offset } = validatePagination(req.query);
-  const list = await analyses.list({ limit, offset, userId: req.user?.id || null });
+  // Your own analyses only. Signed out, there are none to list (an
+  // unfiltered list would show everyone's repos).
+  if (!req.user) return res.json([]);
+  const list = await analyses.list({ limit, offset, userId: req.user.id });
   res.json(list.map((a) => ({
     id: a.id,
     repo_url: a.repo_url,
@@ -129,14 +138,12 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
-  const analysis = await analyses.findById(req.params.id);
-  if (!analysis) throw AppError.notFound('Analysis not found');
+  await loadAnalysis(req);
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 }));
 
 router.get('/:id/capture', asyncHandler(async (req, res) => {
-  const analysis = await analyses.findById(req.params.id);
-  if (!analysis) throw AppError.notFound('Analysis not found');
+  await loadAnalysis(req);
 
   const raw = (await analyses.getRollups(req.params.id)) || {};
   const rollups = {

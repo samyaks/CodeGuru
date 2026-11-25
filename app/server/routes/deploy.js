@@ -174,6 +174,11 @@ async function runDeploy(projectId, project, userId) {
 router.get('/:projectId/stream', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.projectId);
   if (!project) throw AppError.notFound('Project not found');
+  // Deploys and their build logs are the owner's alone. Deploying claims an
+  // ownerless project, so a project with no owner has no deploy to watch.
+  if (!req.user || !project.user_id || project.user_id !== req.user.id) {
+    throw AppError.forbidden('Only the project owner can watch its deploy.');
+  }
 
   const streamId = `deploy-${req.params.projectId}`;
   addConnection(streamId, res, { origin: req.headers.origin });
