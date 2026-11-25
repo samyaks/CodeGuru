@@ -26,13 +26,21 @@ function defaultDeps() {
   return {
     deployments,
     prChecks,
-    clientForInstallation: (id) => getGithubApp().clientForInstallation(id),
+    clientForInstallation: (id, repo) => getGithubApp().clientForInstallation(id, { repo, permissions: VERDICT_PERMISSIONS }),
     callModel: callVerdictModel,
     appSlug: config.slug || null,
     appUrl: (process.env.TAKEOFF_APP_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '') || null,
     log: (obj) => console.log(JSON.stringify(obj)),
   };
 }
+
+// The verdict reads the PR and takeoff.yaml and writes one comment and one
+// check run, on the PR's own repo only. (Deployments: read is optional and
+// left out, so an installation without it still mints; the preview link is
+// then skipped.)
+const VERDICT_PERMISSIONS = Object.freeze({
+  contents: 'read', metadata: 'read', pull_requests: 'write', checks: 'write',
+});
 
 function userReason(err) {
   if (err instanceof VerdictError) {
@@ -210,7 +218,7 @@ async function runPrCheck(input, deps = defaultDeps()) {
     return { status: 'skipped', reason: 'no_project' };
   }
   const project = projects[0];
-  const gh = deps.clientForInstallation(installationId);
+  const gh = deps.clientForInstallation(installationId, repo);
 
   let pr;
   let baseText;
@@ -331,7 +339,7 @@ async function recoverStalePrChecks(deps = defaultDeps()) {
     const ctx = { ...key, stage: 'recover' };
     try {
       if (row.installation_id) {
-        const gh = deps.clientForInstallation(Number(row.installation_id));
+        const gh = deps.clientForInstallation(Number(row.installation_id), repo);
         await reportFailure(gh, {
           owner, repo, prNumber: key.prNumber, headSha: key.headSha,
           checkRunId: row.check_run_id ? Number(row.check_run_id) : null,

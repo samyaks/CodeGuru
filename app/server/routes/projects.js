@@ -80,6 +80,7 @@ router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
+  if (!/^[0-9a-f]{4,40}$/i.test(req.params.sha)) throw AppError.badRequest('sha must be a commit hash');
 
   const detail = await clientForProject(project).fetchCommitDetail(project.owner, project.repo, req.params.sha);
   res.json(detail);

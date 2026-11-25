@@ -82,7 +82,12 @@ function makeWorld({ projects = [{ id: 'p1', user_id: 'u1', branch: 'main', gith
         calls.revoked.push({ deleteForRepos: installationId, repoIds });
         return 0;
       },
+      deleteForGithubUser: async (githubUserId) => {
+        calls.revoked.push({ deleteForGithubUser: githubUserId });
+        return 0;
+      },
     },
+    forgetInstallation: (id) => { calls.revoked.push({ forget: id }); },
     processedPushes: {
       claim: async (push) => {
         calls.claims.push(push);
@@ -250,15 +255,37 @@ test('a completed push is marked done; a failed one is released so a redelivery 
   assert.strictEqual(bad.calls.v2.length, 1, 'the redelivery processed the push');
 });
 
-test('uninstalling or suspending the App revokes grants and project installations', async () => {
-  for (const action of ['deleted', 'suspend']) {
-    const { deps, calls } = makeWorld();
-    await send(
-      createWebhookHandler(deps),
-      delivery({ action, installation: { id: 42, account: { login: 'acme' } } }, { secret: APP_SECRET, event: 'installation' }),
-    );
-    assert.deepStrictEqual(calls.revoked, [{ deleteForInstallation: 42 }, { clearInstallation: 42 }], action);
-  }
+test('uninstalling the App revokes grants and project installations', async () => {
+  const { deps, calls } = makeWorld();
+  await send(
+    createWebhookHandler(deps),
+    delivery({ action: 'deleted', installation: { id: 42, account: { login: 'acme' } } }, { secret: APP_SECRET, event: 'installation' }),
+  );
+  assert.deepStrictEqual(calls.revoked, [{ forget: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }]);
+});
+
+test('suspending the App drops cached tokens but keeps grants for an unsuspend', async () => {
+  const { deps, calls } = makeWorld();
+  await send(
+    createWebhookHandler(deps),
+    delivery({ action: 'suspend', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }),
+  );
+  assert.deepStrictEqual(calls.revoked, [{ forget: 42 }]);
+});
+
+test('a user revoking their authorization drops the grants they made', async () => {
+  const { deps, calls } = makeWorld();
+  await send(
+    createWebhookHandler(deps),
+    delivery({ action: 'revoked', sender: { id: 555, login: 'octo' } }, { secret: APP_SECRET, event: 'github_app_authorization' }),
+  );
+  assert.deepStrictEqual(calls.revoked, [{ deleteForGithubUser: 555 }]);
+  const forged = makeWorld();
+  await send(
+    createWebhookHandler(forged.deps),
+    delivery({ action: 'revoked', sender: { id: 555 } }, { secret: HOOK_SECRET, event: 'github_app_authorization' }),
+  );
+  assert.deepStrictEqual(forged.calls.revoked, [], 'only the App can revoke an authorization');
 });
 
 test('removing repos from the installation revokes only those repos', async () => {
@@ -272,6 +299,7 @@ test('removing repos from the installation revokes only those repos', async () =
     }, { secret: APP_SECRET, event: 'installation_repositories' }),
   );
   assert.deepStrictEqual(calls.revoked, [
+    { forget: 42 },
     { deleteForRepos: 42, repoIds: [9] },
     { clearInstallationForRepos: 42, fullNames: ['acme/web'] },
   ]);

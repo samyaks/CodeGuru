@@ -1,4 +1,4 @@
--- 029_pr_checks.sql
+-- 030_pr_checks.sql
 -- One row per PR head commit checked by the Takeoff PR verdict (Milestone 4).
 --
 -- services/verdict/runner.js claims a row before it calls the model, so a

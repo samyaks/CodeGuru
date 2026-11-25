@@ -33,7 +33,11 @@ const GITHUB_API = 'https://api.github.com';
 // Installation tokens live 60 minutes; refresh well before so a scan that
 // starts on a cached token never runs past expiry.
 const TOKEN_REFRESH_MARGIN_MS = 15 * 60 * 1000;
-const MAX_PAGES = 10; // 100 per page → up to 1,000 installations / repos each
+const MAX_PAGES = 10;
+// Read access a scan or PR review needs. An installation that hasn't approved
+// pull_requests yet (it was added later) is minted without it.
+const READ_PERMISSIONS = Object.freeze({ contents: 'read', metadata: 'read', pull_requests: 'read' });
+const BASE_PERMISSIONS = Object.freeze({ contents: 'read', metadata: 'read' }); // 100 per page → up to 1,000 installations / repos each
 
 function base64url(input) {
   return Buffer.from(input).toString('base64url');
@@ -102,35 +106,71 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     return res.json();
   }
 
-  async function mintInstallationToken(installationId) {
+  // Installation tokens are always narrowed to one repo and the permissions a
+  // caller needs, so a grant for repo A can never become a token for repo B
+  // or for write access the caller didn't ask for.
+  function scopeKey(installationId, scope) {
+    return `${installationId}|${scope.repo || ''}|${JSON.stringify(scope.permissions)}`;
+  }
+
+  async function mintInstallationToken(installationId, scope) {
+    const key = scopeKey(installationId, scope);
     const jwt = createAppJwt({ appId: config.appId, privateKey: config.privateKey, now: now() });
+    const mint = (permissions) => githubJson(`/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
+      method: 'POST',
+      token: jwt,
+      body: {
+        ...(scope.repo ? { repositories: [scope.repo] } : {}),
+        permissions,
+      },
+    });
     let data;
     try {
-      data = await githubJson(`/app/installations/${installationId}/access_tokens`, {
-        method: 'POST',
-        token: jwt,
-      });
+      try {
+        data = await mint(scope.permissions);
+      } catch (err) {
+        // 422: a permission the installation hasn't approved, or a repo it no
+        // longer covers. Retry read scopes without pull_requests first.
+        const readScope = scope.permissions === READ_PERMISSIONS;
+        if (err.status !== 422 || !readScope) throw err;
+        data = await mint(BASE_PERMISSIONS);
+      }
     } catch (err) {
-      // 404: uninstalled. 403: suspended. Either way this installation can't be read through any more.
-      if (err.status === 404 || err.status === 403) err.installationGone = true;
-      tokenCache.delete(String(installationId));
+      // 404: uninstalled. 403: suspended. 422: the repo isn't in this
+      // installation any more. Either way it can't be read through here.
+      if (err.status === 404 || err.status === 403 || err.status === 422) err.installationGone = true;
+      tokenCache.delete(key);
       throw err;
     }
     const entry = { token: data.token, expiresAt: new Date(data.expires_at).getTime() };
-    tokenCache.set(String(installationId), entry);
+    tokenCache.set(key, entry);
     return entry.token;
   }
 
-  /** Cached installation token; concurrent callers share one mint. */
-  async function getInstallationToken(installationId) {
+  function normalizeScope({ repo = null, permissions = READ_PERMISSIONS } = {}) {
+    return { repo: repo ? String(repo) : null, permissions };
+  }
+
+  /** Cached installation token for one scope; concurrent callers share one mint. */
+  async function getInstallationToken(installationId, scopeOpts) {
     assertConfigured();
-    const key = String(installationId);
+    const id = String(installationId);
+    const scope = normalizeScope(scopeOpts);
+    const key = scopeKey(id, scope);
     const cached = tokenCache.get(key);
     if (cached && cached.expiresAt - now() > TOKEN_REFRESH_MARGIN_MS) return cached.token;
     if (inFlight.has(key)) return inFlight.get(key);
-    const pending = mintInstallationToken(key).finally(() => inFlight.delete(key));
+    const pending = mintInstallationToken(id, scope).finally(() => inFlight.delete(key));
     inFlight.set(key, pending);
     return pending;
+  }
+
+  /** Drop cached tokens for an installation (uninstalled, suspended, repos removed). */
+  function forgetInstallation(installationId) {
+    const prefix = `${installationId}|`;
+    for (const key of [...tokenCache.keys()]) {
+      if (key.startsWith(prefix)) tokenCache.delete(key);
+    }
   }
 
   /** Id of the installation covering owner/repo, or null when the app isn't installed there. */
@@ -146,9 +186,16 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     }
   }
 
-  /** Repo-reading client that acts as the installation. */
-  function clientForInstallation(installationId) {
-    return github.createClient({ token: () => getInstallationToken(installationId) });
+  /**
+   * Client that acts as the installation for one repo (`repo` is the name
+   * without the owner). Read-only unless `permissions` asks for more.
+   */
+  function clientForInstallation(installationId, scopeOpts = {}) {
+    const scope = normalizeScope(scopeOpts);
+    return github.createClient({
+      token: () => getInstallationToken(installationId, scope),
+      onUnauthorized: () => { tokenCache.delete(scopeKey(String(installationId), scope)); },
+    });
   }
 
   function installUrl(state) {
@@ -199,6 +246,8 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
    * gains repos they couldn't already see on GitHub.
    */
   async function listUserGrants(userToken) {
+    const user = await githubJson('/user', { token: userToken });
+    const githubUserId = user && user.id ? Number(user.id) : null;
     const installations = await paginate('/user/installations', userToken, 'installations');
     const grants = [];
     for (const inst of installations) {
@@ -210,6 +259,7 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
           repoId: r.id,
           repoFullName: r.full_name,
           private: !!r.private,
+          githubUserId,
         });
       }
     }
@@ -219,6 +269,7 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
   return {
     isConfigured,
     getInstallationToken,
+    forgetInstallation,
     findRepoInstallation,
     clientForInstallation,
     installUrl,
@@ -234,4 +285,4 @@ function getGithubApp() {
   return defaultApp;
 }
 
-module.exports = { createAppJwt, createGithubApp, readConfigFromEnv, getGithubApp };
+module.exports = { createAppJwt, createGithubApp, readConfigFromEnv, getGithubApp, READ_PERMISSIONS };

@@ -278,7 +278,7 @@ async function start() {
     console.error('[startup] recoverStaleCommitReviews failed:', err.message)
   );
 
-  // PR verdict checks a restart left running (needs migration 029).
+  // PR verdict checks a restart left running (needs migration 030).
   const sweepPrChecks = () => recoverStalePrChecks().catch((err) =>
     console.error('[pr-checks] recoverStalePrChecks failed:', err.message)
   );

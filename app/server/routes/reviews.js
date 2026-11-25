@@ -19,6 +19,14 @@ const reviewRateLimit = createRateLimit({ windowMs: 60000, max: 10, message: 'To
 router.post('/', reviewRateLimit, asyncHandler(async (req, res) => {
   const { repoUrl, prNumber, type = 'pr', branch } = req.body;
   if (!repoUrl) throw AppError.badRequest('repoUrl is required');
+  if (prNumber != null && prNumber !== '' && !/^[1-9]\d{0,9}$/.test(String(prNumber))) {
+    throw AppError.badRequest('prNumber must be a pull request number');
+  }
+  // A git ref: no dot segments, no "..", nothing outside the usual characters.
+  if (branch != null && branch !== '' && (typeof branch !== 'string' || branch.length > 255
+      || !/^[A-Za-z0-9._\/-]+$/.test(branch) || branch.includes('..') || branch.split('/').some((s) => s === '' || s === '.'))) {
+    throw AppError.badRequest('branch is not a valid branch name');
+  }
 
   if (type === 'pr' && !prNumber) {
     const parsed = github.parsePRUrl(repoUrl);

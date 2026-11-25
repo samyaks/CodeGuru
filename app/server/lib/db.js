@@ -330,7 +330,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
   'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
-  'suggestions_count', 'security_score', 'github_installation_id',
+  'suggestions_count', 'security_score', 'github_installation_id', 'repo_private',
 ]);
 
 const deployments = {
@@ -421,13 +421,15 @@ deployments.clearInstallationForRepos = async function clearInstallationForRepos
 // ── GitHub App repo access ────────────────────────────────────────
 
 const GRANT_UPSERT_SQL = `INSERT INTO github_repo_access
-     (user_id, installation_id, repo_id, repo_full_name, private, account_login)
-   VALUES ($1, $2, $3, $4, $5, $6)
+     (user_id, installation_id, repo_id, repo_full_name, private, account_login, github_user_id, granted_at)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, now())
    ON CONFLICT (user_id, repo_id) DO UPDATE SET
      installation_id = EXCLUDED.installation_id,
      repo_full_name = EXCLUDED.repo_full_name,
      private = EXCLUDED.private,
-     account_login = EXCLUDED.account_login`;
+     account_login = EXCLUDED.account_login,
+     github_user_id = EXCLUDED.github_user_id,
+     granted_at = now()`;
 
 const githubRepoAccess = {
   /** Replace everything a user can read via the app with a fresh listing. */
@@ -436,20 +438,17 @@ const githubRepoAccess = {
       await client.query('DELETE FROM github_repo_access WHERE user_id = $1', [userId]);
       for (const g of grants) {
         await client.query(GRANT_UPSERT_SQL,
-          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin]);
+          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin, g.githubUserId ?? null]);
       }
     });
   },
-  /** Add or refresh grants without removing any (used when the callback's state can't vouch for the listing). */
-  async mergeForUser(userId, grants) {
-    await withTransaction(async (client) => {
-      for (const g of grants) {
-        await client.query(GRANT_UPSERT_SQL,
-          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin]);
-      }
-    });
+  /** A GitHub user revoked their authorization of the app: drop what they granted. */
+  async deleteForGithubUser(githubUserId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE github_user_id = $1', [githubUserId]);
+    return rowCount;
   },
-  /** The app was uninstalled or suspended: nobody reads through this installation any more. */
+  /** The app was uninstalled: nobody reads through this installation any more. */
   async deleteForInstallation(installationId) {
     const { rowCount } = await getDb().query(
       'DELETE FROM github_repo_access WHERE installation_id = $1', [installationId]);
@@ -2222,8 +2221,10 @@ const webhookEvents = {
 
 // ── Processed pushes (webhook dedupe) ─────────────────────────────
 
-// A claim that never completed (crash, deploy) can be taken over after this long.
-const PUSH_CLAIM_STALE_MINUTES = 10;
+// A claim that never completed (crash, deploy) can be taken over after this
+// long. Well past the longest push run (commits run one at a time with LLM
+// calls), so a slow run is never processed twice.
+const PUSH_CLAIM_STALE_MINUTES = 60;
 
 const processedPushes = {
   /**
@@ -2263,7 +2264,7 @@ const processedPushes = {
   },
 };
 
-// ── PR verdict checks (Takeoff Milestone 4, migration 029) ─────────
+// ── PR verdict checks (Takeoff Milestone 4, migration 030) ─────────
 //
 // One row per (repo, PR, head sha). claim() is the dedupe: only the delivery
 // whose claim lands calls the model. The stale window is longer than a run can

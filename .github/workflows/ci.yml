@@ -27,9 +27,19 @@ jobs:
       - name: Test @takeoff/cli
         run: npm test --prefix packages/cli
 
-      - name: Test PR verdict and webhook
+      - name: Test GitHub App access, webhooks and PR verdict
         working-directory: app
-        run: node --test server/services/verdict/verdict.test.js server/routes/github-webhook.test.js
+        run: >-
+          node --test
+          server/lib/github-app.test.js
+          server/lib/github-client.test.js
+          server/services/github-access.test.js
+          server/services/github-webhook-manager.test.js
+          server/services/v2/shipped-runner.test.js
+          server/routes/github-app.test.js
+          server/routes/github-webhook.test.js
+          server/routes/public-story.test.js
+          server/services/verdict/verdict.test.js
 
       - name: TypeScript check (client)
         run: npm run typecheck
@@ -39,7 +49,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-webhook'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build

@@ -152,6 +152,8 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   });
 
   let slug = `${owner}-${repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  // A private repo's name must not be guessable from its public story URL.
+  if (access.private) slug = `p-${crypto.randomBytes(8).toString('hex')}`;
   try {
     await deployments.update(id, { slug });
   } catch (err) {
@@ -159,9 +161,10 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
     slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
     await deployments.update(id, { slug });
   }
-  if (access.installationId) {
-    await deployments.update(id, { github_installation_id: access.installationId });
-  }
+  await deployments.update(id, {
+    repo_private: !!access.private,
+    ...(access.installationId ? { github_installation_id: access.installationId } : {}),
+  });
 
   inFlightAnalyses.add(id);
   setImmediate(() => {
@@ -224,7 +227,12 @@ async function runTakeoff(id, repoUrl) {
     const tAnalyze = startTimer('analyze_repo', id);
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    }, id, { github: gh, publicOnly: !project?.github_installation_id });
+    }, id, { github: gh, publicOnly: !(project && project.owner && project.repo) });
+    // clientForProject already refused a private repo the owner hasn't granted
+    // (it only falls back to the bare server client for a row with no repo).
+    if (typeof codebaseModel?.meta?.private === 'boolean' && codebaseModel.meta.private !== project?.repo_private) {
+      await deployments.update(id, { repo_private: codebaseModel.meta.private });
+    }
     tAnalyze.end({
       files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
       readBytes: codebaseModel?.meta?.ingestedBytes ?? null,

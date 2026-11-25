@@ -496,6 +496,7 @@ async function analyzeRepo(repoUrl, onProgress, analysisId = null, opts = {}) {
   return {
     meta: {
       name: repoMeta.name,
+      private: !!repoMeta.private,
       description: repoMeta.description,
       language: repoMeta.language,
       defaultBranch: branch,

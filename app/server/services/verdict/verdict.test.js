@@ -132,11 +132,12 @@ function world(c, opts = {}) {
   const gh = fakeGitHub(c, opts);
   const prChecks = fakePrChecks();
   const prompts = [];
+  const clientScopes = [];
   const model = { text: c.modelText, error: null, onCall: null };
   const deps = {
     deployments: { findByGithubRepo: async () => [{ id: 'proj-1' }] },
     prChecks,
-    clientForInstallation: () => gh.client,
+    clientForInstallation: (id, repo) => { clientScopes.push([id, repo]); return gh.client; },
     callModel: async (prompt) => {
       prompts.push(prompt);
       if (model.onCall) await model.onCall();
@@ -147,7 +148,7 @@ function world(c, opts = {}) {
     appUrl: 'https://takeoff.example',
     log: () => {},
   };
-  return { gh, prChecks, prompts, model, deps };
+  return { gh, prChecks, prompts, model, deps, clientScopes };
 }
 
 const job = (headSha = SHA1, extra = {}) => ({ owner: 'acme', repo: 'web', prNumber: 7, headSha, installationId: 42, ...extra });
@@ -588,4 +589,11 @@ test('a check left running by a restart is closed as "couldn\'t check" with Retr
 test('Re-run of a check run is ignored when the App id is not configured', () => {
   const payload = { action: 'rerequested', repository: { full_name: 'acme/web' }, check_run: { name: 'Takeoff', head_sha: SHA1, external_id: '7', app: { id: 1 } } };
   assert.strictEqual(prCheckJobs({ event: 'check_run', payload, source: 'app', installationId: 42, appId: null }), null);
+});
+
+test('the verdict reads and writes through a token scoped to the PR repo', async () => {
+  const w = world(readCase('matches'));
+  await runPrCheck(job(), w.deps);
+  assert.ok(w.clientScopes.length > 0);
+  for (const scope of w.clientScopes) assert.deepStrictEqual(scope, [42, 'web']);
 });
