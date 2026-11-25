@@ -2263,6 +2263,56 @@ const processedPushes = {
   },
 };
 
+// ── PR verdict checks (Takeoff Milestone 4, migration 029) ─────────
+//
+// One row per (repo, PR, head sha). claim() is the dedupe: only the delivery
+// whose claim lands calls the model.
+const PR_CHECK_STALE_MINUTES = 10;
+
+const prChecks = {
+  /**
+   * The claimed row, or null when another run holds it or finished it. A row
+   * that failed, or is stuck running past the stale window, is claimed again.
+   * `force` (Re-run on the check) also re-claims a finished row.
+   */
+  async claim({ repo, prNumber, headSha, projectId, force = false }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO pr_checks (repo_full_name, pr_number, head_sha, project_id)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (repo_full_name, pr_number, head_sha) DO UPDATE
+          SET status = 'running', attempts = pr_checks.attempts + 1, error = NULL,
+              project_id = COALESCE(EXCLUDED.project_id, pr_checks.project_id),
+              updated_at = now(), completed_at = NULL
+          WHERE pr_checks.status = 'failed'
+             OR (pr_checks.status = 'running' AND pr_checks.updated_at < now() - ($5 || ' minutes')::interval)
+             OR ($6 AND pr_checks.status <> 'running')
+        RETURNING *`,
+      [repo, prNumber, headSha, projectId ?? null, String(PR_CHECK_STALE_MINUTES), !!force]
+    );
+    return rows[0] || null;
+  },
+  async finish({ repo, prNumber, headSha }, { status, verdict = null, result = null, commentId = null, checkRunId = null, model = null, error = null }) {
+    await getDb().query(
+      `UPDATE pr_checks
+          SET status = $4, verdict = $5, result_json = $6, comment_id = COALESCE($7, comment_id),
+              check_run_id = COALESCE($8, check_run_id), model = COALESCE($9, model), error = $10,
+              updated_at = now(), completed_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3`,
+      [repo, prNumber, headSha, status, verdict, result ? JSON.stringify(result) : null, commentId, checkRunId, model, error]
+    );
+  },
+  /** The Takeoff comment last written on this PR, if any. */
+  async latestCommentId({ repo, prNumber }) {
+    const { rows } = await getDb().query(
+      `SELECT comment_id FROM pr_checks
+        WHERE repo_full_name = $1 AND pr_number = $2 AND comment_id IS NOT NULL
+        ORDER BY updated_at DESC LIMIT 1`,
+      [repo, prNumber]
+    );
+    return rows[0] ? Number(rows[0].comment_id) : null;
+  },
+};
+
 // ── Intent statements (Takeoff intent substrate) ──────────────────
 //
 // The first-class "what this app is meant to do" object. Gaps and
@@ -2801,7 +2851,7 @@ module.exports = {
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents, processedPushes, securityShares,
+  shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

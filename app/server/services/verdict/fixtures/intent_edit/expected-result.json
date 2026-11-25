@@ -1,0 +1,6 @@
+{
+  "verdict": "needs_decision",
+  "summary": "Trips can now have three travellers, and the PR changes the Trips rule in takeoff.yaml to match.",
+  "conflicts": [],
+  "suggested_agreement": "Trips can have two or three travellers."
+}

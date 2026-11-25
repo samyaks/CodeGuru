@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   typecheck-and-build:
@@ -28,6 +27,10 @@ jobs:
       - name: Test @takeoff/cli
         run: npm test --prefix packages/cli
 
+      - name: Test PR verdict and webhook
+        working-directory: app
+        run: node --test server/services/verdict/verdict.test.js server/routes/github-webhook.test.js
+
       - name: TypeScript check (client)
         run: npm run typecheck
 
@@ -36,7 +39,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-webhook'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build

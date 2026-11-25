@@ -217,7 +217,109 @@ function createClient({ token } = {}) {
     return res.json();
   }
 
+  // ── PR verdict (Takeoff GitHub App): needs Pull requests r/w, Checks r/w ──
+
+  const enc = encodeURIComponent;
+  const jsonBody = (method, body) => ({
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  /** Every changed file of a PR (GitHub lists at most 3000), with patches. */
+  async function fetchAllPRFiles(owner, repo, prNumber, { maxPages = 30 } = {}) {
+    const files = [];
+    for (let page = 1; page <= maxPages; page += 1) {
+      const res = await request(`/repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100&page=${page}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      files.push(...batch);
+      if (batch.length < 100) break;
+    }
+    return files;
+  }
+
+  /** File text at a ref, or null when the file does not exist there. */
+  async function fetchFileTextOrNull(owner, repo, filePath, ref) {
+    try {
+      const path = filePath.split('/').map(enc).join('/');
+      const res = await request(`/repos/${owner}/${repo}/contents/${path}${ref ? `?ref=${enc(ref)}` : ''}`);
+      const data = await res.json();
+      if (Array.isArray(data) || data.type !== 'file') return null;
+      if (data.encoding === 'base64' && typeof data.content === 'string') {
+        return Buffer.from(data.content, 'base64').toString('utf-8');
+      }
+      return null;
+    } catch (err) {
+      if (err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * The newest issue comment (PRs are issues) whose body starts with `marker`
+   * and that `accept(comment)` allows (e.g. only the App's own comments).
+   */
+  async function findIssueCommentWithMarker(owner, repo, issueNumber, marker, { maxPages = 10, accept = () => true } = {}) {
+    let found = null;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const res = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100&page=${page}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      for (const c of batch) {
+        if (typeof c.body === 'string' && c.body.startsWith(marker) && accept(c)) found = c;
+      }
+      if (batch.length < 100) break;
+    }
+    return found;
+  }
+
+  async function createIssueComment(owner, repo, issueNumber, body) {
+    const res = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, jsonBody('POST', { body }));
+    return res.json();
+  }
+
+  async function updateIssueComment(owner, repo, commentId, body) {
+    const res = await request(`/repos/${owner}/${repo}/issues/comments/${commentId}`, jsonBody('PATCH', { body }));
+    return res.json();
+  }
+
+  async function createCheckRun(owner, repo, params) {
+    const res = await request(`/repos/${owner}/${repo}/check-runs`, jsonBody('POST', params));
+    return res.json();
+  }
+
+  async function updateCheckRun(owner, repo, checkRunId, params) {
+    const res = await request(`/repos/${owner}/${repo}/check-runs/${checkRunId}`, jsonBody('PATCH', params));
+    return res.json();
+  }
+
+  /**
+   * The newest preview URL a deploy reported for `sha` (a deployment status
+   * with an environment_url), or null.
+   */
+  async function fetchPreviewUrl(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/deployments?sha=${enc(sha)}&per_page=10`);
+    const deployments = await res.json();
+    if (!Array.isArray(deployments)) return null;
+    for (const d of deployments) {
+      const sres = await request(`/repos/${owner}/${repo}/deployments/${d.id}/statuses?per_page=10`);
+      const statuses = await sres.json();
+      const hit = Array.isArray(statuses) && statuses.find((st) => st.state === 'success' && st.environment_url);
+      if (hit) return hit.environment_url;
+    }
+    return null;
+  }
+
   return {
+    fetchAllPRFiles,
+    fetchFileTextOrNull,
+    findIssueCommentWithMarker,
+    createIssueComment,
+    updateIssueComment,
+    createCheckRun,
+    updateCheckRun,
+    fetchPreviewUrl,
     fetchPullRequest,
     fetchPRDiff,
     fetchPRFiles,

@@ -1,0 +1,36 @@
+<product name="Delta-V">
+Plans trips for two people and splits the costs.
+</product>
+
+<touched_areas>
+<area id="trips" name="Trips">
+paths: src/trips/**
+rules:
+  - A trip always has exactly two travellers.
+never:
+  (none)
+agreements:
+  (none)
+changed files in this area:
+  - src/trips/limits.js
+</area>
+</touched_areas>
+
+Changed files outside every area: (none)
+
+<pull_request>
+#7: Let a third traveller join a trip
+
+Friends asked for group trips.
+</pull_request>
+
+<commits>
+- trips: allow up to three travellers
+</commits>
+
+<diff>
+--- src/trips/limits.js (modified, +1 -1)
+@@ -1 +1 @@
+-export const MAX_TRAVELLERS = 2;
++export const MAX_TRAVELLERS = 3;
+</diff>

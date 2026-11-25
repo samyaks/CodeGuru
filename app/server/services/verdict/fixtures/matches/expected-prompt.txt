@@ -1,0 +1,38 @@
+<product name="Delta-V">
+Plans trips for two people and splits the costs.
+</product>
+
+<touched_areas>
+<area id="billing" name="Billing & pricing">
+paths: src/billing/**, src/pages/checkout*
+rules:
+  - Stripe holds all billing data; we store only Stripe IDs.
+never:
+  - Never store card numbers.
+agreements:
+  - Offer an annual plan at 20% off monthly.
+changed files in this area:
+  - src/pages/checkout.tsx
+</area>
+</touched_areas>
+
+Changed files outside every area: (none)
+
+<pull_request>
+#7: Show the annual plan price on checkout
+
+Adds the annual plan (20% off) to the checkout page.
+</pull_request>
+
+<commits>
+- checkout: show annual plan price
+</commits>
+
+<diff>
+--- src/pages/checkout.tsx (modified, +6 -1)
+@@ -10,7 +10,12 @@
+-  const plans = [monthly];
++  const plans = [monthly, annual];
++  // annual = 12 months at 20% off
++  const annual = { id: STRIPE_ANNUAL_PRICE_ID, price: monthly.price * 12 * 0.8 };
+</diff>

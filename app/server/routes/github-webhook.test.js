@@ -285,3 +285,69 @@ test('an installation event signed with the repo-hook secret revokes nothing', a
   );
   assert.deepStrictEqual(calls.revoked, []);
 });
+
+// ── PR verdict (Milestone 4) ───────────────────────────────────────
+
+const { prCheckJobs } = require('../services/verdict/runner');
+
+function prWorld() {
+  const world = makeWorld();
+  const runs = [];
+  world.deps.prCheckJobs = prCheckJobs;
+  world.deps.appId = '777';
+  world.deps.runPrCheck = async (job) => { runs.push(job); return { status: 'done' }; };
+  return { ...world, runs };
+}
+
+const prPayload = (action, { installationId = 42 } = {}) => ({
+  action,
+  repository: { full_name: 'acme/web' },
+  pull_request: { number: 7, head: { sha: AFTER }, base: { sha: BEFORE } },
+  ...(installationId ? { installation: { id: installationId } } : {}),
+});
+
+test('an App pull_request push starts one PR check for its head sha', async () => {
+  for (const action of ['opened', 'synchronize', 'reopened']) {
+    const w = prWorld();
+    const res = await send(createWebhookHandler(w.deps), delivery(prPayload(action), { secret: APP_SECRET, event: 'pull_request', id: `d-${action}` }));
+    assert.strictEqual(res.statusCode, 202);
+    assert.deepStrictEqual(w.runs, [{ owner: 'acme', repo: 'web', prNumber: 7, headSha: AFTER, installationId: 42, force: false, deliveryId: `d-${action}` }]);
+  }
+});
+
+test('other pull_request actions and per-repo hook deliveries start no check', async () => {
+  const closed = prWorld();
+  const res = await send(createWebhookHandler(closed.deps), delivery(prPayload('closed'), { secret: APP_SECRET, event: 'pull_request' }));
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(res.body.ignored, 'pull_request.closed');
+  assert.strictEqual(closed.runs.length, 0);
+
+  const hook = prWorld();
+  await send(createWebhookHandler(hook.deps), delivery(prPayload('opened'), { secret: HOOK_SECRET, event: 'pull_request' }));
+  assert.strictEqual(hook.runs.length, 0);
+});
+
+test('Re-run or Retry on the Takeoff check runs it again, forced', async () => {
+  const checkRun = (action, extra = {}) => ({
+    action,
+    repository: { full_name: 'acme/web' },
+    installation: { id: 42 },
+    check_run: { name: 'Takeoff', head_sha: AFTER, external_id: '7', app: { id: 777 }, pull_requests: [] },
+    ...extra,
+  });
+  const rerun = prWorld();
+  await send(createWebhookHandler(rerun.deps), delivery(checkRun('rerequested'), { secret: APP_SECRET, event: 'check_run' }));
+  assert.strictEqual(rerun.runs.length, 1);
+  assert.strictEqual(rerun.runs[0].force, true);
+  assert.strictEqual(rerun.runs[0].prNumber, 7);
+
+  const retry = prWorld();
+  await send(createWebhookHandler(retry.deps), delivery(checkRun('requested_action', { requested_action: { identifier: 'takeoff_retry' } }), { secret: APP_SECRET, event: 'check_run' }));
+  assert.strictEqual(retry.runs.length, 1);
+
+  const other = prWorld();
+  const payload = checkRun('rerequested');
+  payload.check_run.app = { id: 1 };
+  await send(createWebhookHandler(other.deps), delivery(payload, { secret: APP_SECRET, event: 'check_run' }));
+  assert.strictEqual(other.runs.length, 0);
+});

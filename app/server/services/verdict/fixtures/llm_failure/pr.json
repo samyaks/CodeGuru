@@ -1,0 +1,9 @@
+{
+  "title": "Show the annual plan price on checkout",
+  "body": "Adds the annual plan (20% off) to the checkout page.",
+  "commits": ["checkout: show annual plan price"],
+  "files": [
+    { "filename": "src/pages/checkout.tsx", "status": "modified", "additions": 6, "deletions": 1,
+      "patch": "@@ -10,7 +10,12 @@\n-  const plans = [monthly];\n+  const plans = [monthly, annual];\n+  // annual = 12 months at 20% off\n+  const annual = { id: STRIPE_ANNUAL_PRICE_ID, price: monthly.price * 12 * 0.8 };" }
+  ]
+}

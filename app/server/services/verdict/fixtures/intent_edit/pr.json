@@ -1,0 +1,11 @@
+{
+  "title": "Allow three travellers and update intent",
+  "body": "Updates takeoff.yaml to match.",
+  "commits": ["trips: three travellers", "takeoff.yaml: trips rule"],
+  "files": [
+    { "filename": "src/trips/limits.js", "status": "modified", "additions": 1, "deletions": 1,
+      "patch": "@@ -1 +1 @@\n-export const MAX_TRAVELLERS = 2;\n+export const MAX_TRAVELLERS = 3;" },
+    { "filename": "takeoff.yaml", "status": "modified", "additions": 1, "deletions": 1,
+      "patch": "@@ -17 +17 @@\n-      - \"A trip always has exactly two travellers.\"\n+      - \"A trip has two or three travellers.\"" }
+  ]
+}

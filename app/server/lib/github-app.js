@@ -5,9 +5,10 @@
  *   Repository permissions: Metadata: read; Contents: read & write (commit
  *     takeoff.yaml and agent files); Pull requests: read & write (verdict
  *     comment); Checks: read & write (verdict check run).
- *   Subscribe to events: Push, Pull request.
- *   Today's code only reads; the write permissions and Pull request event are
- *   for the PR-verdict and agreements milestones. Raising permissions makes
+ *   Subscribe to events: Push, Pull request, Check run, Check suite.
+ *   The PR verdict (services/verdict) writes the comment and check run, and
+ *   Check run / Check suite carry Re-run and Retry on the Takeoff check;
+ *   Contents write is for the agreements milestone. Raising permissions makes
  *   each existing installation re-approve before they take effect.
  *
  * Two identities are involved:
