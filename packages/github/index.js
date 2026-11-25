@@ -51,7 +51,7 @@ async function githubFetch(urlPath, opts = {}) {
     if (res.status === 404 && token === undefined && !process.env.GITHUB_TOKEN) {
       message = `Repository not found. If this is a private repo, set GITHUB_TOKEN in .env. If public, you may have hit the unauthenticated rate limit (60 req/hr). Original: ${body}`;
     }
-    if (res.status === 403) {
+    if (res.status === 403 && /rate limit/i.test(body)) {
       message = `GitHub API rate limit exceeded. Set GITHUB_TOKEN in .env to increase limits. Original: ${body}`;
     }
     const err = new Error(message);
@@ -389,6 +389,13 @@ function createClient({ token, onUnauthorized } = {}) {
     return res.json();
   }
 
+  /** The entries directly in tree `sha` (not recursive): [{ path, mode, type, sha, size }]. */
+  async function fetchTreeEntries(owner, repo, sha) {
+    const res = await request(`/repos/${owner}/${repo}/git/trees/${enc(sha)}`);
+    const data = await res.json();
+    return Array.isArray(data.tree) ? data.tree : [];
+  }
+
   /** A tree on top of `baseTree` with text files replaced: files = [{ path, content }]. */
   async function createTextTree(owner, repo, baseTree, files) {
     const tree = files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content }));
@@ -427,6 +434,7 @@ function createClient({ token, onUnauthorized } = {}) {
   return {
     fetchBranch,
     fetchGitCommit,
+    fetchTreeEntries,
     createTextTree,
     createGitCommit,
     updateBranchRef,

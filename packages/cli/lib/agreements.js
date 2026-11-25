@@ -4,6 +4,7 @@
 // with it, as text: the server commits the result through GitHub, so nothing
 // here touches the disk. Comments and layout elsewhere in the file are kept.
 
+const { isDeepStrictEqual } = require('util');
 const YAML = require('yaml');
 const { validateText } = require('./validate');
 const { renderBlock, applyBlock, TARGETS } = require('./generate');
@@ -42,6 +43,75 @@ function agreementId(date, text, suffix) {
   return id;
 }
 
+/** `entry` as a block list item, every line indented by `indent`. */
+function renderItem(entry, indent, eol) {
+  const body = YAML.stringify([entry], { lineWidth: 0, indentSeq: true }).replace(/\n+$/, '');
+  return body.split('\n').map((l) => indent + l).join(eol);
+}
+
+/**
+ * Insert the entry by editing the text around the `agreements` list only, so
+ * every other byte of the file stays as it was. Returns null when the file's
+ * shape isn't one this handles (the caller falls back to re-serializing).
+ */
+function appendAsText(text, entry) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const doc = YAML.parseDocument(text);
+  if (doc.errors.length || !YAML.isMap(doc.contents)) return null;
+  const pair = doc.contents.items.find((p) => YAML.isScalar(p.key) && p.key.value === 'agreements');
+  let out;
+  if (!pair) {
+    const sep = text.endsWith('\n') ? '' : eol;
+    out = `${text}${sep}agreements:${eol}${renderItem(entry, '', eol)}${eol}`;
+  } else {
+    const list = pair.value;
+    if (!YAML.isSeq(list) || !list.range) return null;
+    if (list.flow) {
+      if (list.items.length) return null;
+      // `agreements: []` becomes a block list; a comment on that line stays there.
+      const [start, end] = list.range;
+      const keyLineStart = text.lastIndexOf('\n', start) + 1;
+      const keyIndent = /^[ \t]*/.exec(text.slice(keyLineStart))[0];
+      const nl = text.indexOf('\n', end);
+      const lineRest = (nl === -1 ? text.slice(end) : text.slice(end, nl)).replace(/\r$/, ''); // e.g. ` # none yet`
+      const after = nl === -1 ? eol : text.slice(nl).replace(/^\r?\n/, eol);
+      out = `${text.slice(0, start).replace(/[ \t]+$/, '')}${lineRest}${eol}${renderItem(entry, keyIndent, eol)}${after}`;
+    } else {
+      const first = list.items[0];
+      const firstStart = first?.range?.[0];
+      if (typeof firstStart !== 'number') return null;
+      const lineStart = text.lastIndexOf('\n', firstStart) + 1;
+      const dash = /^([ \t]*)- /.exec(text.slice(lineStart, firstStart + 1));
+      if (!dash) return null;
+      const last = list.items[list.items.length - 1];
+      const end = last?.range?.[1];
+      if (typeof end !== 'number') return null;
+      const head = text.slice(0, end);
+      const ws = /\s*$/.exec(head);
+      out = `${head.slice(0, ws.index)}${eol}${renderItem(entry, dash[1], eol)}${ws[0]}${text.slice(end)}`;
+    }
+  }
+  // Only trust the edit if it means exactly "the old file plus this entry".
+  const parsed = YAML.parse(out);
+  const want = YAML.parse(text) || {};
+  want.agreements = [...(Array.isArray(want.agreements) ? want.agreements : []), entry];
+  return isDeepStrictEqual(parsed, want) ? out : null;
+}
+
+/** Fallback: re-serialize the document (comments kept, layout may change). */
+function appendByDocument(text, entry) {
+  const doc = YAML.parseDocument(text);
+  const list = doc.get('agreements', true);
+  const node = doc.createNode(entry);
+  if (YAML.isSeq(list)) {
+    if (list.flow && list.items.length === 0) list.flow = false;
+    list.add(node);
+  } else {
+    doc.set('agreements', doc.createNode([entry]));
+  }
+  return doc.toString({ lineWidth: 0 });
+}
+
 /**
  * Append `agreement` to the `agreements` list of a v2 takeoff.yaml.
  * Already present (same id): returns the text unchanged with `alreadyThere`.
@@ -72,15 +142,7 @@ function addAgreement(text, agreement) {
   entry.agreed_on = agreement.agreed_on;
   if (agreement.source) entry.source = agreement.source;
 
-  const doc = YAML.parseDocument(String(text));
-  const list = doc.get('agreements', true);
-  if (YAML.isSeq(list)) {
-    list.add(doc.createNode(entry));
-  } else {
-    doc.set('agreements', doc.createNode([entry]));
-  }
-  const out = doc.toString({ lineWidth: 0 });
-
+  const out = appendAsText(String(text), entry) || appendByDocument(String(text), entry);
   const after = validateText(out);
   const newErrors = after.issues.filter((i) => i.severity === 'error');
   if (newErrors.length) {

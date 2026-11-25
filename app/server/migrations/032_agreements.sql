@@ -56,8 +56,13 @@ CREATE TABLE IF NOT EXISTS notification_outbox (
   sent_at TIMESTAMPTZ,
   digest_id TEXT,                                -- set when it went out inside a digest
   attempts INT NOT NULL DEFAULT 0,
-  last_error TEXT
+  last_error TEXT,
+  claimed_at TIMESTAMPTZ,                        -- a flusher is sending it
+  dedupe_key TEXT                                -- the same event is queued once
 );
+ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_outbox_dedupe ON notification_outbox (dedupe_key) WHERE dedupe_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_notification_outbox_unsent ON notification_outbox (recipient_email, created_at) WHERE sent_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_outbox_sent ON notification_outbox (recipient_email, sent_at) WHERE sent_at IS NOT NULL;

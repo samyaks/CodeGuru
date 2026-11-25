@@ -39,7 +39,7 @@ function transportFromEnv(env = process.env, fetchImpl = globalThis.fetch) {
  * Queue one email per recipient.
  * @param {Array<{ userId: string, email: string|null }>} recipients
  */
-async function enqueue({ projectId, recipients, kind, subject, body, link }, deps) {
+async function enqueue({ projectId, recipients, kind, subject, body, link, dedupeKey = null }, deps) {
   if (!deps.emailEnabled) return 0;
   let n = 0;
   const seen = new Set();
@@ -47,15 +47,17 @@ async function enqueue({ projectId, recipients, kind, subject, body, link }, dep
     const email = String(r.email || '').trim().toLowerCase();
     if (!email || seen.has(email)) continue;
     seen.add(email);
-    await deps.notificationOutbox.enqueue({
+    const queued = await deps.notificationOutbox.enqueue({
       id: crypto.randomUUID(), projectId, userId: r.userId, email, kind,
-      subject: subject.slice(0, 200), body: body.slice(0, 4000), link,
+      subject: oneLine(subject).slice(0, 200), body: body.slice(0, 4000), link,
+      dedupeKey: dedupeKey ? `${dedupeKey}:${email}` : null,
     });
-    n += 1;
+    if (queued !== false) n += 1;
   }
   return n;
 }
 
+const oneLine = (t) => String(t || '').replace(/\s+/g, ' ').trim();
 const withLink = (n) => (n.link ? `${n.body}\n\n${n.link}` : n.body);
 
 function digestOf(items) {
@@ -75,7 +77,7 @@ async function flush(deps) {
   const now = deps.now();
   let sent = 0;
   for (const email of await deps.notificationOutbox.pendingRecipients()) {
-    const items = await deps.notificationOutbox.unsentFor(email);
+    const items = await deps.notificationOutbox.claimUnsent(email);
     if (!items.length) continue;
     const { singles, digests } = await deps.notificationOutbox.sentSince(email, new Date(now.getTime() - HOUR_MS).toISOString());
     const ids = items.map((n) => n.id);
@@ -92,8 +94,10 @@ async function flush(deps) {
         await deps.transport.send({ to: email, subject: d.subject, text: d.text });
         await deps.notificationOutbox.markSent(ids, crypto.randomUUID());
         sent += 1;
+      } else {
+        // This hour's singles and digest are used up: wait.
+        await deps.notificationOutbox.releaseClaims(ids);
       }
-      // Otherwise this hour's singles and digest are used up: wait.
     } catch (err) {
       console.warn('[agreements] email send failed:', err.message);
       await deps.notificationOutbox.markFailed(ids, err.message).catch(() => {});

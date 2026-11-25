@@ -59,3 +59,23 @@ test('agent files carry the new agreement and keep hand-written text', () => {
   assert.deepStrictEqual(files.map((f) => f.path), ['CLAUDE.md', 'AGENTS.md', '.cursor/rules/takeoff.mdc']);
   assert.throws(() => renderAgentFiles(data, { 'CLAUDE.md': `${MARKER_START}\n${MARKER_START}\n` }), (e) => e.code === 'broken_markers');
 });
+
+test('adding an agreement keeps the file layout: unindented lists, unpadded flow lists, empty list', () => {
+  const src = [
+    'version: 2',
+    'product:',
+    '  name: Acme',
+    '  summary: "A web app."',
+    'areas:',
+    '- id: billing',
+    '  name: Billing',
+    '  paths: ["src/billing/**"]',
+    '  creators: [sam@acme.test]',
+    'agreements: []',
+    '',
+  ].join('\n');
+  const { text } = addAgreement(src, agreement({ area: 'billing', agreed_by: ['sam@acme.test'] }));
+  const before = src.split('\n').slice(0, 9).join('\n');
+  assert.ok(text.startsWith(before), text);
+  assert.match(text, /\nagreements:\n- id: agr_2026_11_25_ship_dark_mode_ab12\n/);
+});

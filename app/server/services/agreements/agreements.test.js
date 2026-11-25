@@ -178,14 +178,131 @@ test('only members see or act on agreements; only the proposer withdraws', async
   await assert.rejects(svc.propose({ project, user: people.olive, body: { text: 'x', areaId: 'nope' } }, deps), /not in takeoff.yaml/);
 });
 
-test('someone leaving can complete a proposal: listing settles it', async () => {
+test('someone leaving can complete a proposal: settling after they leave accepts it; listing alone changes nothing', async () => {
   const { project, deps, people, memberRows } = setup({ members: ['owner', 'olive', 'rex'] });
-  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Settle on list.' } }, deps);
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Settle on leave.' } }, deps);
   await svc.vote({ project, user: people.owner, agreementId: p.id, body: { vote: 'agree' } }, deps);
   memberRows.splice(memberRows.findIndex((m) => m.user_id === 'rex'), 1);
+  const before = await svc.listAgreements({ project, user: people.owner }, deps);
+  assert.strictEqual(before.agreements[0].status, 'proposed', 'a GET does not change anything');
+  assert.strictEqual(await svc.settleOpen({ project, actor: people.owner }, deps), 1);
   const list = await svc.listAgreements({ project, user: people.owner }, deps);
   assert.strictEqual(list.agreements[0].status, 'accepted');
   assert.strictEqual(list.agreements[0].commit.state, 'committed');
+});
+
+test('a commit stuck in "committing" can be retried after 10 minutes, and the re-run adds nothing twice', async () => {
+  const { project, repo, state, deps, people } = setup();
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Crash after push.' } }, deps);
+  await svc.vote({ project, user: people.owner, agreementId: p.id, body: { vote: 'agree' } }, deps);
+  const row = state.agreements[0];
+  Object.assign(row, { commit_state: 'committing', commit_attempted_at: state.now.toISOString(), commit_url: null });
+  let list = await svc.listAgreements({ project, user: people.owner }, deps);
+  assert.strictEqual(list.agreements[0].you.canRetryCommit, false);
+  await assert.rejects(svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps), /nothing to retry/);
+  state.now = new Date(T0.getTime() + 11 * 60 * 1000);
+  list = await svc.listAgreements({ project, user: people.owner }, deps);
+  assert.strictEqual(list.agreements[0].you.canRetryCommit, true);
+  const out = await svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps);
+  assert.strictEqual(out.agreement.commit.state, 'committed');
+  assert.strictEqual(out.agreement.commit.url, null, 'no link to a commit that did not add it');
+  assert.strictEqual(repo.log.length, 1);
+});
+
+test('a dismissed recommendation can be retried; a pending one cannot', async () => {
+  const { project, repo, state, deps, people } = setup();
+  const { agreement: p } = await svc.propose({ project, user: people.owner, body: { text: 'Dismiss me.' } }, deps);
+  await svc.vote({ project, user: people.olive, agreementId: p.id, body: { vote: 'agree' } }, deps);
+  await assert.rejects(svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps), /nothing to retry/);
+  await committing.dismissRecommendation({ project, user: people.owner, recommendationId: state.recs[0].id }, deps.committing);
+  const out = await svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps);
+  assert.strictEqual(out.agreement.commit.state, 'committed');
+  assert.strictEqual(repo.log.length, 1);
+  // What the person confirming sees says what goes into the repo.
+  assert.strictEqual(state.recs[0].summary, 'Add this agreement to takeoff.yaml: "Dismiss me."');
+});
+
+test('agent files that are symlinks are left alone', async () => {
+  const { project, repo, deps, people } = setup();
+  repo.files['CLAUDE.md'] = '# Notes\n';
+  repo.links.add('AGENTS.md');
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Leave links.' } }, deps);
+  await svc.vote({ project, user: people.owner, agreementId: p.id, body: { vote: 'agree' } }, deps);
+  const written = Object.values(repo.trees).pop().files.map((f) => f.path);
+  assert.ok(written.includes('CLAUDE.md'));
+  assert.ok(!written.includes('AGENTS.md'));
+});
+
+test('a ruleset that requires pull requests opens one; an open PR from an earlier try is reused, not overwritten', async () => {
+  const { project, repo, state, deps, people } = setup();
+  repo.rulesError = 'Repository rule violations found\n\nChanges must be made through a pull request.';
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Rules apply.' } }, deps);
+  const { agreement } = await svc.vote({ project, user: people.owner, agreementId: p.id, body: { vote: 'agree' } }, deps);
+  assert.strictEqual(agreement.commit.state, 'pr_opened');
+  const branch = repo.refs[`takeoff/${p.id}`];
+  state.agreements[0].commit_state = 'failed';
+  const again = await svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps);
+  assert.strictEqual(again.agreement.commit.state, 'pr_opened');
+  assert.strictEqual(repo.pulls.length, 1);
+  assert.strictEqual(repo.refs[`takeoff/${p.id}`], branch, 'the branch was not force-pushed');
+});
+
+test('with no email to record, the commit fails plainly and a retry looks again', async () => {
+  const { project, repo, state, deps, people, memberRows } = setup();
+  for (const m of memberRows) m.email = null;
+  const noMail = { ...people.owner, email_confirmed_at: null };
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Who agreed?' } }, { ...deps });
+  people.olive.email_confirmed_at = null;
+  const { agreement } = await svc.vote({ project, user: noMail, agreementId: p.id, body: { vote: 'agree' } }, deps);
+  assert.strictEqual(agreement.commit.state, 'failed');
+  assert.match(agreement.commit.error, /email/);
+  memberRows.find((m) => m.user_id === 'owner').email = 'sam@acme.test';
+  const out = await svc.retryCommit({ project, user: people.owner, agreementId: p.id }, deps);
+  assert.strictEqual(out.agreement.commit.state, 'committed');
+  assert.deepStrictEqual(validateText(repo.files['takeoff.yaml']).data.agreements[0].agreed_by, ['sam@acme.test']);
+  assert.ok(state.agreements[0].agreed_by_emails.includes('sam@acme.test'));
+});
+
+test('a "Not yet" from someone who left does not block the 48-hour fallback', async () => {
+  const { project, state, deps, people, memberRows } = setup({ members: ['owner', 'olive', 'rex'] });
+  const { agreement: p } = await svc.propose({ project, user: people.owner, body: { text: 'Rex left.' } }, deps);
+  await svc.vote({ project, user: people.rex, agreementId: p.id, body: { vote: 'not_yet', comment: 'Hmm.' } }, deps);
+  memberRows.splice(memberRows.findIndex((m) => m.user_id === 'rex'), 1);
+  state.now = new Date(T0.getTime() + 49 * HOUR);
+  const out = await svc.decide({ project, user: people.owner, agreementId: p.id, body: { outcome: 'accept', note: 'Rex left the team.' } }, deps);
+  assert.strictEqual(out.agreement.status, 'accepted');
+});
+
+test('an area with no Creators is decided like one with no area: write access', async () => {
+  const { project, state, deps, people } = setup({ members: ['owner', 'olive', 'rex'] });
+  deps.readIntent = async () => ({ ok: true, reason: null, branch: 'main', areas: [{ id: 'billing', name: 'Billing', creators: [] }] });
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'No creators.', areaId: 'billing' } }, deps);
+  state.now = new Date(T0.getTime() + 49 * HOUR);
+  await assert.rejects(svc.decide({ project, user: people.olive, agreementId: p.id, body: { outcome: 'accept', note: 'x' } }, deps), /Creator|write access/);
+  const out = await svc.decide({ project, user: people.owner, agreementId: p.id, body: { outcome: 'accept', note: 'Owner can write.' } }, deps);
+  assert.strictEqual(out.agreement.status, 'accepted');
+});
+
+test('hidden characters are stripped, and toggling "Not yet" emails the proposer once', async () => {
+  const { project, state, deps, people } = setup({ members: ['owner', 'olive', 'rex'] });
+  const { agreement: p } = await svc.propose({ project, user: people.olive, body: { text: 'Use\u200b UTC\u202e everywhere.' } }, deps);
+  assert.strictEqual(p.text, 'Use UTC everywhere.');
+  for (const vote of ['not_yet', 'agree', 'not_yet', 'agree', 'not_yet']) {
+    await svc.vote({ project, user: people.rex, agreementId: p.id, body: { vote, comment: vote === 'not_yet' ? 'Wait.' : undefined } }, deps);
+  }
+  assert.strictEqual(state.outbox.filter((o) => o.kind === 'agreement_not_yet').length, 1);
+});
+
+test('the decide check asks GitHub once per page, however many rows need it', async () => {
+  const { project, state, deps, people, committingDeps } = setup({ members: ['owner', 'olive', 'rex'] });
+  for (let i = 0; i < 5; i += 1) await svc.propose({ project, user: people.olive, body: { text: `Row ${i}.` } }, deps);
+  state.now = new Date(T0.getTime() + 49 * HOUR);
+  let calls = 0;
+  const real = committingDeps.clientForInstallation;
+  committingDeps.clientForInstallation = (...a) => { const gh = real(...a); return { ...gh, fetchCollaboratorPermission: async (...b) => { calls += 1; return gh.fetchCollaboratorPermission(...b); } }; };
+  const list = await svc.listAgreements({ project, user: people.owner }, deps);
+  assert.strictEqual(list.agreements.filter((a) => a.you.canDecide).length, 5);
+  assert.strictEqual(calls, 1);
 });
 
 test('with emails off nothing is queued', async () => {

@@ -14,6 +14,7 @@ import {
   type Person,
 } from '../../services/agreementsApi';
 import styles from './Team.module.css';
+import { TEAM_CHANGED_EVENT } from './TeamSection';
 
 const names = (people: Person[]) => people.map((p) => p.name || 'a teammate').join(', ');
 
@@ -28,29 +29,47 @@ const DECIDE_REASON: Record<string, string> = {
   not_area_creator: 'A Creator of this area (in takeoff.yaml) can decide it now.',
   no_write_access: 'Someone with write access to the repo can decide it now.',
   github_not_connected: 'Someone with write access to the repo can decide it now. If that’s you, connect GitHub.',
-  area_has_no_creators: 'This area has no Creators in takeoff.yaml, so no one can decide it alone.',
   area_gone: 'This area isn’t in takeoff.yaml any more, so no one can decide it alone.',
+  github_check_failed: 'Takeoff couldn’t check GitHub access just now. Reload in a minute.',
+  github_account_changed: 'The GitHub account linked to you has changed. Connect GitHub again to decide this.',
+  app_not_installed: 'Install the Takeoff GitHub App on the repo so someone with write access can decide this.',
+  github_unavailable: 'Takeoff can’t reach GitHub right now. Reload in a minute.',
+  invalid_takeoff_yaml: 'takeoff.yaml has errors, so Takeoff can’t tell who the area’s Creators are.',
+  no_takeoff_yaml: 'There’s no takeoff.yaml in the repo, so Takeoff can’t tell who the area’s Creators are.',
+  intent_unavailable: 'Takeoff can’t read takeoff.yaml right now. Reload in a minute.',
 };
+
 
 function CommitStatus({ a, busy, onRetry }: { a: Agreement; busy: boolean; onRetry: () => void }) {
   const c = a.commit;
   const link = (href: string, text: string) => <a href={href} target="_blank" rel="noreferrer noopener">{text}</a>;
+  const retry = a.you.canRetryCommit ? <Button variant="quiet" size="sm" disabled={busy} onClick={onRetry}>Try again</Button> : null;
   switch (c.state) {
     case 'committed':
       return <span className={cx('type-small', styles.muted)}>In takeoff.yaml{c.url ? <> · {link(c.url, 'See the commit')}</> : null}</span>;
     case 'pr_opened':
       return <span className={cx('type-small', styles.muted)}>The default branch is protected, so Takeoff opened a pull request{c.prUrl ? <> · {link(c.prUrl, 'Review it')}</> : null}</span>;
     case 'waiting_for_write':
-      return <span className={cx('type-small', styles.muted)}>Waiting for someone with write access to confirm it under “Who’s on this project”.</span>;
+      return retry ? (
+        <span className={styles.actions}>
+          <span className={cx('type-small', styles.muted)}>The request for someone with write access was dismissed.</span>
+          {retry}
+        </span>
+      ) : <span className={cx('type-small', styles.muted)}>Waiting for someone with write access to confirm it under “Who’s on this project”.</span>;
     case 'committing':
-      return <span className={cx('type-small', styles.muted)} role="status">Adding it to takeoff.yaml…</span>;
+      return retry ? (
+        <span className={styles.actions}>
+          <span className={cx('type-small', styles.muted)}>Adding it to takeoff.yaml is taking too long.</span>
+          {retry}
+        </span>
+      ) : <span className={cx('type-small', styles.muted)} role="status">Adding it to takeoff.yaml…</span>;
     default:
       return (
         <span className={styles.actions}>
           <span className={cx('type-small', c.state === 'failed' ? styles.error : styles.muted)}>
             {c.state === 'failed' ? c.error || 'Couldn’t add it to takeoff.yaml.' : 'Not in takeoff.yaml yet.'}
           </span>
-          {a.you.canRetryCommit ? <Button variant="quiet" size="sm" disabled={busy} onClick={onRetry}>Try again</Button> : null}
+          {retry}
         </span>
       );
   }
@@ -87,6 +106,21 @@ export function AgreementsSection({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Confirming a recommendation under the team list commits an agreement.
+  useEffect(() => {
+    const onChange = () => { void load(); };
+    window.addEventListener(TEAM_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(TEAM_CHANGED_EVENT, onChange);
+  }, [load]);
+
+  // While a commit is running, look again every few seconds.
+  const committing = !!data?.agreements.some((a) => a.commit.state === 'committing' && !a.you.canRetryCommit);
+  useEffect(() => {
+    if (!committing) return undefined;
+    const t = window.setInterval(() => { void load(); }, 5000);
+    return () => window.clearInterval(t);
+  }, [committing, load]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);

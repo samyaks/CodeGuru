@@ -32,17 +32,31 @@ function fakeRepo({ protectedBranch = false, moveTimes = 0 } = {}) {
     moves: moveTimes,
     log: [],
     collaborators: new Map([['samgh', 'write'], ['olivegh', 'read']]),
+    links: new Set(), // paths that are symlinks
+    rulesError: null, // message of a 422 the branch update gets (rulesets)
   };
   let n = 0;
   const gh = {
     async fetchRepoMeta() { return { default_branch: 'main' }; },
     async fetchBranch() { return { commit: { sha: repo.head }, protected: protectedBranch }; },
     async fetchFileTextOrNull(_o, _r, path) { return Object.prototype.hasOwnProperty.call(repo.files, path) ? repo.files[path] : null; },
-    async fetchGitCommit(_o, _r, sha) { return { sha, tree: { sha: repo.commits[sha]?.tree || 't?' } }; },
+    async fetchGitCommit(_o, _r, sha) { return { sha, tree: { sha: 'tree:' } }; },
+    async fetchTreeEntries(_o, _r, sha) {
+      const prefix = sha.slice('tree:'.length);
+      const seen = new Map();
+      for (const p of [...Object.keys(repo.files), ...repo.links]) {
+        if (!p.startsWith(prefix)) continue;
+        const [head, ...rest] = p.slice(prefix.length).split('/');
+        if (rest.length) seen.set(head, { path: head, type: 'tree', mode: '040000', sha: `tree:${prefix}${head}/` });
+        else seen.set(head, repo.links.has(p) ? { path: head, type: 'blob', mode: '120000', sha: 'x' } : { path: head, type: 'blob', mode: '100644', sha: 'x', size: repo.files[p].length });
+      }
+      return [...seen.values()];
+    },
     async createTextTree(_o, _r, baseTree, files) { const sha = `t${++n}`; repo.trees[sha] = { baseTree, files }; return { sha }; },
     async createGitCommit(_o, _r, { message, tree, parents }) { const sha = `c${++n}`; repo.commits[sha] = { message, tree, parents }; return { sha }; },
     async updateBranchRef(_o, _r, branch, sha, { force } = {}) {
       if (branch === 'main') {
+        if (repo.rulesError) { const e = new Error(repo.rulesError); e.status = 422; throw e; }
         if (repo.moves > 0) { repo.moves -= 1; const e = new Error('Update is not a fast forward'); e.status = 422; throw e; }
         repo.head = sha;
         for (const f of repo.trees[repo.commits[sha].tree].files) repo.files[f.path] = f.content;
@@ -97,12 +111,14 @@ function setup({ repoOpts, emailEnabled = true, members = ['owner', 'olive'] } =
       const a = state.agreements.find((x) => x.project_id === pid && x.id === id && x.status === 'proposed'); if (!a) return null;
       Object.assign(a, { status, decided_by: decidedBy, decided_at: iso(), decided_via: via, decision_note: note, agreed_by_emails: agreedByEmails }); return a;
     },
-    async claimCommit(id) {
-      const a = state.agreements.find((x) => x.id === id && x.status === 'accepted' && ['none', 'waiting_for_write', 'failed'].includes(x.commit_state)); if (!a) return null;
-      a.commit_state = 'committing'; a.commit_error = null; return a;
+    async claimCommit(pid, id) {
+      const stale = (x) => x.commit_state === 'committing' && state.now - new Date(x.commit_attempted_at) >= 10 * 60 * 1000;
+      const a = state.agreements.find((x) => x.project_id === pid && x.id === id && x.status === 'accepted' && (['none', 'waiting_for_write', 'failed'].includes(x.commit_state) || stale(x))); if (!a) return null;
+      a.commit_state = 'committing'; a.commit_error = null; a.commit_attempted_at = iso(); return a;
     },
-    async setCommit(id, { state: s, sha = null, url = null, prUrl = null, error = null, recommendationId = null }) {
-      const a = state.agreements.find((x) => x.id === id); if (!a) return null;
+    async setAgreedBy(pid, id, emails) { const a = state.agreements.find((x) => x.project_id === pid && x.id === id && x.status === 'accepted'); if (!a) return null; a.agreed_by_emails = emails; return a; },
+    async setCommit(id, { state: s, sha = null, url = null, prUrl = null, error = null, recommendationId = null, from = null }) {
+      const a = state.agreements.find((x) => x.id === id && (!from || from.includes(x.commit_state))); if (!a) return null;
       Object.assign(a, { commit_state: s, commit_sha: sha ?? a.commit_sha, commit_url: url ?? a.commit_url, commit_pr_url: prUrl ?? a.commit_pr_url, commit_error: error, recommendation_id: recommendationId ?? a.recommendation_id }); return a;
     },
   };
@@ -115,19 +131,34 @@ function setup({ repoOpts, emailEnabled = true, members = ['owner', 'olive'] } =
     async listFor(ids) { return state.votes.filter((v) => ids.includes(v.agreement_id)); },
   };
   const notificationOutbox = {
-    async enqueue({ id, projectId, userId, email, kind, subject, body, link }) { state.outbox.push({ id, project_id: projectId, recipient_user_id: userId, recipient_email: email, kind, subject, body, link, created_at: iso(), sent_at: null, digest_id: null }); },
-    async pendingRecipients() { return [...new Set(state.outbox.filter((o) => !o.sent_at).map((o) => o.recipient_email))]; },
-    async unsentFor(email) { return state.outbox.filter((o) => o.recipient_email === email && !o.sent_at); },
+    async enqueue({ id, projectId, userId, email, kind, subject, body, link, dedupeKey = null }) {
+      if (dedupeKey && state.outbox.some((o) => o.dedupe_key === dedupeKey)) return false;
+      state.outbox.push({ id, project_id: projectId, recipient_user_id: userId, recipient_email: email, kind, subject, body, link, created_at: iso(), sent_at: null, digest_id: null, dedupe_key: dedupeKey, claimed: false });
+      return true;
+    },
+    async pendingRecipients() {
+      const hourAgo = new Date(state.now.getTime() - 60 * 60 * 1000).toISOString();
+      const throttled = new Set(state.outbox.filter((o) => o.digest_id && o.sent_at >= hourAgo).map((o) => o.recipient_email));
+      return [...new Set(state.outbox.filter((o) => !o.sent_at && !throttled.has(o.recipient_email)).map((o) => o.recipient_email))];
+    },
+    async claimUnsent(email) {
+      const rows = state.outbox.filter((o) => o.recipient_email === email && !o.sent_at && !o.claimed);
+      for (const o of rows) o.claimed = true;
+      return rows;
+    },
+    async releaseClaims(ids) { for (const o of state.outbox) if (ids.includes(o.id)) o.claimed = false; },
     async sentSince(email, since) {
       const sent = state.outbox.filter((o) => o.recipient_email === email && o.sent_at && o.sent_at >= since);
       return { singles: sent.filter((o) => !o.digest_id).length, digests: new Set(sent.filter((o) => o.digest_id).map((o) => o.digest_id)).size };
     },
     async markSent(ids, digestId = null) { for (const o of state.outbox) if (ids.includes(o.id) && !o.sent_at) Object.assign(o, { sent_at: iso(), digest_id: digestId }); },
-    async markFailed() {},
+    async markFailed(ids) { for (const o of state.outbox) if (ids.includes(o.id)) o.claimed = false; },
   };
   const recommendations = {
     async create({ id, projectId, actionType, payload, summary, createdBy }) { const r = { id, project_id: projectId, action_type: actionType, payload, summary, created_by: createdBy, status: 'pending' }; state.recs.push(r); return r; },
     async get(pid, id) { return state.recs.find((r) => r.project_id === pid && r.id === id) || null; },
+    async listPending(pid) { return state.recs.filter((r) => r.project_id === pid && ['pending', 'confirming'].includes(r.status)); },
+    async dismiss(pid, id, uid) { const r = state.recs.find((x) => x.id === id && x.status === 'pending'); if (!r) return null; r.status = 'dismissed'; r.decided_by = uid; return r; },
     async claimForConfirm(pid, id, uid) { const r = state.recs.find((x) => x.id === id && x.status === 'pending'); if (!r) return null; r.status = 'confirming'; r.decided_by = uid; return r; },
     async finish(id, { status }) { const r = state.recs.find((x) => x.id === id); r.status = status; return r; },
     async release(id) { const r = state.recs.find((x) => x.id === id); r.status = 'pending'; return r; },

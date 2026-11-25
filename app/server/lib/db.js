@@ -2542,24 +2542,32 @@ const agreements = {
     return rows[0] || null;
   },
   /** Take an accepted agreement to commit it. Only one runner wins; a stuck run is taken again after 10 minutes. */
-  async claimCommit(id) {
+  async claimCommit(projectId, id) {
     const { rows } = await getDb().query(
       `UPDATE agreements SET commit_state = 'committing', commit_attempted_at = now(), commit_error = NULL
-        WHERE id = $1 AND status = 'accepted'
+        WHERE project_id = $2 AND id = $1 AND status = 'accepted'
           AND (commit_state IN ('none', 'waiting_for_write', 'failed')
             OR (commit_state = 'committing' AND commit_attempted_at < now() - ${AGREEMENT_COMMIT_STALE}))
         RETURNING *`,
-      [id]
+      [id, projectId]
     );
     return rows[0] || null;
   },
-  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId }) {
+  async setAgreedBy(projectId, id, emails) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET agreed_by_emails = $3::text[] WHERE project_id = $1 AND id = $2 AND status = 'accepted' RETURNING *`,
+      [projectId, id, emails]
+    );
+    return rows[0] || null;
+  },
+  /** Record the commit outcome. With `from`, only while the state is one of those. */
+  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId, from = null }) {
     const { rows } = await getDb().query(
       `UPDATE agreements SET commit_state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
           commit_pr_url = COALESCE($5, commit_pr_url), commit_error = $6,
           recommendation_id = COALESCE($7, recommendation_id)
-        WHERE id = $1 RETURNING *`,
-      [id, state, sha, url, prUrl, error, recommendationId ?? null]
+        WHERE id = $1 AND ($8::text[] IS NULL OR commit_state = ANY($8::text[])) RETURNING *`,
+      [id, state, sha, url, prUrl, error, recommendationId ?? null, from]
     );
     return rows[0] || null;
   },
@@ -2588,31 +2596,44 @@ const agreementVotes = {
 };
 
 const notificationOutbox = {
-  async enqueue({ id, projectId, userId, email, kind, subject, body, link = null }) {
-    await getDb().query(
-      `INSERT INTO notification_outbox (id, project_id, recipient_user_id, recipient_email, kind, subject, body, link)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, projectId, userId, email, kind, subject, body, link]
+  /** Queue one email. A `dedupeKey` already queued is skipped (returns false). */
+  async enqueue({ id, projectId, userId, email, kind, subject, body, link = null, dedupeKey = null }) {
+    const { rowCount } = await getDb().query(
+      `INSERT INTO notification_outbox (id, project_id, recipient_user_id, recipient_email, kind, subject, body, link, dedupe_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+      [id, projectId, userId, email, kind, subject, body, link, dedupeKey]
     );
+    return rowCount > 0;
   },
-  /** Recipients with something unsent. */
+  /** Recipients with something unsent who can still get email this hour (no digest in the last hour). */
   async pendingRecipients({ limit = 200 } = {}) {
     const { rows } = await getDb().query(
-      `SELECT recipient_email, MIN(created_at) AS oldest FROM notification_outbox
-        WHERE sent_at IS NULL AND attempts < 5 GROUP BY recipient_email ORDER BY oldest LIMIT $1`,
+      `SELECT o.recipient_email, MIN(o.created_at) AS oldest FROM notification_outbox o
+        WHERE o.sent_at IS NULL AND o.attempts < 5
+          AND NOT EXISTS (SELECT 1 FROM notification_outbox d
+            WHERE d.recipient_email = o.recipient_email AND d.digest_id IS NOT NULL AND d.sent_at >= now() - interval '1 hour')
+        GROUP BY o.recipient_email ORDER BY oldest LIMIT $1`,
       [limit]
     );
     return rows.map((r) => r.recipient_email);
   },
-  async unsentFor(email) {
+  /** Claim `email`'s unsent emails for sending, so two servers don't both send them. */
+  async claimUnsent(email) {
     const { rows } = await getDb().query(
-      `SELECT * FROM notification_outbox WHERE recipient_email = $1 AND sent_at IS NULL AND attempts < 5
-        ORDER BY created_at ASC LIMIT 100`,
+      `UPDATE notification_outbox SET claimed_at = now()
+        WHERE id IN (SELECT id FROM notification_outbox
+          WHERE recipient_email = $1 AND sent_at IS NULL AND attempts < 5
+            AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
+          ORDER BY created_at ASC LIMIT 100 FOR UPDATE SKIP LOCKED)
+        RETURNING *`,
       [email]
     );
-    return rows;
+    return rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   },
-  /** Emails that went to `email` since `since` (each digest counts once). */
+  async releaseClaims(ids) {
+    if (!ids.length) return;
+    await getDb().query('UPDATE notification_outbox SET claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL', [ids]);
+  },
   /** What went to `email` since `since`: single emails and digests, counted apart. */
   async sentSince(email, since) {
     const { rows } = await getDb().query(
@@ -2634,7 +2655,7 @@ const notificationOutbox = {
   async markFailed(ids, error) {
     if (!ids.length) return;
     await getDb().query(
-      'UPDATE notification_outbox SET attempts = attempts + 1, last_error = $2 WHERE id = ANY($1::text[])',
+      'UPDATE notification_outbox SET attempts = attempts + 1, last_error = $2, claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL',
       [ids, String(error).slice(0, 500)]
     );
   },
