@@ -11,7 +11,7 @@ const DEFAULT_MODEL = 'claude-opus-5-5';
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 // `fallbacks: "default"` is only accepted for models that have published
 // fallback targets; an override to another model goes without it.
-const SUPPORTS_FALLBACKS = /^claude-(opus-5|fable-5|mythos-5)/;
+const SUPPORTS_FALLBACKS = /^claude-(opus-5|fable-5|mythos-5|sonnet-5-5)/;
 
 let sharedClient = null;
 function defaultClient() {
@@ -31,7 +31,8 @@ async function callVerdictModel({ system, user }, { client = null, model = verdi
   const params = {
     model,
     max_tokens: 16000,
-    output_config: { format: { type: 'json_schema', schema: VERDICT_SCHEMA } },
+    // Opus 5.5 defaults to medium effort; a review is worth the extra thought.
+    output_config: { format: { type: 'json_schema', schema: VERDICT_SCHEMA }, effort: 'high' },
     system,
     messages: [{ role: 'user', content: user }],
   };

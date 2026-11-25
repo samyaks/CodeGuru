@@ -34,9 +34,20 @@ function clampSentences(text, max = 3) {
 
 const norm = (t) => String(t).toLowerCase().replace(/[“”"'`‘’]/g, '').replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim();
 
+const isWordChar = (c) => !!c && /[\p{L}\p{N}_]/u.test(c);
+
+/** `q` appears in `t` on word boundaries and covers at least half of it. */
+function quotesEnough(t, q) {
+  if (q.length < 12 || q.length < t.length / 2) return false;
+  for (let i = t.indexOf(q); i !== -1; i = t.indexOf(q, i + 1)) {
+    if (!isWordChar(t[i - 1]) && !isWordChar(t[i + q.length])) return true;
+  }
+  return false;
+}
+
 /**
  * The intent text a conflict quotes, or null. Exact match after normalising,
- * or a quote of at least 12 characters taken from inside one rule.
+ * or a quote of whole words that is at least half of one rule.
  * @param {Array<{ area: string|null, text: string }>} known
  */
 function findQuoted(known, area, quote) {
@@ -45,9 +56,14 @@ function findQuoted(known, area, quote) {
   const pool = known.filter((k) => k.area === area || (!k.area && (area === 'product' || area === '')));
   const candidates = pool.length ? pool : known;
   return candidates.find((k) => norm(k.text) === q)
-    || (q.length >= 12 ? candidates.find((k) => norm(k.text).includes(q)) : null)
+    || candidates.find((k) => quotesEnough(norm(k.text), q))
     || null;
 }
+
+// What a comment can show: GitHub caps a comment at 65,536 characters.
+const MAX_CONFLICTS = 10;
+const MAX_FILES_PER_CONFLICT = 20;
+const MAX_EXPLANATION = 600;
 
 /**
  * @param {string} text the model's JSON
@@ -76,13 +92,22 @@ function parseVerdict(text, { known = [], changedFiles = [] } = {}) {
     }
     const hit = findQuoted(known, c.area.trim(), c.rule_or_agreement);
     if (!hit || !c.explanation.trim()) { dropped += 1; return; }
+    const files = (Array.isArray(c.files) ? c.files : []).filter((f) => isStr(f) && changed.has(f));
+    // One entry per rule: a repeat adds its files to the first.
+    const same = conflicts.find((x) => x.rule_or_agreement === hit.text && x.area === (hit.area || 'product'));
+    if (same) {
+      for (const f of files) if (!same.files.includes(f) && same.files.length < MAX_FILES_PER_CONFLICT) same.files.push(f);
+      return;
+    }
     conflicts.push({
       area: hit.area || 'product',
       rule_or_agreement: hit.text, // the intent's own words, not the model's copy
-      explanation: c.explanation.trim(),
-      files: (Array.isArray(c.files) ? c.files : []).filter((f) => isStr(f) && changed.has(f)),
+      explanation: clampSentences(c.explanation, 3).slice(0, MAX_EXPLANATION),
+      files: [...new Set(files)].slice(0, MAX_FILES_PER_CONFLICT),
     });
   });
+  const extraConflicts = Math.max(0, conflicts.length - MAX_CONFLICTS);
+  conflicts.length = Math.min(conflicts.length, MAX_CONFLICTS);
 
   let verdict = raw.verdict;
   // Any real conflict is a drift. A ✅ that named conflicts we couldn't find in
@@ -97,8 +122,9 @@ function parseVerdict(text, { known = [], changedFiles = [] } = {}) {
     verdict,
     summary: clampSentences(raw.summary),
     conflicts,
-    suggested_agreement: verdict === 'matches' ? null : suggested,
+    suggested_agreement: verdict === 'matches' ? null : (suggested ? clampSentences(suggested, 2).slice(0, MAX_EXPLANATION) : null),
     dropped_conflicts: dropped,
+    ...(extraConflicts ? { more_conflicts: extraConflicts } : {}),
   };
 }
 

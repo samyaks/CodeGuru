@@ -110,7 +110,7 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
   // caller needs, so a grant for repo A can never become a token for repo B
   // or for write access the caller didn't ask for.
   function scopeKey(installationId, scope) {
-    return `${installationId}|${scope.repo || ''}|${JSON.stringify(scope.permissions)}`;
+    return `${installationId}|${scope.repo || ''}|${JSON.stringify(scope.permissions)}|${JSON.stringify(scope.optional || null)}`;
   }
 
   async function mintInstallationToken(installationId, scope) {
@@ -124,16 +124,22 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
         permissions,
       },
     });
+    // 422: a permission the installation hasn't approved, or a repo it no
+    // longer covers. Optional permissions are dropped first, then read scopes
+    // fall back to plain contents/metadata (pull_requests was added later).
+    const tries = [];
+    if (scope.optional) tries.push({ ...scope.permissions, ...scope.optional });
+    tries.push(scope.permissions);
+    if (scope.permissions === READ_PERMISSIONS) tries.push(BASE_PERMISSIONS);
     let data;
     try {
-      try {
-        data = await mint(scope.permissions);
-      } catch (err) {
-        // 422: a permission the installation hasn't approved, or a repo it no
-        // longer covers. Retry read scopes without pull_requests first.
-        const readScope = scope.permissions === READ_PERMISSIONS;
-        if (err.status !== 422 || !readScope) throw err;
-        data = await mint(BASE_PERMISSIONS);
+      for (let i = 0; i < tries.length; i += 1) {
+        try {
+          data = await mint(tries[i]);
+          break;
+        } catch (err) {
+          if (err.status !== 422 || i === tries.length - 1) throw err;
+        }
       }
     } catch (err) {
       // 404: uninstalled. 403: suspended. 422: the repo isn't in this
@@ -147,8 +153,10 @@ function createGithubApp(config, { fetchImpl = fetch, now = () => Date.now() } =
     return entry.token;
   }
 
-  function normalizeScope({ repo = null, permissions = READ_PERMISSIONS } = {}) {
-    return { repo: repo ? String(repo) : null, permissions };
+  // `optional` permissions are asked for too, but dropped when the
+  // installation hasn't approved them (e.g. deployments for preview links).
+  function normalizeScope({ repo = null, permissions = READ_PERMISSIONS, optional = null } = {}) {
+    return { repo: repo ? String(repo) : null, permissions, optional: optional && Object.keys(optional).length ? optional : null };
   }
 
   /** Cached installation token for one scope; concurrent callers share one mint. */

@@ -181,4 +181,15 @@ function touchedAreas(intent, paths) {
   return { touched, unmapped };
 }
 
-module.exports = { globMatches, matchesAny, touchedAreas, MAX_PATTERN_LENGTH };
+/** Area path patterns this matcher can't compile (too long, too many brace alternatives), which match nothing. */
+function uncheckablePatterns(intent) {
+  const out = [];
+  for (const area of Array.isArray(intent?.areas) ? intent.areas : []) {
+    for (const g of Array.isArray(area?.paths) ? area.paths : []) {
+      if (typeof g === 'string' && compile(g).length === 0) out.push({ area: area.id, pattern: g });
+    }
+  }
+  return out;
+}
+
+module.exports = { globMatches, matchesAny, touchedAreas, uncheckablePatterns, MAX_PATTERN_LENGTH };

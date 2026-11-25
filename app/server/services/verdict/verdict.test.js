@@ -103,25 +103,31 @@ function fakePrChecks() {
       const row = rows.get(k(key));
       return row ? { ...row, result_json: row.result ? JSON.parse(JSON.stringify(row.result)) : null } : null;
     },
-    async finish(key, fields) {
+    async setCheckRun(key, attempts, checkRunId) {
       const row = rows.get(k(key));
-      Object.assign(row, fields, { commentId: fields.commentId ?? row.commentId ?? null });
-      seq += 1;
-      row.seq = seq;
+      if (row && row.status === 'running' && row.attempts === attempts) row.checkRunId = checkRunId;
     },
-    async setComment(key, commentId) {
+    async finish(key, fields, attempts) {
+      const row = rows.get(k(key));
+      if (!row || row.status !== 'running' || row.attempts !== attempts) return false;
+      Object.assign(row, fields, { commentId: fields.commentId ?? row.commentId ?? null });
+      return true;
+    },
+    async setComment(key, commentId, _db) {
       const row = rows.get(k(key));
       row.commentId = commentId;
       seq += 1;
       row.seq = seq;
     },
-    async latestComment({ repo, prNumber }) {
+    async latestComment({ repo, prNumber }, _db) {
       const hits = [...rows.values()].filter((r) => r.repo === repo && r.prNumber === prNumber && r.commentId).sort((a, b) => b.seq - a.seq);
       return hits[0] ? { headSha: hits[0].headSha, commentId: hits[0].commentId } : null;
     },
-    async withCommentLock(_key, fn) { return fn(); },
-    async listStale() {
-      return [...rows.values()].filter((r) => r.status === 'running').map((r) => ({
+    async withCommentLock(_key, fn) { return fn(undefined); },
+    async failStale() {
+      const stale = [...rows.values()].filter((r) => r.status === 'running');
+      for (const r of stale) Object.assign(r, { status: 'failed', error: 'interrupted' });
+      return stale.map((r) => ({
         repo_full_name: r.repo, pr_number: r.prNumber, head_sha: r.headSha, installation_id: r.installation_id, check_run_id: r.checkRunId || null,
       }));
     },
@@ -596,4 +602,85 @@ test('the verdict reads and writes through a token scoped to the PR repo', async
   await runPrCheck(job(), w.deps);
   assert.ok(w.clientScopes.length > 0);
   for (const scope of w.clientScopes) assert.deepStrictEqual(scope, [42, 'web']);
+});
+
+// ── Round-2 review fixes ────────────────────────────────────────────
+
+test('a PR whose file list GitHub cut short is never ✅, even outside every area', async () => {
+  const w = world(readCase('outside_areas'));
+  const fetchPr = w.gh.client.fetchPullRequest;
+  w.gh.client.fetchPullRequest = async (...a) => ({ ...(await fetchPr(...a)), changed_files: 3500 });
+  w.model.text = JSON.stringify({ verdict: 'matches', summary: 'Looks fine.', conflicts: [] });
+  const out = await runPrCheck(job(), w.deps);
+  assert.deepStrictEqual(out, { status: 'done', verdict: 'needs_decision' });
+  assert.strictEqual(w.prompts.length, 1);
+  assert.match(w.gh.state.comments[0].body, /GitHub lists only 1 of this PR's 3500 changed files/);
+});
+
+test('with a cut-short file list, a takeoff.yaml change is found from the file itself', async () => {
+  const c = readCase('matches');
+  c.headYaml = BASE_YAML.replace(/Stripe/g, 'Stripe Billing');
+  const w = world(c);
+  const fetchPr = w.gh.client.fetchPullRequest;
+  w.gh.client.fetchPullRequest = async (...a) => ({ ...(await fetchPr(...a)), changed_files: 3500 });
+  const out = await runPrCheck(job(), w.deps);
+  assert.strictEqual(out.verdict, 'needs_decision');
+  assert.match(w.gh.state.comments[0].body, /also edits takeoff\.yaml/);
+});
+
+test('path patterns the check cannot match are refused, never silently skipped', async () => {
+  const { uncheckablePatterns } = require('./globs');
+  const long = `src/${'a'.repeat(400)}/**`;
+  assert.deepStrictEqual(uncheckablePatterns({ areas: [{ id: 'x', paths: [long, 'src/**'] }] }), [{ area: 'x', pattern: long }]);
+  const c = readCase('matches');
+  const w = world(c, { baseYaml: BASE_YAML.replace('"src/trips/**"', `"${long}"`) });
+  const out = await runPrCheck(job(), w.deps);
+  assert.strictEqual(out.status, 'failed');
+  assert.match(w.gh.state.comments[0].body, /at most 300 characters/);
+  assert.strictEqual(w.prompts.length, 0);
+});
+
+test('the check run id is saved before the model is called, so a restart can close it', async () => {
+  const w = world(readCase('matches'));
+  let seen = null;
+  w.model.onCall = async () => { seen = [...w.prChecks.rows.values()][0].checkRunId; };
+  await runPrCheck(job(), w.deps);
+  assert.strictEqual(seen, w.gh.state.checkRuns[0].id);
+});
+
+test('a run the restart sweep took over does not overwrite it', async () => {
+  const w = world(readCase('matches'));
+  w.model.onCall = async () => { await recoverStalePrChecks(w.deps); };
+  await runPrCheck(job(), w.deps);
+  const row = [...w.prChecks.rows.values()][0];
+  assert.strictEqual(row.status, 'failed');
+  assert.strictEqual(row.error, 'interrupted');
+});
+
+test('if the verdict cannot be put on the check run, it is closed as "couldn\'t check"', async () => {
+  const w = world(readCase('matches'));
+  const update = w.gh.client.updateCheckRun;
+  let calls = 0;
+  w.gh.client.updateCheckRun = async (...a) => {
+    calls += 1;
+    if (calls === 1) throw Object.assign(new Error('Unprocessable'), { status: 422 });
+    return update(...a);
+  };
+  await runPrCheck(job(), w.deps);
+  const run = w.gh.state.checkRuns[0];
+  assert.strictEqual(run.status, 'completed');
+  assert.deepStrictEqual(run.actions.map((a) => a.identifier), ['takeoff_retry']);
+});
+
+test('model call asks for high effort and uses fallbacks on Sonnet 5.5', async () => {
+  const seen = [];
+  const reply = { stop_reason: 'end_turn', content: [{ type: 'text', text: '{}' }], model: 'm' };
+  const client = {
+    beta: { messages: { create: async (p) => { seen.push(['beta', p]); return reply; } } },
+    messages: { create: async (p) => { seen.push(['plain', p]); return reply; } },
+  };
+  await callVerdictModel({ system: 's', user: 'u' }, { client, model: 'claude-sonnet-5-5' });
+  assert.strictEqual(seen[0][0], 'beta');
+  assert.strictEqual(seen[0][1].output_config.effort, 'high');
+  assert.strictEqual(seen[0][1].fallbacks, 'default');
 });

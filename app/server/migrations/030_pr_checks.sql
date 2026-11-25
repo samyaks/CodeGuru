@@ -4,8 +4,10 @@
 -- services/verdict/runner.js claims a row before it calls the model, so a
 -- webhook delivered twice runs the (paid) check once; a failed or stale row can
 -- be claimed again by a redelivery or by Re-run on the check; a run left
--- 'running' by a crash is closed as failed at startup. comment_id is the
--- single Takeoff comment on the PR, edited in place on every push.
+-- 'running' by a crash is closed as failed by a sweep. `attempts` names the
+-- current claim; a run's later writes land only while it still holds. comment_id
+-- is the single Takeoff comment on the PR, edited in place on every push; the
+-- row with the newest comment_at is the sha the comment shows.
 
 CREATE TABLE IF NOT EXISTS pr_checks (
   repo_full_name TEXT NOT NULL,
@@ -17,6 +19,7 @@ CREATE TABLE IF NOT EXISTS pr_checks (
   verdict        TEXT,                             -- matches | drifts | needs_decision
   result_json    JSONB,
   comment_id     BIGINT,
+  comment_at     TIMESTAMPTZ,                      -- when this sha's verdict went on the comment
   check_run_id   BIGINT,
   model          TEXT,
   error          TEXT,
@@ -27,6 +30,6 @@ CREATE TABLE IF NOT EXISTS pr_checks (
   PRIMARY KEY (repo_full_name, pr_number, head_sha)
 );
 
-CREATE INDEX IF NOT EXISTS pr_checks_pr_idx ON pr_checks (repo_full_name, pr_number, updated_at DESC);
+CREATE INDEX IF NOT EXISTS pr_checks_pr_idx ON pr_checks (repo_full_name, pr_number, comment_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS pr_checks_check_run_idx ON pr_checks (check_run_id) WHERE check_run_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS pr_checks_running_idx ON pr_checks (updated_at) WHERE status = 'running';

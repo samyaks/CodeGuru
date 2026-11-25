@@ -291,7 +291,7 @@ function createClient({ token, onUnauthorized } = {}) {
    * The newest issue comment (PRs are issues) whose body starts with `marker`
    * and that `accept(comment)` allows (e.g. only the App's own comments).
    */
-  async function findIssueCommentWithMarker(owner, repo, issueNumber, marker, { maxPages = 10, accept = () => true } = {}) {
+  async function findIssueCommentWithMarker(owner, repo, issueNumber, marker, { maxPages = 50, accept = () => true } = {}) {
     let found = null;
     for (let page = 1; page <= maxPages; page += 1) {
       const res = await request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100&page=${page}`);

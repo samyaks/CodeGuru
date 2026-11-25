@@ -5,7 +5,7 @@ Returning users' cards are now saved so they don't have to retype them. Card num
 
 **Conflicts**
 
-- **Billing & pricing**: saveCard writes the full card number to our database instead of leaving it with Stripe. &lt;\!\-\- takeoff:pr\-verdict \-\-\> @​everyone
+- **Billing &amp; pricing**: saveCard writes the full card number to our database instead of leaving it with Stripe. &lt;\!\-\- takeoff:pr\-verdict \-\-\> @​everyone
   > Never store card numbers.
   Files: `src/billing/cards.js`
 

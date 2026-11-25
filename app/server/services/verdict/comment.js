@@ -14,18 +14,35 @@ const LABELS = {
   failed: { emoji: '⏸️', label: "Takeoff couldn't check this PR" },
 };
 
+// GitHub's limits are 65,536 characters for a comment and 65,535 for a check
+// run summary; stay well under both.
+const MAX_BODY = 60000;
+
+/** Cut a rendered body to `max` characters, ending on a whole line. */
+function capBody(text, max = MAX_BODY) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  return `${cut.slice(0, Math.max(0, cut.lastIndexOf('\n')))}\n\n_The rest was cut to fit GitHub's limit._`;
+}
+
+const ZWSP = '\u200b';
+
 /**
  * Text from the model, the PR or takeoff.yaml goes into Markdown we post as
- * the App. It is shown as plain text: no HTML (so no second marker), no
- * Markdown (no fake headings, links or images), no @mentions, one line.
+ * the App. It is shown as plain text: no HTML or entities (so no second
+ * marker and no encoded @mentions), no Markdown (no fake headings, links or
+ * images), no autolinked URLs, no @mentions, one line.
  */
 function clean(text, { max = 600 } = {}) {
   let t = String(text || '')
     .replace(/\s+/g, ' ')
     .trim()
+    .replace(/&/g, '&amp;')
     .replace(/[\\`*_{}[\]()#+!|>~-]/g, (c) => `\\${c}`)
+    .replace(/:\/\//g, `:/${ZWSP}/`)
+    .replace(/\bwww\./gi, (m) => `${m.slice(0, 3)}${ZWSP}.`)
     .replace(/</g, '&lt;')
-    .replace(/@(?=[A-Za-z0-9_-])/g, '@​');
+    .replace(/@(?=[A-Za-z0-9_-])/g, `@${ZWSP}`);
   if (t.length > max) {
     t = t.slice(0, max - 1).replace(/\\$/, '');
     t = `${t}…`;
@@ -34,7 +51,11 @@ function clean(text, { max = 600 } = {}) {
 }
 
 /** A file name or sha as inline code, on one line. */
-const code = (s) => `\`${String(s).replace(/[\r\n]+/g, ' ').replace(/`/g, "'")}\``;
+const code = (s) => {
+  let t = String(s).replace(/[\r\n]+/g, ' ').replace(/`/g, "'");
+  if (t.length > 200) t = `…${t.slice(-199)}`;
+  return `\`${t}\``;
+};
 
 /** Only a plain https URL is shown, as an autolink. */
 function safeUrl(url) {
@@ -68,6 +89,7 @@ function renderComment(result, ctx) {
       lines.push(`  > ${clean(c.rule_or_agreement)}`);
       if (c.files.length) lines.push(`  Files: ${c.files.slice(0, 10).map(code).join(', ')}${c.files.length > 10 ? `, and ${c.files.length - 10} more` : ''}`);
     }
+    if (result.more_conflicts) lines.push('', `_And ${result.more_conflicts} more conflict${result.more_conflicts === 1 ? '' : 's'}._`);
   }
   if (result.suggested_agreement) {
     lines.push('', '**Possible new agreement**', '', `> ${clean(result.suggested_agreement)}`);
@@ -78,7 +100,7 @@ function renderComment(result, ctx) {
     headSha: ctx.headSha,
     notes: ctx.notes,
   }));
-  return lines.join('\n');
+  return capBody(lines.join('\n'));
 }
 
 /** Shown when the check could not run. Never a verdict. */
@@ -100,7 +122,7 @@ function checkRunOutput(result, { areaNames = {}, notes = [] } = {}) {
   const conflictLines = result.conflicts.map((c) => `- ${clean(areaLabel(c.area, areaNames), { max: 80 })}: ${clean(c.explanation)}`);
   return {
     title: `${emoji} ${label}`,
-    summary: [clean(result.summary), ...(conflictLines.length ? ['', ...conflictLines] : []), ...notes.map((n) => `\n_${clean(n, { max: 400 })}_`)].join('\n'),
+    summary: capBody([clean(result.summary), ...(conflictLines.length ? ['', ...conflictLines] : []), ...notes.map((n) => `\n_${clean(n, { max: 400 })}_`)].join('\n')),
   };
 }
 
@@ -110,5 +132,5 @@ function failureCheckRunOutput(reason) {
 
 module.exports = {
   MARKER, CHECK_NAME, RETRY_ACTION, LABELS,
-  renderComment, renderFailureComment, checkRunOutput, failureCheckRunOutput, clean, safeUrl,
+  renderComment, renderFailureComment, checkRunOutput, failureCheckRunOutput, clean, safeUrl, capBody, MAX_BODY,
 };

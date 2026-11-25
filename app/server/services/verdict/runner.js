@@ -10,7 +10,7 @@
 
 const { FILENAME } = require('@takeoff/cli');
 const { loadIntent, chooseIntent } = require('./intent');
-const { touchedAreas } = require('./globs');
+const { touchedAreas, uncheckablePatterns } = require('./globs');
 const { buildPrompt } = require('./prompt');
 const { parseVerdict, VerdictError, atLeastNeedsDecision } = require('./parse');
 const {
@@ -26,7 +26,9 @@ function defaultDeps() {
   return {
     deployments,
     prChecks,
-    clientForInstallation: (id, repo) => getGithubApp().clientForInstallation(id, { repo, permissions: VERDICT_PERMISSIONS }),
+    clientForInstallation: (id, repo) => getGithubApp().clientForInstallation(id, {
+      repo, permissions: VERDICT_PERMISSIONS, optional: VERDICT_OPTIONAL_PERMISSIONS,
+    }),
     callModel: callVerdictModel,
     appSlug: config.slug || null,
     appUrl: (process.env.TAKEOFF_APP_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '') || null,
@@ -35,12 +37,13 @@ function defaultDeps() {
 }
 
 // The verdict reads the PR and takeoff.yaml and writes one comment and one
-// check run, on the PR's own repo only. (Deployments: read is optional and
-// left out, so an installation without it still mints; the preview link is
-// then skipped.)
+// check run, on the PR's own repo only. Deployments: read is optional: it
+// finds the preview link, and an installation without it still mints (the
+// link is then skipped).
 const VERDICT_PERMISSIONS = Object.freeze({
   contents: 'read', metadata: 'read', pull_requests: 'write', checks: 'write',
 });
+const VERDICT_OPTIONAL_PERMISSIONS = Object.freeze({ deployments: 'read' });
 
 function userReason(err) {
   if (err instanceof VerdictError) {
@@ -54,9 +57,11 @@ function userReason(err) {
 const isOurComment = (slug) => (c) =>
   c?.user?.type === 'Bot' && (!slug || String(c.user.login).toLowerCase() === `${slug}[bot]`.toLowerCase());
 
-/** Edit the PR's Takeoff comment, or post it the first time. Returns its id. */
-async function upsertComment(gh, { owner, repo, prNumber, body }, deps) {
-  const latest = await deps.prChecks.latestComment({ repo: `${owner}/${repo}`, prNumber }).catch(() => null);
+/**
+ * Edit the PR's Takeoff comment, or post it the first time. Returns its id.
+ * `latest` is the stored comment, read by the caller under the PR's lock.
+ */
+async function upsertComment(gh, { owner, repo, prNumber, body, latest = null }, deps) {
   if (latest?.commentId) {
     try {
       const updated = await gh.updateIssueComment(owner, repo, latest.commentId, body);
@@ -76,18 +81,23 @@ async function upsertComment(gh, { owner, repo, prNumber, body }, deps) {
 
 /**
  * Write the comment only while `headSha` is still the PR's head, so a slow
- * check of an older push never overwrites a newer verdict. The per-PR lock
- * keeps two runs from both posting a first comment, and covers the head check.
- * @returns {Promise<number|null>} the comment id, or null when the PR moved on
+ * check of an older push never overwrites a newer verdict. Everything runs
+ * under the per-PR lock, on the locked client: the head check, reading which
+ * sha the comment shows, the write, and recording it. So two runs never both
+ * post a first comment, and the stored "shown" sha always matches the PR.
+ * `skipIfShown` leaves the comment alone when it already shows `headSha`.
+ * @returns {Promise<number|null>} the comment id, or null when nothing was written
  */
-async function writeComment(gh, { owner, repo, prNumber, headSha, body }, deps) {
-  const lock = deps.prChecks.withCommentLock
-    ? (fn) => deps.prChecks.withCommentLock({ repo: `${owner}/${repo}`, prNumber }, fn)
-    : (fn) => fn();
-  return lock(async () => {
+async function writeComment(gh, { owner, repo, prNumber, headSha, body, skipIfShown = false }, deps) {
+  const prKey = { repo: `${owner}/${repo}`, prNumber };
+  return deps.prChecks.withCommentLock(prKey, async (db) => {
     const now = await gh.fetchPullRequest(owner, repo, prNumber).catch(() => null);
     if (now && now.head?.sha !== headSha) return null;
-    return upsertComment(gh, { owner, repo, prNumber, body }, deps);
+    const latest = await deps.prChecks.latestComment(prKey, db);
+    if (skipIfShown && latest && latest.headSha === headSha) return null;
+    const commentId = await upsertComment(gh, { owner, repo, prNumber, body, latest }, deps);
+    await deps.prChecks.setComment({ ...prKey, headSha }, commentId, db);
+    return commentId;
   });
 }
 
@@ -127,12 +137,18 @@ const list3 = (items) => (items.length > 3 ? `${items.slice(0, 3).join(' ')} And
  */
 async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headText }, deps, log, ctx) {
   const files = await gh.fetchAllPRFiles(owner, repo, prNumber);
+  // GitHub lists at most 3000 files. Past that, the list can't show whether
+  // takeoff.yaml changed or which areas are touched, so the texts decide the
+  // first and a person decides the rest.
+  const incomplete = Number(pr.changed_files) > files.length;
   const yamlFile = files.find((f) => f.filename === FILENAME || f.previous_filename === FILENAME);
+  const yamlDiffers = incomplete && baseText !== headText;
   const chosen = chooseIntent({
     base: loadIntent(baseText),
     head: loadIntent(headText),
-    yamlInPr: !!yamlFile,
-    yamlRemoved: !!yamlFile && (yamlFile.status === 'removed' || yamlFile.filename !== FILENAME),
+    yamlInPr: !!yamlFile || yamlDiffers,
+    yamlRemoved: (!!yamlFile && (yamlFile.status === 'removed' || yamlFile.filename !== FILENAME))
+      || (yamlDiffers && headText === null),
   });
   if (!chosen.intent) {
     throw new VerdictError('intent_invalid', `${FILENAME} has errors, so there is nothing to check this PR against. First error: ${chosen.error}`);
@@ -142,6 +158,16 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
   if (chosen.changes.length) {
     notes.push(`This PR also edits ${FILENAME}, so a person should confirm the new intent. ${list3(chosen.changes)}`);
   }
+  if (incomplete) {
+    notes.push(`GitHub lists only ${files.length} of this PR's ${pr.changed_files} changed files, so a person should look at the rest.`);
+  }
+  const uncheckable = uncheckablePatterns(intent);
+  if (uncheckable.length) {
+    const shown = uncheckable.slice(0, 3).map((u) => `"${u.pattern.length > 60 ? `${u.pattern.slice(0, 59)}…` : u.pattern}"`).join(', ');
+    notes.push(`${uncheckable.length} path pattern(s) in ${FILENAME} can't be checked (${shown}${uncheckable.length > 3 ? ', and more' : ''}), so files they mean to cover may have been missed.`);
+  }
+  // Only a complete picture can earn ✅ without a person looking.
+  const mustReview = chosen.changes.length > 0 || incomplete || uncheckable.length > 0;
 
   const paths = [...new Set(files.flatMap((f) => [f.filename, f.previous_filename].filter(Boolean)))];
   const { touched, unmapped } = touchedAreas(intent, paths);
@@ -151,7 +177,7 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
   }
   const areaNames = Object.fromEntries(intent.areas.map((a) => [a.id, a.name]));
 
-  if (!touched.length && !chosen.changes.length) {
+  if (!touched.length && !mustReview) {
     // Nothing in the PR falls in an area the intent describes, and the intent
     // itself is unchanged: no rule can apply.
     return {
@@ -191,9 +217,10 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
   const { dropped_conflicts: _dropped, ...clean } = result;
   result = clean;
 
-  // Code-enforced floors: a PR that edits the intent, or whose touched code
-  // the model could not see, is never ✅.
-  if (chosen.changes.length) result = atLeastNeedsDecision(result);
+  // Code-enforced floors: a PR that edits the intent, whose file list or path
+  // patterns are incomplete, or whose touched code the model could not see,
+  // is never ✅.
+  if (mustReview) result = atLeastNeedsDecision(result);
   if (prompt.omittedTouched.length) {
     result = atLeastNeedsDecision(result);
     notes.push(`${prompt.omittedTouched.length} changed file(s) in areas ${FILENAME} covers were too large to check, so a person should look at them.`);
@@ -248,6 +275,10 @@ async function runPrCheck(input, deps = defaultDeps()) {
 
   const claim = await deps.prChecks.claim({ ...key, projectId: project.id, installationId, force });
   if (!claim) return handleDuplicate(gh, { owner, repo, prNumber, headSha, key }, deps, log, ctx);
+  const attempt = claim.attempts;
+  const finish = (fields) => deps.prChecks.finish(key, fields, attempt)
+    .then((landed) => { if (!landed) log({ event: 'pr_check_finish_superseded', ...ctx }); })
+    .catch((e) => log({ event: 'pr_check_finish_failed', message: e.message, ...ctx }));
 
   let checkRunId = null;
   try {
@@ -260,6 +291,11 @@ async function runPrCheck(input, deps = defaultDeps()) {
       output: { title: 'Checking against takeoff.yaml', summary: 'Takeoff is comparing this PR with the product intent.' },
     });
     checkRunId = run?.id ? Number(run.id) : null;
+    // Saved now, so a restart mid-check leaves something the sweep can close.
+    if (checkRunId) {
+      await deps.prChecks.setCheckRun(key, attempt, checkRunId)
+        .catch((e) => log({ event: 'pr_check_set_run_failed', message: e.message, ...ctx }));
+    }
   } catch (err) {
     log({ event: 'pr_check_run_create_failed', status: err.status || null, message: err.message, ...ctx });
   }
@@ -272,8 +308,7 @@ async function runPrCheck(input, deps = defaultDeps()) {
     log({ event: 'pr_check_failed', stage: 'verdict', code: err.code || null, status: err.status || null, message: err.message, ...ctx });
     const reason = userReason(err);
     const commentId = await reportFailure(gh, { owner, repo, prNumber, headSha, checkRunId, previewUrl, reason }, deps, log, ctx);
-    await deps.prChecks.finish(key, { status: 'failed', commentId, checkRunId, error: String(err.message || err).slice(0, 2000) })
-      .catch((e) => log({ event: 'pr_check_finish_failed', message: e.message, ...ctx }));
+    await finish({ status: 'failed', commentId, checkRunId, error: String(err.message || err).slice(0, 2000) });
     return { status: 'failed', reason };
   }
 
@@ -293,10 +328,18 @@ async function runPrCheck(input, deps = defaultDeps()) {
     await finishCheckRun(gh, { owner, repo, headSha, prNumber, checkRunId, output: checkRunOutput(result, render), retry: !!writeError });
   } catch (err) {
     log({ event: 'pr_check_run_finish_failed', status: err.status || null, message: err.message, ...ctx });
+    // Never leave the check run "in progress": close it as "couldn't check".
+    try {
+      await finishCheckRun(gh, {
+        owner, repo, headSha, prNumber, checkRunId, retry: true,
+        output: failureCheckRunOutput("Takeoff couldn't attach its verdict to this check. Retry to run it again."),
+      });
+    } catch (err2) {
+      log({ event: 'pr_check_run_finish_failed', status: err2.status || null, message: err2.message, fallback: true, ...ctx });
+    }
   }
   const status = writeError ? 'failed' : 'done';
-  await deps.prChecks.finish(key, { status, verdict: result.verdict, result: { ...result, render }, commentId, checkRunId, model, error: writeError })
-    .catch((e) => log({ event: 'pr_check_finish_failed', message: e.message, ...ctx }));
+  await finish({ status, verdict: result.verdict, result: { ...result, render }, commentId, checkRunId, model, error: writeError });
   log({ event: 'pr_check_done', verdict: result.verdict, conflicts: result.conflicts.length, posted: !writeError, ...ctx });
   return writeError ? { status: 'failed', reason: 'comment_write_failed', verdict: result.verdict } : { status: 'done', verdict: result.verdict };
 }
@@ -312,13 +355,12 @@ async function handleDuplicate(gh, { owner, repo, prNumber, headSha, key }, deps
     const row = await deps.prChecks.get(key);
     const stored = row?.result_json;
     if (row?.status !== 'done' || !stored?.verdict) return { status: 'skipped', reason: 'duplicate' };
-    const latest = await deps.prChecks.latestComment({ repo: key.repo, prNumber });
-    if (latest && latest.headSha === headSha) return { status: 'skipped', reason: 'duplicate' };
     const { render = {}, ...result } = stored;
     const reviewUrl = deps.appUrl && row.project_id ? `${deps.appUrl}/projects/${encodeURIComponent(row.project_id)}` : null;
     const body = renderComment(result, { areaNames: render.areaNames || {}, notes: render.notes || [], reviewUrl, headSha });
-    const commentId = await writeComment(gh, { owner, repo, prNumber, headSha, body }, deps);
-    if (commentId) await deps.prChecks.setComment(key, commentId);
+    // Whether the comment already shows this sha is decided under the lock.
+    const commentId = await writeComment(gh, { owner, repo, prNumber, headSha, body, skipIfShown: true }, deps);
+    if (!commentId) return { status: 'skipped', reason: 'duplicate' };
     return { status: 'restored', verdict: result.verdict };
   } catch (err) {
     log({ event: 'pr_check_restore_failed', status: err.status || null, message: err.message, ...ctx });
@@ -332,7 +374,9 @@ async function handleDuplicate(gh, { owner, repo, prNumber, headSha, key }, deps
  */
 async function recoverStalePrChecks(deps = defaultDeps()) {
   const log = deps.log || (() => {});
-  const rows = await deps.prChecks.listStale();
+  // failStale marks them failed atomically, so a check claimed or finished
+  // meanwhile is never touched and two sweeps never report the same row.
+  const rows = await deps.prChecks.failStale();
   for (const row of rows) {
     const [owner, repo] = String(row.repo_full_name).split('/');
     const key = { repo: row.repo_full_name, prNumber: Number(row.pr_number), headSha: row.head_sha };
@@ -346,7 +390,6 @@ async function recoverStalePrChecks(deps = defaultDeps()) {
           reason: 'The check was interrupted before it finished.',
         }, deps, log, ctx);
       }
-      await deps.prChecks.finish(key, { status: 'failed', error: 'interrupted' });
     } catch (err) {
       log({ event: 'pr_check_recover_failed', message: err.message, ...ctx });
     }
