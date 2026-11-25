@@ -138,12 +138,12 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
-  const analysis = await loadAnalysis(req);
+  await loadAnalysis(req);
   addConnection(req.params.id, res, { origin: req.headers.origin || '*' });
 }));
 
 router.get('/:id/capture', asyncHandler(async (req, res) => {
-  const analysis = await loadAnalysis(req);
+  await loadAnalysis(req);
 
   const raw = (await analyses.getRollups(req.params.id)) || {};
   const rollups = {
