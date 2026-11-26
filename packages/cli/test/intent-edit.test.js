@@ -125,3 +125,22 @@ test('a rule shared through a YAML anchor is not reworded, since its aliases wou
     (e) => e instanceof IntentEditError && /YAML anchor/.test(e.message),
   );
 });
+
+test('a reword can take the words of a rule removed in the same change', () => {
+  const src = `version: 2\nproduct:\n  name: Shop\nareas:\n  - id: billing\n    name: Billing\n    paths: ["src/billing/**"]\n    rules:\n      - Charge in cents\n      - Refunds need a reason\n`;
+  const r = applyIntentEdits(src, [
+    { op: 'remove', target: { kind: 'rule', area: 'billing', text: 'Charge in cents' } },
+    { op: 'reword', target: { kind: 'rule', area: 'billing', text: 'Refunds need a reason' }, to: 'Charge in cents' },
+  ]);
+  assert.match(r.text, /- Charge in cents\n$/);
+  assert.doesNotMatch(r.text, /Refunds/);
+  assert.throws(() => applyIntentEdits(src, [
+    { op: 'reword', target: { kind: 'rule', area: 'billing', text: 'Refunds need a reason' }, to: 'Charge in cents' },
+  ]), /already a rule there/);
+});
+
+test('a rule with an invisible character is found by its visible words', () => {
+  const src = `version: 2\nproduct:\n  name: Shop\nareas:\n  - id: billing\n    name: Billing\n    paths: ["src/billing/**"]\n    rules:\n      - "Charge\\u200B in cents"\n      - Refunds need a reason\n`;
+  const r = applyIntentEdits(src, [{ op: 'remove', target: { kind: 'rule', area: 'billing', text: 'Charge in cents' } }]);
+  assert.doesNotMatch(r.text, /Charge/);
+});

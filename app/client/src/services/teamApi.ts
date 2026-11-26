@@ -41,6 +41,8 @@ export interface Recommendation {
   id: string;
   actionType: string;
   summary: string;
+  /** Set for a drift decision: the PR whose review page has every change. */
+  prNumber: number | null;
   status: 'pending' | 'confirming' | 'confirmed' | 'dismissed' | 'failed';
   createdBy: string;
   createdAt: string;

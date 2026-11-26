@@ -2692,6 +2692,11 @@ const userGithubLinks = {
 // take (one model call is capped at about 8 minutes with its retry).
 const PR_CHECK_STALE_MINUTES = 30;
 
+// GitHub owner and repo names are case-insensitive, and the spelling differs
+// between a webhook and the URL someone typed for a project. Checks and
+// decisions are keyed by the lower-case name, so both find the same rows.
+const repoKey = (repo) => String(repo || '').toLowerCase();
+
 const prChecks = {
   /**
    * The claimed row, or null when another run holds it or finished it. A row
@@ -2715,14 +2720,14 @@ const prChecks = {
              OR (pr_checks.status = 'running' AND pr_checks.updated_at < now() - ($5 || ' minutes')::interval)
              OR ($6 AND pr_checks.status <> 'running')
         RETURNING *`,
-      [repo, prNumber, headSha, projectId ?? null, String(PR_CHECK_STALE_MINUTES), !!force, installationId]
+      [repoKey(repo), prNumber, headSha, projectId ?? null, String(PR_CHECK_STALE_MINUTES), !!force, installationId]
     );
     return rows[0] || null;
   },
   async get({ repo, prNumber, headSha }) {
     const { rows } = await getDb().query(
       'SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3',
-      [repo, prNumber, headSha]
+      [repoKey(repo), prNumber, headSha]
     );
     return rows[0] || null;
   },
@@ -2732,7 +2737,7 @@ const prChecks = {
       `UPDATE pr_checks SET check_run_id = $5, updated_at = now()
         WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
           AND status = 'running' AND attempts = $4`,
-      [repo, prNumber, headSha, attempts, checkRunId]
+      [repoKey(repo), prNumber, headSha, attempts, checkRunId]
     );
   },
   /**
@@ -2748,7 +2753,7 @@ const prChecks = {
               updated_at = now(), completed_at = now()
         WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
           AND status = 'running' AND attempts = $11`,
-      [repo, prNumber, headSha, status, verdict, result ? JSON.stringify(result) : null, commentId, checkRunId, model, error, attempts]
+      [repoKey(repo), prNumber, headSha, status, verdict, result ? JSON.stringify(result) : null, commentId, checkRunId, model, error, attempts]
     );
     return rowCount > 0;
   },
@@ -2758,7 +2763,7 @@ const prChecks = {
       // clock_timestamp(): now() is the transaction's start, before the lock wait.
       `UPDATE pr_checks SET comment_id = $4, comment_at = clock_timestamp()
         WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3`,
-      [repo, prNumber, headSha, commentId]
+      [repoKey(repo), prNumber, headSha, commentId]
     );
   },
   /** The row whose verdict the PR's Takeoff comment shows now, if any. */
@@ -2767,7 +2772,7 @@ const prChecks = {
       `SELECT head_sha, comment_id FROM pr_checks
         WHERE repo_full_name = $1 AND pr_number = $2 AND comment_id IS NOT NULL
         ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
-      [repo, prNumber]
+      [repoKey(repo), prNumber]
     );
     return rows[0] ? { headSha: rows[0].head_sha, commentId: Number(rows[0].comment_id) } : null;
   },
@@ -2783,7 +2788,7 @@ const prChecks = {
     try {
       await client.query('BEGIN');
       await client.query("SET LOCAL lock_timeout = '20s'");
-      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pr_comment:${repo}#${prNumber}`]);
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pr_comment:${repoKey(repo)}#${prNumber}`]);
       const out = await fn(client);
       await client.query('COMMIT');
       return out;
@@ -2794,25 +2799,30 @@ const prChecks = {
       client.release();
     }
   },
-  /** The PR's newest check: the one its comment shows, else the latest run. */
-  async latestForPr({ repo, prNumber, projectId = null }) {
+  /**
+   * The PR's newest check: the one its comment shows, else the latest run.
+   * With `installationId`, only a check made through that installation: a
+   * project reads the checks of its repo through the installation its
+   * owner granted it, whichever project the check was filed under.
+   */
+  async latestForPr({ repo, prNumber, installationId = null }) {
     const { rows } = await getDb().query(
-      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND ($3::text IS NULL OR project_id = $3)
+      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND ($3::bigint IS NULL OR installation_id = $3)
         ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
-      [repo, prNumber, projectId]
+      [repoKey(repo), prNumber, installationId ?? null]
     );
     return rows[0] || null;
   },
-  /** Each PR's newest check for a project's repo, newest first. */
-  async latestPerPr(projectId, repo, { limit = 50 } = {}) {
+  /** Each PR's newest check for a repo, made through `installationId`, newest first. */
+  async latestPerPr({ repo, installationId, limit = 50 }) {
     const { rows } = await getDb().query(
       `SELECT * FROM (
          SELECT DISTINCT ON (pr_number) * FROM pr_checks
-          WHERE project_id = $1 AND repo_full_name = $2
+          WHERE repo_full_name = $1 AND installation_id = $2
           ORDER BY pr_number, comment_at DESC NULLS LAST, updated_at DESC
        ) latest
        ORDER BY COALESCE(comment_at, updated_at) DESC LIMIT $3`,
-      [projectId, repo, limit]
+      [repoKey(repo), installationId, limit]
     );
     return rows;
   },
@@ -2821,7 +2831,7 @@ const prChecks = {
     await getDb().query(
       `UPDATE pr_checks SET pr_closed_at = CASE WHEN $3 THEN COALESCE(pr_closed_at, now()) END
         WHERE repo_full_name = $1 AND pr_number = $2`,
-      [repo, prNumber, !!closed]
+      [repoKey(repo), prNumber, !!closed]
     );
   },
   /**
@@ -2860,13 +2870,13 @@ const driftDecisions = {
       `UPDATE drift_decisions SET state = 'failed', error = 'interrupted', updated_at = now()
         WHERE repo_full_name = $1 AND pr_number = $2 AND state = 'working'
           AND updated_at < now() - ${DRIFT_DECISION_STALE}`,
-      [repo, prNumber]
+      [repoKey(repo), prNumber]
     );
     try {
       const { rows } = await getDb().query(
         `INSERT INTO drift_decisions (id, project_id, repo_full_name, pr_number, head_sha, branch, type, note, edits, actor_user_id, actor_name)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-        [id, projectId, repo, prNumber, headSha, branch, type, note, edits ? JSON.stringify(edits) : null, actorUserId, actorName]
+        [id, projectId, repoKey(repo), prNumber, headSha, branch, type, note, edits ? JSON.stringify(edits) : null, actorUserId, actorName]
       );
       return rows[0];
     } catch (err) {
@@ -2882,7 +2892,7 @@ const driftDecisions = {
     const { rows } = await getDb().query(
       `SELECT * FROM drift_decisions WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3
         ORDER BY created_at DESC LIMIT 50`,
-      [projectId, repo, prNumber]
+      [projectId, repoKey(repo), prNumber]
     );
     return rows;
   },
@@ -2894,7 +2904,7 @@ const driftDecisions = {
     return rows;
   },
   /** Take a waiting or failed decision to run it (a confirmed recommendation, or a retry). */
-  async claim(projectId, id, { from = ['waiting_for_write', 'failed'], confirmedBy = null } = {}) {
+  async claim(projectId, id, { from = ['waiting_for_write', 'failed'], confirmedBy = null, confirmedByName = null } = {}) {
     await getDb().query(
       `UPDATE drift_decisions SET state = 'failed', error = 'interrupted', updated_at = now()
         WHERE project_id = $1 AND id = $2 AND state = 'working' AND updated_at < now() - ${DRIFT_DECISION_STALE}`,
@@ -2903,9 +2913,10 @@ const driftDecisions = {
     try {
       const { rows } = await getDb().query(
         `UPDATE drift_decisions SET state = 'working', error = NULL, updated_at = now(),
-                confirmed_by = COALESCE($4, confirmed_by)
+                confirmed_by = COALESCE($4, confirmed_by),
+                confirmed_by_name = CASE WHEN $4::text IS NULL THEN confirmed_by_name ELSE $5 END
           WHERE project_id = $1 AND id = $2 AND state = ANY($3) RETURNING *`,
-        [projectId, id, from, confirmedBy]
+        [projectId, id, from, confirmedBy, confirmedByName]
       );
       return rows[0] || null;
     } catch (err) {
@@ -2936,17 +2947,26 @@ const driftDecisions = {
     );
   },
   /**
-   * The accept in this project that committed (or is committing right now)
-   * exactly this takeoff.yaml on this PR, over exactly this base file.
+   * The accept, in one of `projectIds` (the projects linked to the repo),
+   * that committed (or is committing right now) exactly this takeoff.yaml on
+   * this PR, over exactly this base file. A later send-back that went out, or
+   * is going out, takes the trust away.
    */
-  async acceptedFor({ projectId, repo, prNumber, yamlSha256, baseYamlSha256 }) {
+  async acceptedFor({ projectIds, repo, prNumber, yamlSha256, baseYamlSha256 }) {
+    const ids = (Array.isArray(projectIds) ? projectIds : [projectIds]).filter(Boolean).map(String);
+    if (!ids.length) return null;
     const { rows } = await getDb().query(
-      `SELECT * FROM drift_decisions
-        WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3 AND type = 'accepted'
-          AND (state = 'done' OR (state = 'working' AND updated_at > now() - ${DRIFT_DECISION_STALE}))
-          AND yaml_sha256 = $4 AND base_yaml_sha256 = $5
-        ORDER BY (state = 'done') DESC, updated_at DESC LIMIT 1`,
-      [projectId, repo, prNumber, yamlSha256, baseYamlSha256]
+      `SELECT d.* FROM drift_decisions d
+        WHERE d.project_id = ANY($1::text[]) AND d.repo_full_name = $2 AND d.pr_number = $3 AND d.type = 'accepted'
+          AND (d.state = 'done' OR (d.state = 'working' AND d.updated_at > now() - ${DRIFT_DECISION_STALE}))
+          AND d.yaml_sha256 = $4 AND d.base_yaml_sha256 = $5
+          AND NOT EXISTS (
+            SELECT 1 FROM drift_decisions s
+             WHERE s.repo_full_name = d.repo_full_name AND s.pr_number = d.pr_number
+               AND s.type = 'sent_back' AND s.created_at > d.created_at
+               AND (s.state = 'done' OR (s.state = 'working' AND s.updated_at > now() - ${DRIFT_DECISION_STALE})))
+        ORDER BY (d.state = 'done') DESC, d.updated_at DESC LIMIT 1`,
+      [ids, repoKey(repo), prNumber, yamlSha256, baseYamlSha256]
     );
     return rows[0] || null;
   },

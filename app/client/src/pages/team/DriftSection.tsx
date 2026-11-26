@@ -14,7 +14,7 @@ export function decisionLine(d: Decision): string {
   switch (d.state) {
     case 'done':
       return d.type === 'accepted'
-        ? `Accepted by ${who(d)}${d.confirmedBy ? `, confirmed by ${d.confirmedBy.name || 'a teammate'}` : ''}. takeoff.yaml on the PR's branch was updated.`
+        ? `Accepted by ${who(d)}${d.confirmedBy ? `, confirmed by ${d.confirmedBy.name || 'a teammate'}` : ''}. ${d.commitUrl ? 'takeoff.yaml on the PR’s branch was updated.' : 'The PR’s own takeoff.yaml was accepted as it is, so nothing new was committed.'}`
         : `Sent back by ${who(d)}${d.confirmedBy ? `, confirmed by ${d.confirmedBy.name || 'a teammate'}` : ''}, with a note on the PR.`;
     case 'waiting_for_write':
       return `${who(d)} asked to ${what}. Someone with write access to the repo can confirm it under “Who’s on this project”.`;

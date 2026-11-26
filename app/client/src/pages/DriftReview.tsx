@@ -26,6 +26,8 @@ const WHY_NOT: Record<WhyNot, string> = {
   github_unavailable: 'Takeoff can’t reach this pull request on GitHub right now, so it can’t be decided here. Reload in a minute.',
   fork: 'This pull request comes from a fork. Takeoff can’t commit to a fork’s branch, so decide on it in GitHub.',
   closed: 'This pull request is closed, so there’s nothing left to decide.',
+  checking: 'Takeoff is checking this pull request again. This page updates when the check is done.',
+  check_failed: 'The latest check of this pull request didn’t finish. Re-run it from the Takeoff check on GitHub, then decide here.',
   no_drift: 'The latest check of this pull request needs no decision.',
   decision_running: 'Someone is deciding on this pull request right now. This page updates when they’re done.',
   newer_push: 'There’s a newer push on this pull request that Takeoff hasn’t checked yet. Decide once it has: this page updates when the check is done.',
@@ -122,7 +124,7 @@ export default function DriftReview() {
 
   // While a decision runs or a newer push is being checked, look again.
   // Polling stops after a while and pauses while the tab is hidden.
-  const waiting = review?.you.whyNot === 'decision_running' || review?.you.whyNot === 'newer_push';
+  const waiting = review?.you.whyNot === 'decision_running' || review?.you.whyNot === 'newer_push' || review?.you.whyNot === 'checking';
   useEffect(() => {
     if (!waiting) return undefined;
     const started = Date.now();

@@ -10,7 +10,7 @@
 
 const crypto = require('crypto');
 const { AppError } = require('../../lib/app-error');
-const { githubIdentity } = require('./identity');
+const { githubIdentity, displayName } = require('./identity');
 
 const WRITE_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 const actions = new Map();
@@ -60,10 +60,14 @@ async function writeAccess(project, user, deps) {
   return { ...base, canWrite, reason: canWrite ? null : 'no_write_access' };
 }
 
+const actorName = (user) => String(displayName(user) || '').replace(/\s+/g, ' ').trim().slice(0, 80) || null;
+
 const publicRecommendation = (r) => r && ({
   id: r.id,
   actionType: r.action_type,
   summary: r.summary,
+  // A drift decision's PR, so the list can link to its review page.
+  prNumber: Number.isInteger(r.payload?.prNumber) ? r.payload.prNumber : null,
   status: r.status,
   createdBy: r.created_by,
   createdAt: r.created_at,
@@ -89,7 +93,7 @@ async function performCommittingAction({ project, user, type, payload = {} }, de
     access = { canWrite: false, githubConnected: !!identity, githubLogin: identity?.githubLogin || null, reason: 'github_check_failed' };
   }
   if (access.canWrite) {
-    const result = await action.run({ project, payload, actor: { userId: user.id, githubLogin: access.githubLogin } });
+    const result = await action.run({ project, payload, actor: { userId: user.id, githubLogin: access.githubLogin, name: actorName(user) } });
     return { status: 'done', result: result ?? null };
   }
   const rec = await deps.recommendations.create({
@@ -120,7 +124,7 @@ async function confirmRecommendation({ project, user, recommendationId }, deps =
   if (!rec) throw AppError.conflict('This recommendation was already confirmed or dismissed.');
   let result;
   try {
-    result = await action.run({ project, payload: rec.payload || {}, actor: { userId: user.id, githubLogin: access.githubLogin } });
+    result = await action.run({ project, payload: rec.payload || {}, actor: { userId: user.id, githubLogin: access.githubLogin, name: actorName(user) } });
   } catch (err) {
     // The action failed: back to pending with the reason, so it stays on the
     // list and can be tried again. An action that can never run now (err.final)

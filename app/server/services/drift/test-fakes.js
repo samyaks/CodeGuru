@@ -110,11 +110,17 @@ function fakeGithub({ headFiles = {}, fork = false } = {}) {
         const e = new Error('Update is not a fast forward'); e.status = 422; throw e;
       }
       gh.branches[branch] = sha;
+      // The branch moved, but the answer never arrived.
+      if (gh.loseUpdateAnswer) { const e = new Error('socket hang up'); e.status = 502; throw e; }
       return {};
     },
+    async findIssueCommentWithMarker(_o, _r, number, marker, { accept = () => true } = {}) {
+      gh.calls.push(['findIssueCommentWithMarker', number]);
+      return gh.comments.filter((c) => Number(c.number) === Number(number) && c.body.startsWith(marker) && accept(c)).at(-1) || null;
+    },
     async createIssueComment(_o, _r, number, body) {
-      if (gh.failComment) { const e = new Error(gh.failComment); e.status = 403; throw e; }
-      const c = { id: 900 + gh.comments.length, number, body, html_url: `https://github.com/acme/web/pull/${number}#issuecomment-${900 + gh.comments.length}` };
+      if (gh.failComment) { const e = new Error(gh.failComment); e.status = gh.failCommentStatus || 403; throw e; }
+      const c = { id: 900 + gh.comments.length, number, body, user: { type: 'Bot', login: 'takeoff[bot]' }, html_url: `https://github.com/acme/web/pull/${number}#issuecomment-${900 + gh.comments.length}` };
       gh.comments.push(c);
       return c;
     },
@@ -142,38 +148,43 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
   ]);
   const iso = () => state.now.toISOString();
   state.checks.push({
-    project_id: 'p1', repo_full_name: 'acme/web', pr_number: 7, head_sha: 'a1a1a1a1', status: 'done', verdict: result.verdict,
+    project_id: 'p1', installation_id: 77, repo_full_name: 'acme/web', pr_number: 7, head_sha: 'a1a1a1a1', status: 'done', verdict: result.verdict,
     result_json: result, completed_at: iso(), updated_at: iso(), pr_closed_at: null,
   });
-  const latest = (repo, pr) => state.checks.filter((c) => c.repo_full_name === repo && Number(c.pr_number) === Number(pr)).at(-1) || null;
+  // Like the database: repos are keyed by their lower-case name.
+  const key = (repo) => String(repo).toLowerCase();
+  const latest = (repo, pr, inst = null) => state.checks.filter((c) => key(c.repo_full_name) === key(repo) && Number(c.pr_number) === Number(pr)
+    && (inst === null || Number(c.installation_id) === Number(inst))).at(-1) || null;
   const prChecks = {
-    async latestForPr({ repo, prNumber, projectId = null }) {
-      const row = latest(repo, prNumber);
-      return row && (!projectId || row.project_id === projectId) ? row : null;
+    async latestForPr({ repo, prNumber, installationId = null }) {
+      return latest(repo, prNumber, installationId ?? null);
     },
-    async latestPerPr(pid, repo) {
-      const prs = [...new Set(state.checks.filter((c) => c.project_id === pid && c.repo_full_name === repo).map((c) => Number(c.pr_number)))];
-      return prs.map((p) => latest(repo, p));
+    async latestPerPr({ repo, installationId }) {
+      const prs = [...new Set(state.checks.filter((c) => Number(c.installation_id) === Number(installationId) && key(c.repo_full_name) === key(repo)).map((c) => Number(c.pr_number)))];
+      return prs.map((p) => latest(repo, p, installationId));
     },
   };
-  const isWorking = (repo, pr) => state.decisions.some((d) => d.repo_full_name === repo && Number(d.pr_number) === Number(pr) && d.state === 'working');
+  const isWorking = (repo, pr) => state.decisions.some((d) => key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(pr) && d.state === 'working');
   const driftDecisions = {
     async create({ id, projectId, repo, prNumber, headSha, branch, type, note = null, edits = null, actorUserId, actorName = null }) {
       if (isWorking(repo, prNumber)) return null;
       const row = {
-        id, project_id: projectId, repo_full_name: repo, pr_number: prNumber, head_sha: headSha, branch, type, state: 'working',
+        id, project_id: projectId, repo_full_name: key(repo), pr_number: prNumber, head_sha: headSha, branch, type, state: 'working',
         note, edits: edits ? JSON.parse(JSON.stringify(edits)) : null, actor_user_id: actorUserId, actor_name: actorName, created_at: iso(), updated_at: iso(),
       };
       state.decisions.unshift(row);
       return { ...row };
     },
     async get(pid, id) { const d = state.decisions.find((x) => x.project_id === pid && x.id === id); return d ? { ...d } : null; },
-    async listForPr(pid, repo, pr) { return state.decisions.filter((d) => d.project_id === pid && d.repo_full_name === repo && Number(d.pr_number) === Number(pr)).map((d) => ({ ...d })); },
+    async listForPr(pid, repo, pr) { return state.decisions.filter((d) => d.project_id === pid && key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(pr)).map((d) => ({ ...d })); },
     async listRecent(pid) { return state.decisions.filter((d) => d.project_id === pid).map((d) => ({ ...d })); },
-    async claim(pid, id, { from, confirmedBy = null }) {
+    async claim(pid, id, { from, confirmedBy = null, confirmedByName = null }) {
       const d = state.decisions.find((x) => x.project_id === pid && x.id === id && from.includes(x.state));
       if (!d || isWorking(d.repo_full_name, d.pr_number)) return null;
-      Object.assign(d, { state: 'working', error: null, confirmed_by: confirmedBy ?? d.confirmed_by ?? null, updated_at: iso() });
+      Object.assign(d, {
+        state: 'working', error: null, confirmed_by: confirmedBy ?? d.confirmed_by ?? null,
+        confirmed_by_name: confirmedBy ? confirmedByName : d.confirmed_by_name ?? null, updated_at: iso(),
+      });
       return { ...d };
     },
     async finish(id, f) {
@@ -195,8 +206,8 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
       state.planned = state.planned || [];
       state.planned.push({ id, yamlSha256, baseYamlSha256 });
     },
-    async acceptedFor({ projectId, repo, prNumber, yamlSha256, baseYamlSha256 }) {
-      return state.decisions.find((d) => d.project_id === projectId && d.repo_full_name === repo && Number(d.pr_number) === Number(prNumber) && d.type === 'accepted'
+    async acceptedFor({ projectIds, repo, prNumber, yamlSha256, baseYamlSha256 }) {
+      return state.decisions.find((d) => projectIds.includes(d.project_id) && key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(prNumber) && d.type === 'accepted'
         && ['done', 'working'].includes(d.state) && d.yaml_sha256 === yamlSha256 && d.base_yaml_sha256 === baseYamlSha256) || null;
     },
   };

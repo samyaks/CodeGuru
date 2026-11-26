@@ -83,3 +83,15 @@ test('takeoff notes reports GitHub being unreachable as an error, in JSON too', 
   assert.strictEqual(code, 1);
   assert.match(JSON.parse(lines.join('\n')).error, /Couldn't reach GitHub/);
 });
+
+test('takeoff notes skips an edited App comment and never prints control characters', async () => {
+  const bot = { user: { type: 'Bot', login: 'takeoff[bot]' }, performed_via_github_app: { slug: 'takeoff' } };
+  const { fetchImpl } = fakeGitHub([
+    { ...bot, body: sendBackMarker({ id: 'a', sha: 'abcdef1', note: 'Edited later.' }), created_at: '2026-11-26T10:00:00Z', updated_at: '2026-11-26T11:00:00Z' },
+    { ...bot, body: sendBackMarker({ id: 'b', sha: 'abcdef1', note: 'Keep \u001b[2Jrefunds\u0007 on Stripe.' }), created_at: '2026-11-26T10:00:00Z', updated_at: '2026-11-26T10:00:01Z' },
+  ]);
+  const out = [];
+  assert.strictEqual(await run(['notes', '--branch', 'feat/x', '--repo', 'o/r'], { out: (s) => out.push(s), err: () => {}, env: { GH_TOKEN: 't', TAKEOFF_APP_SLUG: 'takeoff' }, exec, fetchImpl }), 0);
+  assert.deepStrictEqual(out.slice(0, 2), ['Sent back on PR #7 (2026-11-26):', '  Keep [2Jrefunds on Stripe.']);
+  assert.ok(!out.join('\n').includes('Edited later'));
+});

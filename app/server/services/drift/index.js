@@ -68,6 +68,7 @@ function defaultDeps() {
       newId: () => crypto.randomUUID(),
     },
     runPrCheck: (job) => require('../verdict/runner').runPrCheck(job),
+    prCache: sharedPrCache,
     appUrl: require('../team/members').appUrlFromEnv(),
     now: () => new Date(),
     newId: () => `dec_${crypto.randomBytes(9).toString('base64url')}`,
@@ -135,7 +136,7 @@ function publicDecision(d, { members = [], pendingRecIds = null } = {}) {
     agreementText: edits.agreementText || null,
     agreementId: d.agreement_id || null,
     by: { userId: d.actor_user_id, name: d.actor_name || nameFor(d.actor_user_id) },
-    confirmedBy: d.confirmed_by ? { userId: d.confirmed_by, name: nameFor(d.confirmed_by) } : null,
+    confirmedBy: d.confirmed_by ? { userId: d.confirmed_by, name: nameFor(d.confirmed_by) || d.confirmed_by_name || null } : null,
     commitUrl: d.commit_url || null,
     commentUrl: d.comment_url || null,
     recommendationId: d.recommendation_id || null,
@@ -170,26 +171,44 @@ async function livePr(gh, project, prNumber) {
   };
 }
 
+// The list asks GitHub about each PR it shows. A short cache keeps a page
+// that polls, or many members opening it, from using up the App's rate limit.
+const MAX_LISTED = 10;
+const PR_CACHE_MS = 60 * 1000;
+const PR_CACHE_MAX = 500;
+const sharedPrCache = new Map();
+
+async function cachedLivePr(gh, project, prNumber, cache) {
+  if (!cache) return livePr(gh, project, prNumber);
+  const key = `${project.github_installation_id}:${repoOf(project).toLowerCase()}#${prNumber}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < PR_CACHE_MS) return hit.pr;
+  const pr = await livePr(gh, project, prNumber);
+  if (cache.size >= PR_CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, { at: Date.now(), pr });
+  return pr;
+}
+
 /**
  * PRs whose newest check drifts or needs a decision, and recent decisions.
  */
 async function listDrift({ project, user }, deps = defaultDeps()) {
   await assertMember(project, user, deps);
-  if (!project.owner || !project.repo) return { reviews: [], decisions: [] };
+  if (!project.owner || !project.repo || !project.github_installation_id) return { reviews: [], decisions: [] };
   const repo = repoOf(project);
   const [rows, recent, members, pendingRecIds] = await Promise.all([
-    deps.prChecks.latestPerPr(project.id, repo, { limit: 50 }),
+    deps.prChecks.latestPerPr({ repo, installationId: Number(project.github_installation_id), limit: 50 }),
     deps.driftDecisions.listRecent(project.id, { limit: 20 }),
     currentMembers(project, deps),
     pendingRecommendationIds(project, deps),
   ]);
-  const open = rows.filter((r) => r.status === 'done' && REVIEW_VERDICTS.has(r.verdict) && !r.pr_closed_at).slice(0, 15);
+  const open = rows.filter((r) => r.status === 'done' && REVIEW_VERDICTS.has(r.verdict) && !r.pr_closed_at).slice(0, MAX_LISTED);
   let gh = null;
   try { gh = project.github_installation_id ? deps.readClientFor(project) : null; } catch { gh = null; }
   const reviews = await Promise.all(open.map(async (row) => {
     const res = storedResult(row);
     let pr = null;
-    if (gh) pr = await livePr(gh, project, Number(row.pr_number)).catch(() => null);
+    if (gh) pr = await cachedLivePr(gh, project, Number(row.pr_number), deps.prCache).catch(() => null);
     const last = recent.find((d) => Number(d.pr_number) === Number(row.pr_number));
     return {
       prNumber: Number(row.pr_number),
@@ -230,8 +249,8 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
   requireRepo(project);
   const prNumber = parsePrNumber(raw);
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber, projectId: project.id });
-  if (!row || row.project_id !== project.id) throw AppError.notFound('Takeoff has not checked this pull request.');
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, installationId: Number(project.github_installation_id) });
+  if (!row) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber).catch((err) => {
     console.warn('[drift] reading the PR failed:', err.message);
@@ -298,7 +317,8 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
     decisions: decisions.map((d) => publicDecision(d, { members, pendingRecIds })),
     you: {
       canDecide: reviewable && !working && !pr.fork && !newerPush,
-      whyNot: !pr ? 'github_unavailable' : pr.fork ? 'fork' : pr.state !== 'open' ? 'closed' : !reviewable ? 'no_drift'
+      whyNot: !pr ? 'github_unavailable' : pr.fork ? 'fork' : pr.state !== 'open' ? 'closed'
+        : row.status === 'running' ? 'checking' : row.status === 'failed' ? 'check_failed' : !reviewable ? 'no_drift'
         : working ? 'decision_running' : newerPush ? 'newer_push' : null,
       canWrite: access.canWrite,
       writeReason: access.reason,
@@ -333,8 +353,8 @@ function cleanEdits(raw) {
 async function loadDecidable(project, prNumber, headSha, deps) {
   if (typeof headSha !== 'string' || !SHA_RE.test(headSha)) throw AppError.badRequest('Missing which commit you reviewed.');
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber, projectId: project.id });
-  if (!row || row.project_id !== project.id) throw AppError.notFound('Takeoff has not checked this pull request.');
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, installationId: Number(project.github_installation_id) });
+  if (!row) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber);
   if (pr.state !== 'open') throw AppError.conflict('This pull request is closed.');
@@ -387,12 +407,10 @@ async function decide({ project, user, prNumber: raw, body = {}, type }, deps) {
 
   const access = await accessFor(project, user, deps);
   if (!access.canWrite) {
-    const summary = type === 'sent_back'
-      ? `Send PR #${prNumber} back: "${note.length > 200 ? `${note.slice(0, 199)}…` : note}"`
-      : `Accept the drift on PR #${prNumber} and update takeoff.yaml: ${edits.summary.join('; ').slice(0, 300) || 'accept the PR\'s own takeoff.yaml changes'}`;
+    const summary = type === 'sent_back' ? sendBackSummary(prNumber, note) : acceptSummary(prNumber, edits.summary);
     try {
       const rec = await deps.committing.recommendations.create({
-        id: deps.committing.newId(), projectId: project.id, actionType: ACTION, payload: { decisionId: decision.id }, summary: summary.slice(0, 500), createdBy: user.id,
+        id: deps.committing.newId(), projectId: project.id, actionType: ACTION, payload: { decisionId: decision.id, prNumber }, summary, createdBy: user.id,
       });
       const waiting = await deps.driftDecisions.finish(decision.id, { state: 'waiting_for_write', recommendationId: rec.id });
       return { decision: publicDecision(waiting || decision), status: 'recommended', reason: access.reason };
@@ -403,6 +421,37 @@ async function decide({ project, user, prNumber: raw, body = {}, type }, deps) {
   }
   const done = await execute(project, decision, { userId: user.id }, deps);
   return { decision: publicDecision(done), status: done.state === 'done' ? 'done' : 'failed' };
+}
+
+// A recommendation's summary is all a confirmer sees under "Who's on this
+// project", so it never hides a change: what doesn't fit is counted, and the
+// review page (linked beside it) has the full list and note.
+const MAX_SUMMARY = 500;
+function sendBackSummary(prNumber, note) {
+  const flat = oneLine(note);
+  const room = 300;
+  return flat.length > room
+    ? `Send PR #${prNumber} back with a note (${flat.length} characters; read it all on the review page): "${flat.slice(0, room - 1)}…"`
+    : `Send PR #${prNumber} back: "${flat}"`;
+}
+function acceptSummary(prNumber, changes) {
+  const head = `Accept the drift on PR #${prNumber} and update ${FILENAME}`;
+  if (!changes.length) return `${head}: accept the PR's own ${FILENAME} changes`;
+  const all = `${head} (${changes.length} change${changes.length === 1 ? '' : 's'}): ${changes.join('; ')}`;
+  if (all.length <= MAX_SUMMARY) return all;
+  const shown = [];
+  for (const c of changes) {
+    const rest = changes.length - shown.length - 1;
+    const tail = rest ? `; and ${rest} more (see the review page)` : '';
+    const next = `${head} (${changes.length} changes): ${[...shown, c].join('; ')}${tail}`;
+    if (next.length > MAX_SUMMARY) break;
+    shown.push(c);
+  }
+  const rest = changes.length - shown.length;
+  const count = `${changes.length} change${changes.length === 1 ? '' : 's'}`;
+  return shown.length
+    ? `${head} (${count}): ${shown.join('; ')}; and ${rest} more (see the review page)`
+    : `${head} (${count}, too long to show here; see the review page)`;
 }
 
 /** What an accept will commit, worked out from the PR's takeoff.yaml. Throws AppError on a bad edit. */
@@ -434,7 +483,7 @@ function planAccept({ yamlText, edits, pr, deps }) {
       const r = addAgreement(next, agreement);
       next = r.text;
       data = r.data;
-      summary.push(`Record the agreement "${edits.agreementText.length > 120 ? `${edits.agreementText.slice(0, 119)}…` : edits.agreementText}"`);
+      summary.push(`Record the agreement "${edits.agreementText}"`);
     }
     if (!summary.length && !edits.allowNoEdits) {
       throw AppError.badRequest(`Choose how ${FILENAME} should change: remove or reword a rule, add one, or record an agreement.`);
@@ -469,8 +518,10 @@ function friendly(err, project) {
   }
   if ((err?.status === 422) && /protected|rule/i.test(msg)) return 'This PR\'s branch is protected, so Takeoff can\'t commit to it. Make the change on the branch yourself.';
   if (err?.status === 404) return `Takeoff's GitHub App can't see ${project.owner}/${project.repo} or this pull request any more.`;
-  // Only GitHub's own answers are shown; anything else stays in the log.
-  if (err?.status) return `GitHub refused the change (${Number(err.status)}): ${msg.slice(0, 300)}`;
+  // GitHub's own words stay in the log: members see what to do.
+  if (err?.status === 409 || err?.status === 422) return 'GitHub refused the change to this pull request\'s branch. Reload to see the latest check, then try again.';
+  if (err?.status >= 500) return 'GitHub had a problem just now. Try again in a minute.';
+  if (err?.status) return `GitHub refused the change (error ${Number(err.status)}). Try again in a minute.`;
   return 'Something went wrong in Takeoff. Try again in a minute.';
 }
 
@@ -529,9 +580,14 @@ async function commitAccept(gh, project, decision, actor, deps) {
   try {
     await gh.updateBranchRef(owner, repo, pr.branch, commit.sha, { force: false });
   } catch (err) {
-    // Someone pushed after the reviewer looked: never accept on top of that.
-    if (err.status === 422 && /fast.?forward/i.test(err.message)) throw staleError();
-    throw err;
+    // The branch may have moved even though the answer got lost: if the PR
+    // now ends with this commit, the accept landed.
+    const now = await livePr(gh, project, Number(decision.pr_number)).catch(() => null);
+    if (now?.headSha !== commit.sha) {
+      // Someone pushed after the reviewer looked: never accept on top of that.
+      if (err.status === 422 && /fast.?forward/i.test(err.message)) throw staleError();
+      throw err;
+    }
   }
   return { ...result, commitSha: commit.sha, commitUrl: `https://github.com/${owner}/${repo}/commit/${commit.sha}`, newHead: commit.sha };
 }
@@ -568,7 +624,13 @@ async function execute(project, decision, actor, deps) {
       const pr = await livePr(gh, project, Number(decision.pr_number));
       if (pr.state !== 'open') throw staleError('This pull request was closed before Takeoff could post the note, so the decision was set aside.');
       if (pr.headSha !== decision.head_sha) throw staleError();
-      const comment = await gh.createIssueComment(project.owner, project.repo, Number(decision.pr_number), sendBackComment(decision, decision.actor_name));
+      // A run that posted but stopped before recording it (or two at once)
+      // must not post the note twice.
+      const marker = `<!-- takeoff:send-back id=${decision.id} `;
+      const comment = (await gh.findIssueCommentWithMarker(project.owner, project.repo, Number(decision.pr_number), marker, {
+        accept: (c) => c.user?.type === 'Bot',
+      }).catch(() => null))
+        || await gh.createIssueComment(project.owner, project.repo, Number(decision.pr_number), sendBackComment(decision, decision.actor_name));
       return (await deps.driftDecisions.finish(decision.id, {
         state: 'done', commentId: comment?.id ? Number(comment.id) : null, commentUrl: comment?.html_url || null,
       })) || decision;
@@ -600,8 +662,18 @@ const sendBack = (input, deps = defaultDeps()) => decide({ ...input, type: 'sent
 
 /** Whether someone decided on the decision's PR after it. */
 async function decidedLater(project, row, deps) {
-  return (await deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)))
-    .some((d) => d.id !== row.id && new Date(d.created_at) > new Date(row.created_at));
+  const [later, pendingRecIds] = await Promise.all([
+    deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)),
+    pendingRecommendationIds(project, deps),
+  ]);
+  // Only a decision that stands counts: one that failed, was set aside, or
+  // whose recommendation was turned down doesn't.
+  return later.some((d) => {
+    if (d.id === row.id || new Date(d.created_at) <= new Date(row.created_at)) return false;
+    if (d.state === 'done' || d.state === 'working') return true;
+    if (d.state === 'waiting_for_write') return !pendingRecIds || !d.recommendation_id || pendingRecIds.has(d.recommendation_id);
+    return false;
+  });
 }
 const LATER_MESSAGE = 'Someone decided on this pull request after this, so it was set aside.';
 
@@ -612,8 +684,15 @@ async function retryDecision({ project, user, decisionId }, deps = defaultDeps()
   if (!access.canWrite) throw AppError.forbidden('Trying again needs write access to the repo on GitHub.');
   const row = await deps.driftDecisions.get(project.id, String(decisionId || ''));
   if (!row || row.state !== 'failed') throw AppError.conflict('This decision is not waiting to be tried again.');
+  if (row.recommendation_id) {
+    // A recommendation that was set aside stays set aside.
+    const pendingRecIds = await pendingRecommendationIds(project, deps);
+    if (!pendingRecIds || !pendingRecIds.has(row.recommendation_id)) {
+      throw AppError.conflict('This recommendation was set aside, so it can\'t be tried again.');
+    }
+  }
   if (await decidedLater(project, row, deps)) throw AppError.conflict('Someone decided on this pull request after this, so it can\'t be tried again.');
-  const claimed = await deps.driftDecisions.claim(project.id, row.id, { from: ['failed'], confirmedBy: user.id });
+  const claimed = await deps.driftDecisions.claim(project.id, row.id, { from: ['failed'], confirmedBy: user.id, confirmedByName: nameOf(user) });
   if (!claimed) throw AppError.conflict('This decision is not waiting to be tried again.');
   return { decision: publicDecision(await execute(project, claimed, { userId: user.id }, deps)) };
 }
@@ -667,7 +746,9 @@ function registerDecisionAction(depsFactory = defaultDeps) {
       const deps = depsFactory();
       // 'failed': an earlier confirm failed and its recommendation went back to pending.
       const final = (message) => { const err = AppError.conflict(message); err.final = true; return err; };
-      const claimed = await deps.driftDecisions.claim(project.id, String(payload?.decisionId || ''), { from: ['waiting_for_write', 'failed'], confirmedBy: actor.userId });
+      const claimed = await deps.driftDecisions.claim(project.id, String(payload?.decisionId || ''), {
+        from: ['waiting_for_write', 'failed'], confirmedBy: actor.userId, confirmedByName: actor.name || actor.githubLogin || null,
+      });
       if (!claimed) {
         const row = await deps.driftDecisions.get(project.id, String(payload?.decisionId || ''));
         if (row?.state === 'done') return publicDecision(row);

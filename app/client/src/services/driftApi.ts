@@ -71,7 +71,7 @@ export interface Conflict {
   target: Target | null;
 }
 
-export type WhyNot = 'github_unavailable' | 'fork' | 'closed' | 'no_drift' | 'decision_running' | 'newer_push';
+export type WhyNot = 'github_unavailable' | 'fork' | 'closed' | 'checking' | 'check_failed' | 'no_drift' | 'decision_running' | 'newer_push';
 
 export interface DriftReview {
   pr: {

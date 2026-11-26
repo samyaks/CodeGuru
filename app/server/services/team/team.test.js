@@ -254,7 +254,7 @@ test('a member without write access gets a recommendation; a member with write a
 
   const done = await committing.confirmRecommendation({ project: db.project, user: owner, recommendationId: rec.recommendation.id }, deps);
   assert.strictEqual(done.status, 'confirmed');
-  assert.deepStrictEqual(ran, [{ project: 'p1', payload: { text: 'ship it' }, actor: { userId: 'owner', githubLogin: 'olive' } }]);
+  assert.deepStrictEqual(ran, [{ project: 'p1', payload: { text: 'ship it' }, actor: { userId: 'owner', githubLogin: 'olive', name: 'Olive Owner' } }]);
   await assert.rejects(committing.confirmRecommendation({ project: db.project, user: owner, recommendationId: rec.recommendation.id }, deps), (e) => e.statusCode === 409);
 
   // With write access the action just runs.
