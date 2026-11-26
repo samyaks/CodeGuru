@@ -41,6 +41,7 @@ const SAMPLE_PROJECTS: DashboardProject[] = [
       ],
       count: 7,
     },
+    open_pull_requests: { count: 3, capped: false },
     last_commit: {
       sha: '0000000000000000000000000000000000000001',
       shortSha: '0000001',
@@ -69,6 +70,7 @@ const SAMPLE_PROJECTS: DashboardProject[] = [
     persona: null,
     personas: [{ id: 'p3', name: 'Receptionist', emoji: null, description: null, readiness: 95 }],
     missing: { next: null, items: [], count: 0 },
+    open_pull_requests: { count: 0, capped: false },
     last_commit: null,
   },
   {
@@ -90,6 +92,7 @@ const SAMPLE_PROJECTS: DashboardProject[] = [
     persona: null,
     personas: [],
     missing: { next: null, items: [], count: 0 },
+    open_pull_requests: { count: 100, capped: true },
     last_commit: null,
   },
   {

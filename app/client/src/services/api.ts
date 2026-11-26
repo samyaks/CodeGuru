@@ -288,6 +288,8 @@ export interface DashboardProject {
     count: number;
   };
   last_commit: DashboardLastCommit | null;
+  /** null or absent: unknown, so nothing is shown. `capped`: at least `count`. */
+  open_pull_requests?: { count: number; capped: boolean } | null;
 }
 
 // Takeoff
