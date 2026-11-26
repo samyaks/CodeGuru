@@ -163,6 +163,11 @@ test('nothing to commit still records the accept and checks the PR again by forc
   assert.strictEqual(again.decision.state, 'done', again.decision.error);
   assert.strictEqual(again.decision.commitUrl, null);
   assert.strictEqual(gh.branches['feat/charge'], head);
+  // Until the new head is checked, the review waits for it.
+  state.checks.pop();
+  const review = await svc.getReview({ project, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.check.newerPush, true);
+  assert.strictEqual(review.you.whyNot, 'newer_push');
   await tick();
   assert.deepStrictEqual(state.rechecks.at(-1), { owner: 'acme', repo: 'web', prNumber: 7, headSha: head, installationId: 77, force: true });
 });

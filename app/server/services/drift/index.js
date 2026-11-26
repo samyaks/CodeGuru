@@ -262,6 +262,7 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
     accessFor(project, user, deps),
   ]);
   const working = decisions.some((d) => d.state === 'working');
+  const newerPush = !!(pr?.headSha && pr.headSha !== row.head_sha);
   const reviewable = !!pr && pr.state === 'open' && row.status === 'done' && REVIEW_VERDICTS.has(res.verdict);
   return {
     pr: pr && {
@@ -276,7 +277,7 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
       notes: res.notes,
       suggestedAgreement: res.suggestedAgreement,
       checkedAt: row.completed_at || row.updated_at,
-      newerPush: !!(pr?.headSha && pr.headSha !== row.head_sha),
+      newerPush,
       conflicts: res.conflicts.map((c) => ({
         area: c.area || null,
         areaName: res.areaNames[c.area] || c.area || null,
@@ -289,8 +290,9 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
     intent: { areas, allAreas, yamlChanged, headValid: !!headIntent },
     decisions: decisions.map((d) => publicDecision(d, { members, pendingRecIds })),
     you: {
-      canDecide: reviewable && !working && !pr.fork,
-      whyNot: !pr ? 'github_unavailable' : pr.fork ? 'fork' : pr.state !== 'open' ? 'closed' : !reviewable ? 'no_drift' : working ? 'decision_running' : null,
+      canDecide: reviewable && !working && !pr.fork && !newerPush,
+      whyNot: !pr ? 'github_unavailable' : pr.fork ? 'fork' : pr.state !== 'open' ? 'closed' : !reviewable ? 'no_drift'
+        : working ? 'decision_running' : newerPush ? 'newer_push' : null,
       canWrite: access.canWrite,
       writeReason: access.reason,
     },
