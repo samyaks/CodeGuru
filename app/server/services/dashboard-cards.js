@@ -20,7 +20,7 @@ const PULLS_PAGE_SIZE = 100;
 const PULLS_CACHE_MS = 5 * 60 * 1000;
 const PULLS_FAILURE_CACHE_MS = 60 * 1000;
 const PULLS_CACHE_MAX = 1000;
-const pullsCache = new Map(); // "owner/repo" → { value, expiresAt }
+const pullsCache = new Map(); // "identity:owner/repo" → { value, expiresAt }
 
 const SUMMARY_FIELDS = [
   'id', 'repo_url', 'owner', 'repo', 'branch', 'status', 'readiness_score',
@@ -230,17 +230,21 @@ async function resolveLastCommits(projects, shippedById) {
  * or GitHub didn't answer), which is never shown as zero.
  */
 async function fetchOpenPullCount(project, {
-  client = github, cache = pullsCache, now = Date.now,
+  client = null, cache = pullsCache, now = Date.now,
 } = {}) {
   if (!isGithubProject(project)) return null;
-  const key = `${project.owner}/${project.repo}`.toLowerCase();
+  // A count read through one GitHub App installation is never served to a
+  // project that reads the same repo some other way.
+  const identity = project.github_installation_id || 'public';
+  const key = `${identity}:${project.owner}/${project.repo}`.toLowerCase();
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now()) return hit.value;
 
   let value = null;
   try {
     const pulls = await withTimeout(
-      client.fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: PULLS_PAGE_SIZE }),
+      (client || clientForProject(project))
+        .fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: PULLS_PAGE_SIZE }),
       PULLS_FETCH_TIMEOUT_MS
     );
     if (Array.isArray(pulls)) {

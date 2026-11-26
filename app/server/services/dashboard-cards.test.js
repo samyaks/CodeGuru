@@ -206,3 +206,24 @@ test('fetchOpenPullCount reuses a count until it expires, per repo regardless of
   await fetchOpenPullCount(PROJECT, opts);
   assert.equal(gh.calls.length, 2);
 });
+
+test('fetchOpenPullCount reads through the project’s own GitHub client by default', async (t) => {
+  const urls = [];
+  const realFetch = global.fetch;
+  t.after(() => { global.fetch = realFetch; });
+  global.fetch = async (url) => {
+    urls.push(String(url));
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => [{}] };
+  };
+  assert.deepEqual(await fetchOpenPullCount(PROJECT, { cache: new Map() }), { count: 1, capped: false });
+  // The project client may check the repo's visibility first.
+  assert.ok(urls.some((u) => /\/repos\/Acme\/Widgets\/pulls\?state=open/.test(u)), urls.join(' '));
+});
+
+test('fetchOpenPullCount does not share a cached count across GitHub identities', async () => {
+  const cache = new Map();
+  const gh = pullsClient(() => [{}]);
+  await fetchOpenPullCount({ ...PROJECT, github_installation_id: 7 }, { client: gh.client, cache });
+  await fetchOpenPullCount(PROJECT, { client: gh.client, cache });
+  assert.equal(gh.calls.length, 2);
+});
