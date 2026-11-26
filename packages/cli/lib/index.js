@@ -9,4 +9,6 @@ module.exports = {
   ...require('./generate'),
   ...require('./sync'),
   ...require('./agreements'),
+  ...require('./intent-edit'),
+  ...require('./notes'),
 };

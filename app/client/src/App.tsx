@@ -11,6 +11,7 @@ import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
 import InvitePage from './pages/team/InvitePage';
+import DriftReview from './pages/DriftReview';
 import ReadPage from './pages/read/ReadPage';
 import { ReleaseProject, ReleaseIntake } from './pages/ReleasePreview';
 import SecurityReportV2 from './pages/v2/SecurityReport';
@@ -85,6 +86,7 @@ export default function App() {
             {/* The Read — GET is public; writes handle auth themselves */}
             {/* Release 11.15.26: new design first, previous Read page kept at /old/read/:id. */}
             <Route path="/read/:id" element={<ReleaseProject />} />
+            <Route path="/read/:id/drift/:prNumber" element={<DriftReview />} />
             <Route path="/old/read/:id" element={<ReadPage />} />
             <Route path="/intake" element={<ReleaseIntake />} />
 

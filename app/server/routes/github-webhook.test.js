@@ -355,6 +355,26 @@ test('other pull_request actions and per-repo hook deliveries start no check', a
   assert.strictEqual(hook.runs.length, 0);
 });
 
+test('closing or reopening a PR through the App records its state for the drift list', async () => {
+  for (const [action, closed] of [['closed', true], ['reopened', false]]) {
+    const w = prWorld();
+    const seen = [];
+    w.deps.setPrClosed = async (q) => { seen.push(q); };
+    await send(createWebhookHandler(w.deps), delivery(prPayload(action), { secret: APP_SECRET, event: 'pull_request', id: `c-${action}` }));
+    assert.deepStrictEqual(seen, [{ repo: 'acme/web', prNumber: 7, closed }]);
+  }
+  // From a per-repo hook, nothing is recorded; a failure still answers GitHub.
+  const hook = prWorld();
+  const seen = [];
+  hook.deps.setPrClosed = async (q) => { seen.push(q); };
+  await send(createWebhookHandler(hook.deps), delivery(prPayload('closed'), { secret: HOOK_SECRET, event: 'pull_request' }));
+  assert.strictEqual(seen.length, 0);
+  const broken = prWorld();
+  broken.deps.setPrClosed = async () => { throw new Error('db down'); };
+  const res = await send(createWebhookHandler(broken.deps), delivery(prPayload('closed'), { secret: APP_SECRET, event: 'pull_request' }));
+  assert.strictEqual(res.statusCode, 200);
+});
+
 test('Re-run or Retry on the Takeoff check runs it again, forced', async () => {
   const checkRun = (action, extra = {}) => ({
     action,

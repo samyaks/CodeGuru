@@ -477,5 +477,7 @@ function registerCommitAction(depsFactory = defaultDeps) {
 module.exports = {
   listAgreements, propose, vote, withdraw, decide, retryCommit, settleOpen,
   registerCommitAction, defaultDeps, isStalled, STALL_MS, COMMIT_ACTION,
+  // Shared with the drift review (Milestone 5).
+  assertMember, currentMembers, clean, oneLine, nameOf, confirmedEmail,
   _resetRegistration: () => { registered = false; committing._actions.delete(COMMIT_ACTION); },
 };

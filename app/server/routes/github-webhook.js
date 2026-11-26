@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks } = require('../lib/db');
+const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks, prChecks } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 const { runPrCheck, prCheckJobs } = require('../services/verdict/runner');
@@ -32,6 +32,8 @@ function defaultDeps() {
     processPushV2,
     runPrCheck,
     prCheckJobs,
+    // Closed PRs leave the drift review list (Milestone 5).
+    setPrClosed: (q) => prChecks.setPrClosed(q),
     appId: process.env.GITHUB_APP_ID || null,
     forgetInstallation: (id) => getGithubApp().forgetInstallation(id),
     secrets: () => ({
@@ -397,6 +399,14 @@ function createWebhookHandler(deps = defaultDeps()) {
     }
 
     if (PR_CHECK_EVENTS.has(event)) {
+      if (event === 'pull_request' && source === 'app' && ['closed', 'reopened'].includes(payload.action)
+        && payload.pull_request?.number && payload.repository?.full_name && deps.setPrClosed) {
+        try {
+          await deps.setPrClosed({ repo: payload.repository.full_name, prNumber: Number(payload.pull_request.number), closed: payload.action === 'closed' });
+        } catch (err) {
+          console.error('github webhook: recording the PR state failed:', err.message);
+        }
+      }
       const jobs = deps.prCheckJobs({ event, payload, source, installationId, appId: deps.appId });
       if (!jobs || !jobs.length) {
         return res.status(200).json({ ok: true, ignored: payload.action ? `${event}.${payload.action}` : event });

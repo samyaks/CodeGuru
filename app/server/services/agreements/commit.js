@@ -230,4 +230,4 @@ async function commitAgreement({ project, agreementId }, deps) {
   }
 }
 
-module.exports = { commitAgreement, commitMessage, defaultWriteClient, friendly };
+module.exports = { commitAgreement, commitMessage, defaultWriteClient, friendly, treeEntry, writable, MAX_TEXT_BYTES };

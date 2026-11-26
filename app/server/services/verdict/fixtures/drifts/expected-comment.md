@@ -9,6 +9,6 @@ Returning users' cards are now saved so they don't have to retype them. Card num
   > Never store card numbers.
   Files: `src/billing/cards.js`
 
-[Review in Takeoff](https://takeoff.example/projects/proj-1)
+[Review in Takeoff](https://takeoff.example/read/proj-1/drift/7)
 
 <sub>Checked `1111111` against takeoff.yaml. This check never blocks merging.</sub>

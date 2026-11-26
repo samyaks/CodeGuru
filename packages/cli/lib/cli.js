@@ -6,11 +6,13 @@ const { validateText } = require('./validate');
 const { migrateData, stringifyV2 } = require('./migrate');
 const { sync, TakeoffError, readIfExists } = require('./sync');
 const { FILENAME, CURRENT_VERSION } = require('./schema');
+const { notesCommand } = require('./notes');
 
 const FLAGS = {
   validate: ['--strict'],
   sync: ['--check', '--dry-run'],
   migrate: ['--dry-run'],
+  notes: ['--json', '--branch', '--repo'],
 };
 
 const HELP = `takeoff: keep what you build matching what you agreed
@@ -20,6 +22,9 @@ Usage:
   takeoff sync [file] [--check] [--dry-run]
                                      Write CLAUDE.md, AGENTS.md and .cursor/rules/takeoff.mdc
   takeoff migrate [file] [--dry-run] Upgrade a v1 takeoff.yaml to v2
+  takeoff notes [--branch <name>] [--repo <owner/name>] [--json]
+                                     Show reviewers' send-back notes for this branch's PR
+                                     (reads GitHub with GITHUB_TOKEN or the gh CLI's sign-in)
 
 Options:
   --dir <path>   Run in another directory (default: current)
@@ -28,10 +33,11 @@ Options:
 `;
 
 function parseArgs(argv) {
-  const opts = { _: [], flags: new Set(), dir: null, file: null };
+  const opts = { _: [], flags: new Set(), dir: null, file: null, branch: null, repo: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--dir' || a === '--file') {
+    if (a === '--dir' || a === '--file' || a === '--branch' || a === '--repo') {
+      if (a === '--branch' || a === '--repo') opts.flags.add(a);
       const value = argv[i + 1];
       if (!value || value.startsWith('-')) throw new UsageError(`${a} needs a value.`);
       opts[a.slice(2)] = value;
@@ -55,10 +61,11 @@ function formatIssue(file, i) {
 
 /**
  * @param {string[]} argv arguments after the program name
- * @param {{ cwd?: string, out?: (s: string) => void, err?: (s: string) => void }} io
- * @returns {number} exit code: 0 ok, 1 problems found, 2 usage error
+ * @param {{ cwd?: string, out?: (s: string) => void, err?: (s: string) => void, env?: object, exec?: Function, fetchImpl?: Function }} io
+ * @returns {number|Promise<number>} exit code: 0 ok, 1 problems found, 2 usage error
+ *   (`notes` reads GitHub, so it returns a promise)
  */
-function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s) => console.error(s) } = {}) {
+function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s) => console.error(s), ...io } = {}) {
   let args;
   try {
     args = parseArgs(argv);
@@ -91,6 +98,7 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
       case 'validate': return validateCommand({ yamlPath, label, strict: args.flags.has('--strict'), out, err });
       case 'sync': return syncCommand({ dir, file: args.file || rest[0] || null, args, out, err });
       case 'migrate': return migrateCommand({ yamlPath, label, dryRun: args.flags.has('--dry-run'), out, err });
+      case 'notes': return notesCommand({ dir, args, out, err, ...io });
       default:
         err(`Unknown command "${command}".\n\n${HELP}`);
         return 2;
