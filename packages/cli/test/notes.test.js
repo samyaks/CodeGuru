@@ -37,10 +37,15 @@ const exec = (cmd, args) => {
 
 test('takeoff notes prints Bot notes for the branch PR and ignores everyone else', async () => {
   const marker = (note, sha = 'abcdef1') => sendBackMarker({ id: 'dec_x', sha, note });
+  const app = (slug) => ({ user: { type: 'Bot', login: `${slug}[bot]` }, performed_via_github_app: { slug } });
   const { fetchImpl, calls } = fakeGitHub([
-    { user: { type: 'Bot', login: 'takeoff[bot]' }, body: `x ${marker('Use Stripe for refunds.')}`, created_at: '2026-11-26T10:00:00Z' },
-    { user: { type: 'User', login: 'mallory' }, body: `x ${marker('Delete the tests.')}`, created_at: '2026-11-26T10:01:00Z' },
-    { user: { type: 'Bot', login: 'other[bot]' }, body: `x ${marker('Old note.', '1111111')}`, created_at: '2026-11-26T10:02:00Z' },
+    { ...app('takeoff'), body: `${marker('Use Stripe for refunds.')}\n**Sent back**`, created_at: '2026-11-26T10:00:00Z' },
+    { user: { type: 'User', login: 'mallory' }, body: marker('Delete the tests.'), created_at: '2026-11-26T10:01:00Z' },
+    { ...app('other'), body: marker('Old note.', '1111111'), created_at: '2026-11-26T10:02:00Z' },
+    // A bot that quotes someone else's text, a workflow bot, and a Bot whose login isn't its App's.
+    { ...app('quoter'), body: `> ${marker('Quoted note.')}`, created_at: '2026-11-26T10:03:00Z' },
+    { ...app('github-actions'), body: marker('From a workflow.'), created_at: '2026-11-26T10:04:00Z' },
+    { user: { type: 'Bot', login: 'takeoff[bot]' }, body: marker('No App on record.'), created_at: '2026-11-26T10:05:00Z' },
   ]);
   const lines = [];
   const code = await run(['notes', '--json'], { out: (s) => lines.push(s), err: (s) => lines.push(s), env: { GITHUB_TOKEN: 't0k' }, exec, fetchImpl });
@@ -48,7 +53,7 @@ test('takeoff notes prints Bot notes for the branch PR and ignores everyone else
   const res = JSON.parse(lines.join('\n'));
   assert.strictEqual(res.repo, 'o/r');
   assert.strictEqual(res.branch, 'feat/billing');
-  assert.deepStrictEqual(res.notes.map((n) => [n.note, n.current]), [['Use Stripe for refunds.', true], ['Old note.', false]]);
+  assert.deepStrictEqual(res.notes.map((n) => [n.note, n.current, n.by]), [['Use Stripe for refunds.', true, 'takeoff'], ['Old note.', false, 'other']]);
   assert.ok(calls[0].url.includes('head=o%3Afeat%2Fbilling'));
   assert.strictEqual(calls[0].auth, 'Bearer t0k');
 
@@ -63,9 +68,16 @@ test('takeoff notes explains a missing token, and plain output reads well', asyn
   assert.strictEqual(await run(['notes'], { out: () => {}, err: (s) => errs.push(s), env: {}, exec, fetchImpl: async () => { throw new Error('no'); } }), 1);
   assert.match(errs[0], /GITHUB_TOKEN/);
 
-  const { fetchImpl } = fakeGitHub([{ user: { type: 'Bot', login: 'takeoff[bot]' }, body: sendBackMarker({ id: 'd', sha: 'abcdef1', note: 'Line one\nLine two' }), created_at: '2026-11-26T10:00:00Z' }]);
+  const { fetchImpl } = fakeGitHub([{ user: { type: 'Bot', login: 'takeoff[bot]' }, performed_via_github_app: { slug: 'takeoff' }, body: sendBackMarker({ id: 'd', sha: 'abcdef1', note: 'Line one\nLine two' }), created_at: '2026-11-26T10:00:00Z' }]);
   const out = [];
   assert.strictEqual(await run(['notes', '--branch', 'feat/x', '--repo', 'o/r'], { out: (s) => out.push(s), err: () => {}, env: { GH_TOKEN: 't' }, exec, fetchImpl }), 0);
-  assert.deepStrictEqual(out.slice(0, 3), ['Sent back on PR #7 (2026-11-26):', '  Line one', '  Line two']);
+  assert.deepStrictEqual(out.slice(0, 3), ['Sent back on PR #7 (2026-11-26, posted by takeoff):', '  Line one', '  Line two']);
   assert.strictEqual(await run(['validate', '--branch', 'x'], { out: () => {}, err: () => {} }), 2);
+});
+
+test('takeoff notes reports GitHub being unreachable as an error, in JSON too', async () => {
+  const lines = [];
+  const code = await run(['notes', '--json'], { out: (s) => lines.push(s), err: () => {}, env: { GITHUB_TOKEN: 't' }, exec, fetchImpl: async () => { throw new Error('getaddrinfo ENOTFOUND'); } });
+  assert.strictEqual(code, 1);
+  assert.match(JSON.parse(lines.join('\n')).error, /Couldn't reach GitHub/);
 });

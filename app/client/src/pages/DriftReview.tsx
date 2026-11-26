@@ -15,6 +15,7 @@ import {
   type DecisionResult,
   type DriftReview as Review,
   type IntentEdit,
+  type Target,
   type WhyNot,
 } from '../services/driftApi';
 import { decisionLine } from './team/DriftSection';
@@ -27,7 +28,7 @@ const WHY_NOT: Record<WhyNot, string> = {
   closed: 'This pull request is closed, so there’s nothing left to decide.',
   no_drift: 'The latest check of this pull request needs no decision.',
   decision_running: 'Someone is deciding on this pull request right now. This page updates when they’re done.',
-  newer_push: 'There’s a newer push that Takeoff is checking now. This page updates when the check is done.',
+  newer_push: 'There’s a newer push on this pull request that Takeoff hasn’t checked yet. Decide once it has: this page updates when the check is done.',
 };
 
 const WRITE_REASON: Record<string, string> = {
@@ -41,6 +42,8 @@ const WRITE_REASON: Record<string, string> = {
 const KIND_WORD = { rule: 'rule', never: 'never-rule', agreement: 'agreement' } as const;
 
 type Choice = { action: 'keep' | 'remove' | 'reword'; to: string };
+const targetKey = (t: Target) => `${t.kind}|${t.area || ''}|${t.text}`;
+const POLL_FOR_MS = 10 * 60 * 1000;
 
 function Page({ children }: { children: React.ReactNode }) {
   return (
@@ -67,7 +70,7 @@ function ConflictCard({ c, filesUrl }: { c: Conflict; filesUrl: string | null })
       </div>
       {c.files.length ? (
         <p className={cx('type-small', styles.muted)}>
-          {c.files.map((f) => <code key={f} className={drift.file}>{f}</code>)}
+          {c.files.map((f, i) => <code key={i} className={drift.file}>{f}</code>)}
           {filesUrl ? <> · <a href={filesUrl} target="_blank" rel="noreferrer noopener">See the diff</a></> : null}
         </p>
       ) : null}
@@ -86,7 +89,7 @@ export default function DriftReview() {
   const [review, setReview] = useState<Review | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<'accept' | 'send_back' | null>(null);
-  const [choices, setChoices] = useState<Record<number, Choice>>({});
+  const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [add, setAdd] = useState({ area: '', kind: 'rule' as 'rule' | 'never', text: '' });
   const [agreement, setAgreement] = useState('');
   const [note, setNote] = useState('');
@@ -108,11 +111,25 @@ export default function DriftReview() {
 
   useEffect(() => { if (user) void load(); }, [user, load]);
 
+  // A new check is a new review: drop choices made against the old one.
+  const checkedSha = review?.check.headSha;
+  useEffect(() => {
+    setChoices({});
+    setAdd({ area: '', kind: 'rule', text: '' });
+    setAgreement('');
+    setNote('');
+  }, [checkedSha]);
+
   // While a decision runs or a newer push is being checked, look again.
+  // Polling stops after a while and pauses while the tab is hidden.
   const waiting = review?.you.whyNot === 'decision_running' || review?.you.whyNot === 'newer_push';
   useEffect(() => {
     if (!waiting) return undefined;
-    const t = window.setInterval(() => { void load(); }, 8000);
+    const started = Date.now();
+    const t = window.setInterval(() => {
+      if (Date.now() - started > POLL_FOR_MS) { window.clearInterval(t); return; }
+      if (document.visibilityState === 'visible') void load();
+    }, 8000);
     return () => window.clearInterval(t);
   }, [waiting, load]);
 
@@ -139,16 +156,20 @@ export default function DriftReview() {
 
   const { pr, check, intent, you } = review;
   const verdict = check.verdict === 'drifts' ? 'drifts' : check.verdict === 'needs_decision' ? 'needs_decision' : null;
-  const targeted = check.conflicts.map((c, i) => ({ c, i })).filter((x) => x.c.target);
-  const failed = review.decisions.find((d) => d.state === 'failed');
+  // One control per rule, even when the check names it in several conflicts.
+  const targets: Target[] = [];
+  for (const c of check.conflicts) if (c.target && !targets.some((t) => targetKey(t) === targetKey(c.target!))) targets.push(c.target);
+  // Only the newest decision, on the commit shown, can be tried again.
+  const latest = review.decisions[0];
+  const retryable = latest && latest.state === 'failed' && latest.headSha === check.headSha && !check.newerPush && you.canWrite ? latest : null;
 
   const edits = (): IntentEdit[] => {
     const out: IntentEdit[] = [];
-    for (const { c, i } of targeted) {
-      const ch = choices[i];
-      if (!ch || ch.action === 'keep' || !c.target) continue;
-      if (ch.action === 'remove') out.push({ op: 'remove', target: c.target });
-      else if (ch.to.trim()) out.push({ op: 'reword', target: c.target, to: ch.to.trim() });
+    for (const t of targets) {
+      const ch = choices[targetKey(t)];
+      if (!ch || ch.action === 'keep') continue;
+      if (ch.action === 'remove') out.push({ op: 'remove', target: t });
+      else if (ch.to.trim()) out.push({ op: 'reword', target: t, to: ch.to.trim() });
     }
     if (add.text.trim() && add.area) out.push({ op: 'add', kind: add.kind, area: add.area, text: add.text.trim() });
     return out;
@@ -162,7 +183,13 @@ export default function DriftReview() {
         ? 'Done. takeoff.yaml on the PR’s branch is updated, and Takeoff is checking the PR again.'
         : 'Sent. The note is on the pull request, where the builder and their AI agent can read it.');
     } else setError(res.decision.error || 'That didn’t work. Try again.');
-    setMode(null);
+    if (res.status !== 'failed') {
+      setMode(null);
+      setChoices({});
+      setAdd({ area: '', kind: 'rule', text: '' });
+      setAgreement('');
+      setNote('');
+    }
   };
 
   const run = async (fn: () => Promise<void>) => {
@@ -188,7 +215,7 @@ export default function DriftReview() {
     if (!note.trim()) return;
     void run(async () => finish(await sendBackDrift(id, prNumber, { headSha: check.headSha, note: note.trim() })));
   };
-  const setChoice = (i: number, next: Partial<Choice>) => setChoices({ ...choices, [i]: { ...(choices[i] || { action: 'keep', to: '' }), ...next } });
+  const setChoice = (key: string, next: Partial<Choice>) => setChoices({ ...choices, [key]: { ...(choices[key] || { action: 'keep', to: '' }), ...next } });
   const direct = you.canWrite;
 
   return (
@@ -212,7 +239,7 @@ export default function DriftReview() {
       </div>
 
       {check.summary ? <p className="type-body">{check.summary}</p> : null}
-      {check.notes.map((n) => <p key={n} className={cx('type-small', styles.muted)}>{n}</p>)}
+      {check.notes.map((n, i) => <p key={i} className={cx('type-small', styles.muted)}>{n}</p>)}
 
       {check.conflicts.length ? (
         <section aria-labelledby="conflicts-title" className={styles.section}>
@@ -230,8 +257,8 @@ export default function DriftReview() {
             <div key={a.id} className={styles.block}>
               <p className="type-heading">{a.name}</p>
               {a.creators.length ? <p className={cx('type-small', styles.muted)}>Creators: {a.creators.join(', ')}</p> : null}
-              {a.rules.length ? <ul className="type-small">{a.rules.map((r) => <li key={r}>{r}</li>)}</ul> : null}
-              {a.never.length ? <ul className="type-small">{a.never.map((r) => <li key={r}>Never: {r}</li>)}</ul> : null}
+              {a.rules.length ? <ul className="type-small">{a.rules.map((r, i) => <li key={i}>{r}</li>)}</ul> : null}
+              {a.never.length ? <ul className="type-small">{a.never.map((r, i) => <li key={i}>Never: {r}</li>)}</ul> : null}
             </div>
           ))}
         </details>
@@ -264,21 +291,23 @@ export default function DriftReview() {
                   This PR changes takeoff.yaml itself. Accepting with nothing else chosen accepts its version as it is.
                 </p>
               ) : null}
-              {targeted.map(({ c, i }) => {
-                const ch = choices[i] || { action: 'keep', to: '' };
-                const t = c.target!;
+              {targets.map((t) => {
+                const key = targetKey(t);
+                const ch = choices[key] || { action: 'keep', to: '' };
+                // People agreed to an agreement's exact words, so it is removed, never reworded.
+                const actions = t.kind === 'agreement' ? (['keep', 'remove'] as const) : (['keep', 'remove', 'reword'] as const);
                 return (
-                  <fieldset key={i} className={styles.labels}>
+                  <fieldset key={key} className={styles.labels}>
                     <legend className="type-small">The {KIND_WORD[t.kind]} “{t.text}”</legend>
-                    {(['keep', 'remove', 'reword'] as const).map((action) => (
+                    {actions.map((action) => (
                       <label key={action} className={cx('type-small', styles.labelOption)}>
-                        <input type="radio" name={`c${i}`} checked={ch.action === action} onChange={() => setChoice(i, { action })} />
+                        <input type="radio" name={key} checked={ch.action === action} onChange={() => setChoice(key, { action })} />
                         {action === 'keep' ? 'Keep it' : action === 'remove' ? 'Remove it' : 'Reword it'}
                       </label>
                     ))}
                     {ch.action === 'reword' ? (
                       <textarea aria-label={`New wording for “${t.text}”`} className={cx('type-body', styles.input)} rows={2} maxLength={1000}
-                        value={ch.to} placeholder={t.text} onChange={(e) => setChoice(i, { to: e.target.value })} />
+                        value={ch.to} placeholder={t.text} onChange={(e) => setChoice(key, { to: e.target.value })} />
                     ) : null}
                   </fieldset>
                 );
@@ -292,8 +321,8 @@ export default function DriftReview() {
                       {intent.allAreas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                     <select aria-label="Kind of rule" className={cx('type-small', styles.input)} value={add.kind} onChange={(e) => setAdd({ ...add, kind: e.target.value as 'rule' | 'never' })}>
-                      <option value="rule">Always</option>
-                      <option value="never">Never</option>
+                      <option value="rule">A rule to follow</option>
+                      <option value="never">Something to never do</option>
                     </select>
                   </div>
                   <input id={addId} className={cx('type-body', styles.input)} maxLength={1000} value={add.text}
@@ -346,7 +375,7 @@ export default function DriftReview() {
               <li key={d.id} className={styles.row}>
                 <div className={styles.who}>
                   <span className={cx('type-small', d.state === 'failed' ? styles.error : undefined)}>{decisionLine(d)}</span>
-                  {d.changes.length ? <ul className={cx('type-small', styles.muted)}>{d.changes.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+                  {d.changes.length ? <ul className={cx('type-small', styles.muted)}>{d.changes.map((x, i) => <li key={i}>{x}</li>)}</ul> : null}
                   {d.note ? <blockquote className={cx('type-small', drift.quote)}>{d.note}</blockquote> : null}
                   <span className={cx('type-small', styles.muted)}>
                     {new Date(d.createdAt).toLocaleString()} · on <code>{d.headSha.slice(0, 7)}</code>
@@ -354,12 +383,12 @@ export default function DriftReview() {
                     {d.commentUrl ? <> · <a href={d.commentUrl} target="_blank" rel="noreferrer noopener">See the note</a></> : null}
                   </span>
                 </div>
-                {failed?.id === d.id && you.canWrite ? (
+                {retryable?.id === d.id ? (
                   <div className={styles.actions}>
                     <Button variant="quiet" size="sm" disabled={busy}
                       onClick={() => void run(async () => {
                         const r = await retryDriftDecision(id, d.id);
-                        if (r.decision.state === 'failed') setError(r.decision.error || 'It didn’t work again.');
+                        if (r.decision.state !== 'done') setError(r.decision.error || 'It didn’t work again.');
                         else setOutcome('Done.');
                       })}>
                       Try again

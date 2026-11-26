@@ -123,8 +123,11 @@ async function confirmRecommendation({ project, user, recommendationId }, deps =
     result = await action.run({ project, payload: rec.payload || {}, actor: { userId: user.id, githubLogin: access.githubLogin } });
   } catch (err) {
     // The action failed: back to pending with the reason, so it stays on the
-    // list and can be tried again.
-    await deps.recommendations.release(rec.id, String(err.message || err).slice(0, 1000)).catch(() => {});
+    // list and can be tried again. An action that can never run now (err.final)
+    // closes as failed instead, so it doesn't stay on the list for good.
+    const reason = String(err.message || err).slice(0, 1000);
+    if (err.final) await deps.recommendations.finish(rec.id, { status: 'failed', error: reason }).catch(() => {});
+    else await deps.recommendations.release(rec.id, reason).catch(() => {});
     throw err;
   }
   // The action already ran (it may have written to the repo), so a failure

@@ -121,7 +121,7 @@ function appendByDocument(text, entry) {
   } else {
     doc.set('agreements', doc.createNode([entry]));
   }
-  return doc.toString({ lineWidth: 0 });
+  return doc.toString({ lineWidth: 0, flowCollectionPadding: false });
 }
 
 /**

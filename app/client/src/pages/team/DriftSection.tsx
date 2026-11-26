@@ -19,7 +19,9 @@ export function decisionLine(d: Decision): string {
     case 'waiting_for_write':
       return `${who(d)} asked to ${what}. Someone with write access to the repo can confirm it under “Who’s on this project”.`;
     case 'dismissed':
-      return `${who(d)} asked to ${what}, and the request was dismissed.`;
+      return d.error
+        ? `${who(d)} asked to ${what}. ${d.error}`
+        : `${who(d)} asked to ${what}, and the request was dismissed.`;
     case 'failed':
       return `${who(d)} tried to ${what}, and it didn’t work: ${d.error || 'GitHub refused the change.'}`;
     default:

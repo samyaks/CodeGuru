@@ -50,10 +50,10 @@ test('rewords a rule written as a map, keeping its id', () => {
 test('matches text with different whitespace, and finds never-rules and agreements', () => {
   const { data } = applyIntentEdits(yaml, [
     { op: 'remove', target: rule('Charge  before the\ntrial ends.', 'billing', 'never') },
-    { op: 'reword', target: { kind: 'agreement', area: 'emails', text: 'Send a weekly digest, not daily.' }, to: 'Send a daily digest.' },
+    { op: 'remove', target: { kind: 'agreement', area: 'emails', text: 'Send a  weekly digest, not daily.' } },
   ]);
   assert.deepStrictEqual(data.areas.find((a) => a.id === 'billing').never, []);
-  assert.strictEqual(data.agreements[0].text, 'Send a daily digest.');
+  assert.deepStrictEqual(data.agreements, []);
   assert.ok(validateText(applyIntentEdits(yaml, [{ op: 'remove', target: rule('Charge before the trial ends.', 'billing', 'never') }]).text).ok);
 });
 
@@ -84,4 +84,35 @@ test('refuses edits that miss, repeat, or would break the file', () => {
   assert.strictEqual(code([{ op: 'add', kind: 'agreement', area: 'billing', text: 'x' }]), 'bad_edit');
   assert.strictEqual(code([{ op: 'remove', target: rule('x') }], 'version: 2\nareas: [oops'), 'invalid_yaml');
   assert.strictEqual(code([{ op: 'reword', target: rule('Stripe holds all billing data.'), to: 'y'.repeat(1001) }]), 'bad_edit');
+});
+
+test('an agreement is never reworded, since people agreed to its exact words', () => {
+  assert.throws(
+    () => applyIntentEdits(yaml, [{ op: 'reword', target: { kind: 'agreement', area: 'emails', text: 'Send a weekly digest, not daily.' }, to: 'Send a daily digest.' }]),
+    (e) => e instanceof IntentEditError && e.code === 'bad_edit' && /can't be reworded/.test(e.message),
+  );
+});
+
+test('a reword keeps the comments and quoting around the rule, and the rest of the file as written', () => {
+  const commented = yaml.replace('      - "Stripe holds all billing data."\n', '      # about where data lives\n      - "Stripe holds all billing data." # checked in Q3\n');
+  const { text } = applyIntentEdits(commented, [{ op: 'reword', target: rule('Stripe holds all billing data.'), to: 'Stripe and our ledger hold billing data.' }]);
+  assert.match(text, /# about where data lives\n {6}- "Stripe and our ledger hold billing data." # checked in Q3\n/);
+  assert.ok(text.includes('paths: ["src/billing/**"]'), 'flow lists are not re-padded');
+  const mapped = applyIntentEdits(yaml, [{ op: 'reword', target: rule('We never store card numbers.'), to: 'We never store or log card numbers.' }]);
+  assert.match(mapped.text, /text: "We never store or log card numbers."/);
+});
+
+test('a reword cannot make a rule a duplicate of another', () => {
+  assert.throws(
+    () => applyIntentEdits(yaml, [{ op: 'reword', target: rule('Stripe holds all billing data.'), to: 'We never store card numbers.' }]),
+    (e) => e instanceof IntentEditError && /already a rule/.test(e.message),
+  );
+});
+
+test('a removal that would break an alias is refused, not thrown raw', () => {
+  const aliased = yaml.replace('      - "Stripe holds all billing data."\n', '      - &stripe "Stripe holds all billing data."\n').replace('    paths: ["src/email/**"]\n', '    paths: ["src/email/**"]\n    rules:\n      - *stripe\n');
+  assert.throws(
+    () => applyIntentEdits(aliased, [{ op: 'remove', target: rule('Stripe holds all billing data.') }]),
+    (e) => e instanceof IntentEditError,
+  );
 });

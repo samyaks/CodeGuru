@@ -727,7 +727,7 @@ test('a takeoff.yaml change accepted in Takeoff is trusted while the PR keeps ex
   w.deps.acceptedDecision = async (q) => { lookups.push(q); return accepted(q) ? { actor_name: 'Sam  Lee' } : null; };
   w.model.text = '{"verdict":"matches","summary":"Trips can have three travellers, as the intent now says.","conflicts":[]}';
   const out = await runPrCheck(job(), w.deps);
-  assert.deepStrictEqual(lookups, [{ repo: 'acme/web', prNumber: 7, yamlSha256: hash(c.headYaml), baseYamlSha256: hash(BASE_YAML) }]);
+  assert.deepStrictEqual(lookups, [{ projectId: 'proj-1', repo: 'acme/web', prNumber: 7, yamlSha256: hash(c.headYaml), baseYamlSha256: hash(BASE_YAML) }]);
   assert.strictEqual(out.verdict, 'matches', 'judged against the accepted intent, with no floor for editing it');
   assert.ok(!/<proposed_intent_change>/.test(w.prompts[0].user));
   assert.match(w.gh.state.comments[0].body, /This PR's changes to takeoff\.yaml were accepted in Takeoff by Sam Lee\./);

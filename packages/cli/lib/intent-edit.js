@@ -94,6 +94,9 @@ function checkEdits(edits) {
     if (t.kind !== 'agreement' && (typeof t.area !== 'string' || !t.area)) throw new IntentEditError('A rule is named with its area.', 'bad_edit');
     const target = { kind: t.kind, area: typeof t.area === 'string' && t.area ? t.area : null, text: checkText(t.text, 'The rule to change') };
     if (e.op === 'remove') return { op: 'remove', target };
+    // An agreement records who agreed to its exact words, so it is never
+    // reworded: remove it, and record a new agreement instead.
+    if (target.kind === 'agreement') throw new IntentEditError('An agreement can\'t be reworded, since people agreed to its exact words. Remove it and record a new one.', 'bad_edit');
     const to = checkText(e.to, 'The new wording');
     if (to === target.text) throw new IntentEditError(`The new wording of "${short(to)}" is the same as the old.`, 'bad_edit');
     return { op: 'reword', target, to };
@@ -139,9 +142,12 @@ function applyIntentEdits(text, edits) {
   list.forEach((e, i) => {
     if (e.op !== 'reword') return;
     const [seq, idx] = located[i];
+    if (seq.items.some((n, j) => j !== idx && itemText(n) === e.to)) throw new IntentEditError(`"${short(e.to)}" is already a rule there.`, 'bad_edit');
     const node = seq.items[idx];
-    if (YAML.isMap(node)) node.set('text', e.to);
-    else seq.items[idx] = doc.createNode(e.to);
+    // Change the value in place, so comments and quoting on it stay.
+    const scalar = YAML.isMap(node) ? node.get('text', true) : node;
+    if (YAML.isScalar(scalar)) scalar.value = e.to;
+    else node.set('text', e.to);
     summary.push(`Reword "${short(e.target.text)}" to "${short(e.to)}"`);
   });
   // Highest index first, so removing one item doesn't move the next.
@@ -168,7 +174,12 @@ function applyIntentEdits(text, edits) {
   // An emptied block list prints as "[]" so the file stays valid.
   YAML.visit(doc, { Seq(_, node) { if (!node.items.length) node.flow = true; } });
 
-  const out = doc.toString({ lineWidth: 0 });
+  let out;
+  try {
+    out = doc.toString({ lineWidth: 0, flowCollectionPadding: false });
+  } catch (err) {
+    throw new IntentEditError(`That change would leave takeoff.yaml unreadable: ${err.message}`, 'invalid_result');
+  }
   const after = validateText(out);
   const newErrors = after.issues.filter((i) => i.severity === 'error');
   if (newErrors.length) throw new IntentEditError(`That change would leave takeoff.yaml invalid: ${newErrors[0].message}`, 'invalid_result');

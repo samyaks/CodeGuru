@@ -34,7 +34,14 @@ const EMAIL_RE = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
 const REVIEW_VERDICTS = new Set(['drifts', 'needs_decision']);
 const MAX_NOTE = 2000;
 const MAX_AGREEMENT = 1000;
-const MAX_FAST_FORWARD_RETRIES = 3;
+
+const STALE_MESSAGE = 'This pull request changed after the decision was made, so Takeoff set it aside. Review the latest check and decide again.';
+/** A decision that can never run: its PR moved on, closed, or became a fork. */
+function staleError(message = STALE_MESSAGE) {
+  const err = AppError.conflict(message);
+  err.final = true;
+  return err;
+}
 
 const sha256 = (text) => (text === null || text === undefined ? 'none' : crypto.createHash('sha256').update(String(text), 'utf8').digest('hex'));
 
@@ -223,7 +230,7 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
   requireRepo(project);
   const prNumber = parsePrNumber(raw);
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber });
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, projectId: project.id });
   if (!row || row.project_id !== project.id) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber).catch((err) => {
@@ -326,7 +333,7 @@ function cleanEdits(raw) {
 async function loadDecidable(project, prNumber, headSha, deps) {
   if (typeof headSha !== 'string' || !SHA_RE.test(headSha)) throw AppError.badRequest('Missing which commit you reviewed.');
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber });
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, projectId: project.id });
   if (!row || row.project_id !== project.id) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber);
@@ -462,63 +469,71 @@ function friendly(err, project) {
   }
   if ((err?.status === 422) && /protected|rule/i.test(msg)) return 'This PR\'s branch is protected, so Takeoff can\'t commit to it. Make the change on the branch yourself.';
   if (err?.status === 404) return `Takeoff's GitHub App can't see ${project.owner}/${project.repo} or this pull request any more.`;
-  return `GitHub refused the change: ${msg.slice(0, 300)}`;
+  // Only GitHub's own answers are shown; anything else stays in the log.
+  if (err?.status) return `GitHub refused the change (${Number(err.status)}): ${msg.slice(0, 300)}`;
+  return 'Something went wrong in Takeoff. Try again in a minute.';
 }
 
-/** Commit the accepted takeoff.yaml (and agent files) on top of the PR's head. */
+/**
+ * Commit the accepted takeoff.yaml (and agent files) on top of the commit the
+ * reviewer saw. If the PR has moved on, nothing is committed: what was
+ * accepted is only ever that commit's takeoff.yaml.
+ */
 async function commitAccept(gh, project, decision, actor, deps) {
   const { owner, repo } = project;
   const edits = decision.edits || {};
-  for (let attempt = 1; ; attempt += 1) {
-    const pr = await livePr(gh, project, Number(decision.pr_number));
-    if (pr.state !== 'open') throw AppError.conflict('This pull request was closed before Takeoff could commit.');
-    if (pr.fork) throw AppError.badRequest('This pull request comes from a fork, so Takeoff can\'t commit to its branch.');
-    const head = await gh.fetchGitCommit(owner, repo, pr.headSha);
-    const trees = new Map();
-    const yamlEntry = await treeEntry(gh, owner, repo, head.tree.sha, FILENAME, trees);
-    if (yamlEntry && !writable(yamlEntry)) throw AppError.badRequest(`${FILENAME} on this branch is a link or too big for Takeoff to edit.`);
-    const yamlText = yamlEntry ? await gh.fetchFileTextOrNull(owner, repo, FILENAME, pr.headSha) : null;
-    const baseText = pr.baseSha ? await gh.fetchFileTextOrNull(owner, repo, FILENAME, pr.baseSha) : null;
-    const plan = planAccept({ yamlText, edits: { ...edits, edits: edits.edits || [], allowNoEdits: true }, pr, deps });
-    const data = plan.data || loadIntentData(plan.text);
+  const pr = await livePr(gh, project, Number(decision.pr_number));
+  if (pr.state !== 'open') throw staleError('This pull request was closed before Takeoff could commit, so the decision was set aside.');
+  if (pr.fork) throw staleError('This pull request comes from a fork, so Takeoff can\'t commit to its branch.');
+  if (pr.headSha !== decision.head_sha) throw staleError();
+  const head = await gh.fetchGitCommit(owner, repo, pr.headSha);
+  const trees = new Map();
+  const yamlEntry = await treeEntry(gh, owner, repo, head.tree.sha, FILENAME, trees);
+  if (yamlEntry && !writable(yamlEntry)) throw AppError.badRequest(`${FILENAME} on this branch is a link or too big for Takeoff to edit.`);
+  const yamlText = yamlEntry ? await gh.fetchFileTextOrNull(owner, repo, FILENAME, pr.headSha) : null;
+  const baseText = pr.baseSha ? await gh.fetchFileTextOrNull(owner, repo, FILENAME, pr.baseSha) : null;
+  const plan = planAccept({ yamlText, edits: { ...edits, edits: edits.edits || [], allowNoEdits: true }, pr, deps });
+  const data = plan.data || loadIntentData(plan.text);
 
-    const current = {};
-    const skipped = [];
-    for (const p of AGENT_FILE_PATHS) {
-      const e = await treeEntry(gh, owner, repo, head.tree.sha, p, trees);
-      if (!writable(e)) { skipped.push(p); continue; }
-      current[p] = e ? await gh.fetchFileTextOrNull(owner, repo, p, pr.headSha) : null;
-      if (e && current[p] === null) skipped.push(p);
-    }
-    let agentFiles = [];
-    try {
-      agentFiles = data ? renderAgentFiles(data, current).filter((f) => f.changed && !skipped.includes(f.path)) : [];
-    } catch (err) {
-      if (err instanceof AgreementError) throw AppError.badRequest(err.message);
-      throw err;
-    }
-    const files = [];
-    if (plan.text !== yamlText) files.push({ path: FILENAME, content: plan.text });
-    files.push(...agentFiles.map((f) => ({ path: f.path, content: f.text })));
-    const result = {
-      yamlSha256: sha256(plan.text), baseYamlSha256: sha256(baseText), agreementId: plan.agreement?.id || null,
-      branch: pr.branch, prHead: pr.headSha, summary: plan.summary,
-    };
-    if (!files.length) return { ...result, commitSha: null, commitUrl: null, newHead: pr.headSha };
-
-    const tree = await gh.createTextTree(owner, repo, head.tree.sha, files);
-    const coAuthor = await coAuthorOf(decision.actor_user_id, deps);
-    const message = commitMessage(Number(decision.pr_number), plan.summary.length ? plan.summary : [`Regenerate the agent files from ${FILENAME}`], decision.actor_name, coAuthor);
-    const commit = await gh.createGitCommit(owner, repo, { message, tree: tree.sha, parents: [pr.headSha] });
-    try {
-      await gh.updateBranchRef(owner, repo, pr.branch, commit.sha, { force: false });
-    } catch (err) {
-      if (err.status === 422 && /fast.?forward/i.test(err.message) && attempt < MAX_FAST_FORWARD_RETRIES) continue;
-      if (err.status === 422 && /fast.?forward/i.test(err.message)) throw AppError.conflict('The PR\'s branch kept changing while Takeoff committed. Try again.');
-      throw err;
-    }
-    return { ...result, commitSha: commit.sha, commitUrl: `https://github.com/${owner}/${repo}/commit/${commit.sha}`, newHead: commit.sha };
+  const current = {};
+  const skipped = [];
+  for (const p of AGENT_FILE_PATHS) {
+    const e = await treeEntry(gh, owner, repo, head.tree.sha, p, trees);
+    if (!writable(e)) { skipped.push(p); continue; }
+    current[p] = e ? await gh.fetchFileTextOrNull(owner, repo, p, pr.headSha) : null;
+    if (e && current[p] === null) skipped.push(p);
   }
+  let agentFiles = [];
+  try {
+    agentFiles = data ? renderAgentFiles(data, current).filter((f) => f.changed && !skipped.includes(f.path)) : [];
+  } catch (err) {
+    if (err instanceof AgreementError) throw AppError.badRequest(err.message);
+    throw err;
+  }
+  const files = [];
+  if (plan.text !== yamlText) files.push({ path: FILENAME, content: plan.text });
+  files.push(...agentFiles.map((f) => ({ path: f.path, content: f.text })));
+  const result = {
+    yamlSha256: sha256(plan.text), baseYamlSha256: sha256(baseText), agreementId: plan.agreement?.id || null,
+    branch: pr.branch, prHead: pr.headSha, summary: plan.summary,
+  };
+  if (!files.length) return { ...result, commitSha: null, commitUrl: null, newHead: pr.headSha };
+
+  const tree = await gh.createTextTree(owner, repo, head.tree.sha, files);
+  const coAuthor = await coAuthorOf(decision.actor_user_id, deps);
+  const message = commitMessage(Number(decision.pr_number), plan.summary.length ? plan.summary : [`Regenerate the agent files from ${FILENAME}`], decision.actor_name, coAuthor);
+  const commit = await gh.createGitCommit(owner, repo, { message, tree: tree.sha, parents: [pr.headSha] });
+  // Record what is being accepted before the branch moves: the push starts a
+  // PR check at once, and that check must already trust this file.
+  await deps.driftDecisions.recordPlan(decision.id, { yamlSha256: result.yamlSha256, baseYamlSha256: result.baseYamlSha256 });
+  try {
+    await gh.updateBranchRef(owner, repo, pr.branch, commit.sha, { force: false });
+  } catch (err) {
+    // Someone pushed after the reviewer looked: never accept on top of that.
+    if (err.status === 422 && /fast.?forward/i.test(err.message)) throw staleError();
+    throw err;
+  }
+  return { ...result, commitSha: commit.sha, commitUrl: `https://github.com/${owner}/${repo}/commit/${commit.sha}`, newHead: commit.sha };
 }
 
 function loadIntentData(text) {
@@ -551,7 +566,8 @@ async function execute(project, decision, actor, deps) {
     gh = deps.writeClientFor(project);
     if (decision.type === 'sent_back') {
       const pr = await livePr(gh, project, Number(decision.pr_number));
-      if (pr.state !== 'open') throw AppError.conflict('This pull request was closed before Takeoff could post the note.');
+      if (pr.state !== 'open') throw staleError('This pull request was closed before Takeoff could post the note, so the decision was set aside.');
+      if (pr.headSha !== decision.head_sha) throw staleError();
       const comment = await gh.createIssueComment(project.owner, project.repo, Number(decision.pr_number), sendBackComment(decision, decision.actor_name));
       return (await deps.driftDecisions.finish(decision.id, {
         state: 'done', commentId: comment?.id ? Number(comment.id) : null, commentUrl: comment?.html_url || null,
@@ -573,8 +589,9 @@ async function execute(project, decision, actor, deps) {
     return done;
   } catch (err) {
     const message = friendly(err, project);
-    console.warn(`[drift] decision ${decision.id} failed:`, err.message);
-    return (await deps.driftDecisions.finish(decision.id, { state: 'failed', error: message }).catch(() => null)) || { ...decision, state: 'failed', error: message };
+    const state = err.final ? 'dismissed' : 'failed';
+    console.warn(`[drift] decision ${decision.id} ${state}:`, err.message);
+    return (await deps.driftDecisions.finish(decision.id, { state, error: message }).catch(() => null)) || { ...decision, state, error: message };
   }
 }
 
@@ -586,7 +603,12 @@ async function retryDecision({ project, user, decisionId }, deps = defaultDeps()
   await assertMember(project, user, deps);
   const access = await accessFor(project, user, deps);
   if (!access.canWrite) throw AppError.forbidden('Trying again needs write access to the repo on GitHub.');
-  const claimed = await deps.driftDecisions.claim(project.id, String(decisionId || ''), { from: ['failed'], confirmedBy: user.id });
+  const row = await deps.driftDecisions.get(project.id, String(decisionId || ''));
+  if (!row || row.state !== 'failed') throw AppError.conflict('This decision is not waiting to be tried again.');
+  const later = (await deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)))
+    .some((d) => d.id !== row.id && new Date(d.created_at) > new Date(row.created_at));
+  if (later) throw AppError.conflict('Someone decided on this pull request after this, so it can\'t be tried again.');
+  const claimed = await deps.driftDecisions.claim(project.id, row.id, { from: ['failed'], confirmedBy: user.id });
   if (!claimed) throw AppError.conflict('This decision is not waiting to be tried again.');
   return { decision: publicDecision(await execute(project, claimed, { userId: user.id }, deps)) };
 }
@@ -646,6 +668,13 @@ function registerDecisionAction(depsFactory = defaultDeps) {
         throw AppError.conflict('This decision is already running or was decided another way.');
       }
       const done = await execute(project, claimed, actor, deps);
+      if (done.state === 'dismissed') {
+        // It can never run now, so the recommendation closes instead of
+        // going back on the list.
+        const err = AppError.conflict(done.error || STALE_MESSAGE);
+        err.final = true;
+        throw err;
+      }
       if (done.state !== 'done') throw new AppError(done.error || 'The decision failed.', 502, 'DECISION_FAILED');
       return publicDecision(done);
     },

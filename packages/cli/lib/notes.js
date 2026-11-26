@@ -6,8 +6,11 @@
 // branch's open PR, so a builder (or their AI agent's hook) gets the note
 // without a Takeoff account: their own GitHub access is enough.
 //
-// Only comments posted by a GitHub App (a Bot account) count, so a note typed
-// by anyone else on the PR can't pose as a reviewer's.
+// Only a comment that a GitHub App posted, and that starts with the marker,
+// counts, so a note typed by a person, or quoted by another bot, can't pose as
+// a reviewer's. Set TAKEOFF_APP_SLUG to the Takeoff App's slug to count only
+// its comments; without it, common bots that post on behalf of anyone (like
+// GitHub Actions) are left out, and each note says which App posted it.
 
 const { execFileSync } = require('child_process');
 
@@ -55,19 +58,40 @@ function tokenFrom(env, exec, cwd) {
 
 class NotesError extends Error {}
 
+// Apps that post whatever a workflow or a config tells them to.
+const UNTRUSTED_APPS = new Set(['github-actions', 'dependabot', 'renovate', 'copilot', 'copilot-swe-agent']);
+
+/** The posting App's slug when `c` is a comment a GitHub App posted, else null. */
+function postingApp(c, appSlug) {
+  if (c?.user?.type !== 'Bot') return null;
+  const app = String(c.performed_via_github_app?.slug || '').toLowerCase();
+  if (!app || String(c.user.login || '').toLowerCase() !== `${app}[bot]`) return null;
+  if (appSlug) return app === appSlug.toLowerCase() ? app : null;
+  return UNTRUSTED_APPS.has(app) ? null : app;
+}
+
 async function getJson(fetchImpl, token, path) {
-  const res = await fetchImpl(`https://api.github.com${path}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'User-Agent': 'takeoff-cli',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
+  let res;
+  try {
+    res = await fetchImpl(`https://api.github.com${path}`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'takeoff-cli',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+  } catch (e) {
+    throw new NotesError(`Couldn't reach GitHub: ${e.message}`);
+  }
   if (res.status === 401) throw new NotesError('GitHub rejected the token. Set GITHUB_TOKEN to a token that can read this repo, or sign in again with `gh auth login`.');
   if (res.status === 404) throw new NotesError("GitHub can't find that repo with this token.");
   if (!res.ok) throw new NotesError(`GitHub answered ${res.status}.`);
-  return res.json();
+  try {
+    return await res.json();
+  } catch {
+    throw new NotesError('GitHub sent an answer Takeoff couldn\'t read.');
+  }
 }
 
 /**
@@ -84,14 +108,15 @@ async function fetchSendBackNotes({ repo, branch, token, fetchImpl = globalThis.
       const comments = await getJson(fetchImpl, token, `/repos/${q(owner)}/${q(name)}/issues/${Number(pr.number)}/comments?per_page=100&page=${page}`);
       if (!Array.isArray(comments) || !comments.length) break;
       for (const c of comments) {
-        if (c?.user?.type !== 'Bot') continue;
-        if (appSlug && String(c.user.login).toLowerCase() !== `${appSlug}[bot]`.toLowerCase()) continue;
+        const app = postingApp(c, appSlug);
+        if (!app || !String(c.body || '').startsWith('<!-- takeoff:send-back ')) continue;
         const parsed = parseSendBack(c.body);
         if (!parsed) continue;
         out.push({
           pr: Number(pr.number),
           prUrl: pr.html_url,
           ...parsed,
+          by: app,
           at: c.created_at,
           current: !!pr.head?.sha && pr.head.sha.startsWith(parsed.sha),
         });
@@ -133,7 +158,7 @@ async function notesCommand({ dir, args, out, err, env = process.env, exec = def
       return 0;
     }
     for (const n of notes) {
-      out(`Sent back on PR #${n.pr} (${n.at ? n.at.slice(0, 10) : 'date unknown'}${n.current ? '' : ', about an earlier push'}):`);
+      out(`Sent back on PR #${n.pr} (${n.at ? n.at.slice(0, 10) : 'date unknown'}${n.current ? '' : ', about an earlier push'}${appSlug ? '' : `, posted by ${n.by}`}):`);
       for (const line of n.note.split(/\r?\n/)) out(`  ${line}`);
       out('');
     }

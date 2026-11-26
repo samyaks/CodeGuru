@@ -99,6 +99,7 @@ function fakeGithub({ headFiles = {}, fork = false } = {}) {
     },
     async updateBranchRef(_o, _r, branch, sha, { force } = {}) {
       gh.calls.push(['updateBranchRef', branch, sha, !!force]);
+      if (gh.onUpdateRef) await gh.onUpdateRef(sha);
       if (gh.pushesBeforeUpdate > 0) {
         gh.pushesBeforeUpdate -= 1;
         const pushed = `dead00${(++n).toString(16).padStart(2, '0')}`;
@@ -146,7 +147,10 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
   });
   const latest = (repo, pr) => state.checks.filter((c) => c.repo_full_name === repo && Number(c.pr_number) === Number(pr)).at(-1) || null;
   const prChecks = {
-    async latestForPr({ repo, prNumber }) { return latest(repo, prNumber); },
+    async latestForPr({ repo, prNumber, projectId = null }) {
+      const row = latest(repo, prNumber);
+      return row && (!projectId || row.project_id === projectId) ? row : null;
+    },
     async latestPerPr(pid, repo) {
       const prs = [...new Set(state.checks.filter((c) => c.project_id === pid && c.repo_full_name === repo).map((c) => Number(c.pr_number)))];
       return prs.map((p) => latest(repo, p));
@@ -185,9 +189,15 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
       });
       return { ...d };
     },
-    async acceptedFor({ repo, prNumber, yamlSha256, baseYamlSha256 }) {
-      return state.decisions.find((d) => d.repo_full_name === repo && Number(d.pr_number) === Number(prNumber) && d.type === 'accepted'
-        && d.state === 'done' && d.yaml_sha256 === yamlSha256 && d.base_yaml_sha256 === baseYamlSha256) || null;
+    async recordPlan(id, { yamlSha256, baseYamlSha256 }) {
+      const d = state.decisions.find((x) => x.id === id && x.state === 'working' && x.type === 'accepted');
+      if (d) Object.assign(d, { yaml_sha256: yamlSha256, base_yaml_sha256: baseYamlSha256 });
+      state.planned = state.planned || [];
+      state.planned.push({ id, yamlSha256, baseYamlSha256 });
+    },
+    async acceptedFor({ projectId, repo, prNumber, yamlSha256, baseYamlSha256 }) {
+      return state.decisions.find((d) => d.project_id === projectId && d.repo_full_name === repo && Number(d.pr_number) === Number(prNumber) && d.type === 'accepted'
+        && ['done', 'working'].includes(d.state) && d.yaml_sha256 === yamlSha256 && d.base_yaml_sha256 === baseYamlSha256) || null;
     },
   };
   const recommendations = {

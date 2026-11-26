@@ -147,7 +147,7 @@ const list3 = (items) => (items.length > 3 ? `${items.slice(0, 3).join(' ')} And
  * Work out the verdict. Throws on anything that should read "couldn't check".
  * @returns {Promise<{ result: object, render: { areaNames: object, notes: string[] }, model: string|null }>}
  */
-async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headText }, deps, log, ctx) {
+async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headText, projectId = null }, deps, log, ctx) {
   const files = await gh.fetchAllPRFiles(owner, repo, prNumber);
   // GitHub lists at most 3000 files. Past that, the list can't show whether
   // takeoff.yaml changed or which areas are touched, so the texts decide the
@@ -169,9 +169,9 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
   // while the PR still has exactly that file, over exactly the base file it
   // was accepted against, the PR is judged against its own intent.
   let acceptedBy = null;
-  if (yamlInPr && head.ok && deps.acceptedDecision) {
+  if (yamlInPr && head.ok && deps.acceptedDecision && projectId) {
     const decision = await deps.acceptedDecision({
-      repo: `${owner}/${repo}`, prNumber, yamlSha256: sha256(headText), baseYamlSha256: sha256(baseText),
+      projectId, repo: `${owner}/${repo}`, prNumber, yamlSha256: sha256(headText), baseYamlSha256: sha256(baseText),
     }).catch((err) => {
       log({ event: 'pr_check_accepted_lookup_failed', message: err.message, ...ctx });
       return null;
@@ -347,7 +347,7 @@ async function runPrCheck(input, deps = defaultDeps()) {
 
   let computed = null;
   try {
-    computed = await computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headText }, deps, log, ctx);
+    computed = await computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headText, projectId: project.id }, deps, log, ctx);
   } catch (err) {
     log({ event: 'pr_check_failed', stage: 'verdict', code: err.code || null, status: err.status || null, message: err.message, ...ctx });
     const reason = userReason(err);

@@ -2795,11 +2795,11 @@ const prChecks = {
     }
   },
   /** The PR's newest check: the one its comment shows, else the latest run. */
-  async latestForPr({ repo, prNumber }) {
+  async latestForPr({ repo, prNumber, projectId = null }) {
     const { rows } = await getDb().query(
-      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2
+      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND ($3::text IS NULL OR project_id = $3)
         ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
-      [repo, prNumber]
+      [repo, prNumber, projectId]
     );
     return rows[0] || null;
   },
@@ -2927,14 +2927,25 @@ const driftDecisions = {
     );
     return rows[0] || null;
   },
-  /** The accept that committed exactly this takeoff.yaml on this PR, over exactly this base file. */
-  async acceptedFor({ repo, prNumber, yamlSha256, baseYamlSha256 }) {
+  /** While an accept runs, the takeoff.yaml it is about to commit (set just before the branch moves). */
+  async recordPlan(id, { yamlSha256, baseYamlSha256 }) {
+    await getDb().query(
+      `UPDATE drift_decisions SET yaml_sha256 = $2, base_yaml_sha256 = $3, updated_at = now()
+        WHERE id = $1 AND state = 'working' AND type = 'accepted'`,
+      [id, yamlSha256, baseYamlSha256]
+    );
+  },
+  /**
+   * The accept in this project that committed (or is committing right now)
+   * exactly this takeoff.yaml on this PR, over exactly this base file.
+   */
+  async acceptedFor({ projectId, repo, prNumber, yamlSha256, baseYamlSha256 }) {
     const { rows } = await getDb().query(
       `SELECT * FROM drift_decisions
-        WHERE repo_full_name = $1 AND pr_number = $2 AND type = 'accepted' AND state = 'done'
-          AND yaml_sha256 = $3 AND base_yaml_sha256 = $4
-        ORDER BY done_at DESC LIMIT 1`,
-      [repo, prNumber, yamlSha256, baseYamlSha256]
+        WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3 AND type = 'accepted'
+          AND state IN ('done', 'working') AND yaml_sha256 = $4 AND base_yaml_sha256 = $5
+        ORDER BY (state = 'done') DESC, updated_at DESC LIMIT 1`,
+      [projectId, repo, prNumber, yamlSha256, baseYamlSha256]
     );
     return rows[0] || null;
   },
