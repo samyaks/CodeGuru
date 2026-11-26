@@ -8,6 +8,7 @@
 // checks take a pr_checks row; the claim runs before the model is called.
 // Nothing here can post a ✅ for a check that did not run.
 
+const crypto = require('crypto');
 const { FILENAME } = require('@takeoff/cli');
 const { loadIntent, chooseIntent } = require('./intent');
 const { touchedAreas, uncheckablePatterns } = require('./globs');
@@ -19,7 +20,7 @@ const {
 } = require('./comment');
 
 function defaultDeps() {
-  const { deployments, prChecks } = require('../../lib/db');
+  const { deployments, prChecks, driftDecisions } = require('../../lib/db');
   const { getGithubApp, readConfigFromEnv } = require('../../lib/github-app');
   const { callVerdictModel } = require('./llm');
   const config = readConfigFromEnv();
@@ -30,6 +31,10 @@ function defaultDeps() {
       repo, permissions: VERDICT_PERMISSIONS, optional: VERDICT_OPTIONAL_PERMISSIONS,
     }),
     callModel: callVerdictModel,
+    // Milestone 5: takeoff.yaml changes an accept committed are trusted, and
+    // a ⚠️ or ❓ verdict emails the area's Creators.
+    acceptedDecision: (q) => driftDecisions.acceptedFor(q),
+    onDrift: (input) => require('../drift').notifyDrift(input),
     appSlug: config.slug || null,
     appUrl: (process.env.TAKEOFF_APP_URL || process.env.FRONTEND_URL || '').replace(/\/+$/, '') || null,
     log: (obj) => console.log(JSON.stringify(obj)),
@@ -129,6 +134,13 @@ async function reportFailure(gh, { owner, repo, prNumber, headSha, checkRunId = 
   return commentId;
 }
 
+const sha256 = (text) => (text === null || text === undefined ? 'none' : crypto.createHash('sha256').update(String(text), 'utf8').digest('hex'));
+
+/** The review page for a PR, or the project when there's no page yet. */
+const reviewUrlFor = (deps, projectId, prNumber) => (deps.appUrl && projectId
+  ? `${deps.appUrl}/read/${encodeURIComponent(projectId)}/drift/${prNumber}`
+  : null);
+
 const list3 = (items) => (items.length > 3 ? `${items.slice(0, 3).join(' ')} And ${items.length - 3} more.` : items.join(' '));
 
 /**
@@ -143,18 +155,38 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
   const incomplete = Number(pr.changed_files) > files.length;
   const yamlFile = files.find((f) => f.filename === FILENAME || f.previous_filename === FILENAME);
   const yamlDiffers = incomplete && baseText !== headText;
-  const chosen = chooseIntent({
-    base: loadIntent(baseText),
-    head: loadIntent(headText),
-    yamlInPr: !!yamlFile || yamlDiffers,
+  const base = loadIntent(baseText);
+  const head = loadIntent(headText);
+  const yamlInPr = !!yamlFile || yamlDiffers;
+  let chosen = chooseIntent({
+    base,
+    head,
+    yamlInPr,
     yamlRemoved: (!!yamlFile && (yamlFile.status === 'removed' || yamlFile.filename !== FILENAME))
       || (yamlDiffers && headText === null),
   });
+  // A reviewer accepted this PR's takeoff.yaml in Takeoff (Milestone 5):
+  // while the PR still has exactly that file, over exactly the base file it
+  // was accepted against, the PR is judged against its own intent.
+  let acceptedBy = null;
+  if (yamlInPr && head.ok && deps.acceptedDecision) {
+    const decision = await deps.acceptedDecision({
+      repo: `${owner}/${repo}`, prNumber, yamlSha256: sha256(headText), baseYamlSha256: sha256(baseText),
+    }).catch((err) => {
+      log({ event: 'pr_check_accepted_lookup_failed', message: err.message, ...ctx });
+      return null;
+    });
+    if (decision) {
+      acceptedBy = decision.actor_name || 'a reviewer';
+      chosen = { intent: head.intent, from: 'head', changes: [], areaIds: [], productWide: false, error: null };
+    }
+  }
   if (!chosen.intent) {
     throw new VerdictError('intent_invalid', `${FILENAME} has errors, so there is nothing to check this PR against. First error: ${chosen.error}`);
   }
   const { intent } = chosen;
   const notes = [];
+  if (acceptedBy) notes.push(`This PR's changes to ${FILENAME} were accepted in Takeoff by ${String(acceptedBy).replace(/\s+/g, ' ').slice(0, 80)}.`);
   if (chosen.changes.length) {
     notes.push(`This PR also edits ${FILENAME}, so a person should confirm the new intent. ${list3(chosen.changes)}`);
   }
@@ -189,6 +221,8 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
       },
       render: { areaNames, notes },
       model: null,
+      intent,
+      touchedIds: [],
     };
   }
 
@@ -225,7 +259,7 @@ async function computeVerdict(gh, { owner, repo, prNumber, pr, baseText, headTex
     result = atLeastNeedsDecision(result);
     notes.push(`${prompt.omittedTouched.length} changed file(s) in areas ${FILENAME} covers were too large to check, so a person should look at them.`);
   }
-  return { result, render: { areaNames, notes }, model: reply.model || null };
+  return { result, render: { areaNames, notes }, model: reply.model || null, intent, touchedIds: [...touchedIds] };
 }
 
 /**
@@ -323,7 +357,7 @@ async function runPrCheck(input, deps = defaultDeps()) {
   }
 
   const { result, render, model } = computed;
-  const reviewUrl = deps.appUrl ? `${deps.appUrl}/projects/${encodeURIComponent(project.id)}` : null;
+  const reviewUrl = reviewUrlFor(deps, project.id, prNumber);
   let commentId = null;
   let writeError = null;
   try {
@@ -351,6 +385,11 @@ async function runPrCheck(input, deps = defaultDeps()) {
   const status = writeError ? 'failed' : 'done';
   await finish({ status, verdict: result.verdict, result: { ...result, render }, commentId, checkRunId, model, error: writeError });
   log({ event: 'pr_check_done', verdict: result.verdict, conflicts: result.conflicts.length, posted: !writeError, ...ctx });
+  if (!writeError && deps.onDrift && (result.verdict === 'drifts' || result.verdict === 'needs_decision')) {
+    await Promise.resolve(deps.onDrift({
+      project, prNumber, headSha, result, intent: computed.intent, touchedAreaIds: computed.touchedIds, prTitle: pr.title,
+    })).catch((err) => log({ event: 'pr_check_notify_failed', message: err.message, ...ctx }));
+  }
   return writeError ? { status: 'failed', reason: 'comment_write_failed', verdict: result.verdict } : { status: 'done', verdict: result.verdict };
 }
 
@@ -366,7 +405,7 @@ async function handleDuplicate(gh, { owner, repo, prNumber, headSha, key }, deps
     const stored = row?.result_json;
     if (row?.status !== 'done' || !stored?.verdict) return { status: 'skipped', reason: 'duplicate' };
     const { render = {}, ...result } = stored;
-    const reviewUrl = deps.appUrl && row.project_id ? `${deps.appUrl}/projects/${encodeURIComponent(row.project_id)}` : null;
+    const reviewUrl = reviewUrlFor(deps, row.project_id, prNumber);
     const body = renderComment(result, { areaNames: render.areaNames || {}, notes: render.notes || [], reviewUrl, headSha });
     // Whether the comment already shows this sha is decided under the lock.
     const commentId = await writeComment(gh, { owner, repo, prNumber, headSha, body, skipIfShown: true }, deps);

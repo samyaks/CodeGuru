@@ -62,9 +62,9 @@ const withLink = (n) => (n.link ? `${n.body}\n\n${n.link}` : n.body);
 
 function digestOf(items) {
   return {
-    subject: `${items.length} updates on agreements in Takeoff`,
+    subject: `${items.length} updates in Takeoff`,
     text: [
-      `There were ${items.length} updates on agreements in your Takeoff projects:`,
+      `There were ${items.length} updates in your Takeoff projects:`,
       '',
       ...items.map((n) => `- ${n.subject}${n.link ? `\n  ${n.link}` : ''}`),
     ].join('\n'),

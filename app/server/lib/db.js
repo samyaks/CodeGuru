@@ -2794,6 +2794,36 @@ const prChecks = {
       client.release();
     }
   },
+  /** The PR's newest check: the one its comment shows, else the latest run. */
+  async latestForPr({ repo, prNumber }) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2
+        ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
+      [repo, prNumber]
+    );
+    return rows[0] || null;
+  },
+  /** Each PR's newest check for a project's repo, newest first. */
+  async latestPerPr(projectId, repo, { limit = 50 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (pr_number) * FROM pr_checks
+          WHERE project_id = $1 AND repo_full_name = $2
+          ORDER BY pr_number, comment_at DESC NULLS LAST, updated_at DESC
+       ) latest
+       ORDER BY COALESCE(comment_at, updated_at) DESC LIMIT $3`,
+      [projectId, repo, limit]
+    );
+    return rows;
+  },
+  /** A PR was closed or reopened on GitHub. */
+  async setPrClosed({ repo, prNumber, closed }) {
+    await getDb().query(
+      `UPDATE pr_checks SET pr_closed_at = CASE WHEN $3 THEN COALESCE(pr_closed_at, now()) END
+        WHERE repo_full_name = $1 AND pr_number = $2`,
+      [repo, prNumber, !!closed]
+    );
+  },
   /**
    * Take over runs left 'running' past the stale window (e.g. a restart
    * mid-check): marks them failed in one statement and returns them, so a
@@ -2812,6 +2842,101 @@ const prChecks = {
       [String(PR_CHECK_STALE_MINUTES)]
     );
     return rows;
+  },
+};
+
+// ── Drift decisions (Milestone 5) ──────────────────────────────────────
+
+const DRIFT_DECISION_STALE = "interval '10 minutes'";
+
+const driftDecisions = {
+  /**
+   * Start a decision. A decision left 'working' by a crash stops blocking the
+   * PR after 10 minutes. Returns null when another decision on the PR is
+   * running now.
+   */
+  async create({ id, projectId, repo, prNumber, headSha, branch = null, type, note = null, edits = null, actorUserId, actorName = null }) {
+    await getDb().query(
+      `UPDATE drift_decisions SET state = 'failed', error = 'interrupted', updated_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND state = 'working'
+          AND updated_at < now() - ${DRIFT_DECISION_STALE}`,
+      [repo, prNumber]
+    );
+    try {
+      const { rows } = await getDb().query(
+        `INSERT INTO drift_decisions (id, project_id, repo_full_name, pr_number, head_sha, branch, type, note, edits, actor_user_id, actor_name)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [id, projectId, repo, prNumber, headSha, branch, type, note, edits ? JSON.stringify(edits) : null, actorUserId, actorName]
+      );
+      return rows[0];
+    } catch (err) {
+      if (err.code === '23505') return null;
+      throw err;
+    }
+  },
+  async get(projectId, id) {
+    const { rows } = await getDb().query('SELECT * FROM drift_decisions WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] || null;
+  },
+  async listForPr(projectId, repo, prNumber) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM drift_decisions WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3
+        ORDER BY created_at DESC LIMIT 50`,
+      [projectId, repo, prNumber]
+    );
+    return rows;
+  },
+  async listRecent(projectId, { limit = 30 } = {}) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM drift_decisions WHERE project_id = $1 ORDER BY created_at DESC LIMIT $2',
+      [projectId, limit]
+    );
+    return rows;
+  },
+  /** Take a waiting or failed decision to run it (a confirmed recommendation, or a retry). */
+  async claim(projectId, id, { from = ['waiting_for_write', 'failed'], confirmedBy = null } = {}) {
+    await getDb().query(
+      `UPDATE drift_decisions SET state = 'failed', error = 'interrupted', updated_at = now()
+        WHERE project_id = $1 AND id = $2 AND state = 'working' AND updated_at < now() - ${DRIFT_DECISION_STALE}`,
+      [projectId, id]
+    );
+    try {
+      const { rows } = await getDb().query(
+        `UPDATE drift_decisions SET state = 'working', error = NULL, updated_at = now(),
+                confirmed_by = COALESCE($4, confirmed_by)
+          WHERE project_id = $1 AND id = $2 AND state = ANY($3) RETURNING *`,
+        [projectId, id, from, confirmedBy]
+      );
+      return rows[0] || null;
+    } catch (err) {
+      if (err.code === '23505') return null; // another decision on this PR is running
+      throw err;
+    }
+  },
+  /** Record how a running decision ended. Only lands while it is still running. */
+  async finish(id, { state, commitSha = null, commitUrl = null, yamlSha256 = null, baseYamlSha256 = null, commentId = null, commentUrl = null, agreementId = null, recommendationId = null, error = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE drift_decisions
+          SET state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
+              yaml_sha256 = COALESCE($5, yaml_sha256), base_yaml_sha256 = COALESCE($6, base_yaml_sha256),
+              comment_id = COALESCE($7, comment_id), comment_url = COALESCE($8, comment_url),
+              agreement_id = COALESCE($9, agreement_id), recommendation_id = COALESCE($10, recommendation_id),
+              error = $11, updated_at = now(), done_at = CASE WHEN $2 = 'done' THEN now() ELSE done_at END
+        WHERE id = $1 AND state = 'working' RETURNING *`,
+      [id, state, commitSha, commitUrl, yamlSha256, baseYamlSha256, commentId, commentUrl, agreementId, recommendationId, error]
+    );
+    return rows[0] || null;
+  },
+  /** The accept that committed exactly this takeoff.yaml on this PR, over exactly this base file. */
+  async acceptedFor({ repo, prNumber, yamlSha256, baseYamlSha256 }) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM drift_decisions
+        WHERE repo_full_name = $1 AND pr_number = $2 AND type = 'accepted' AND state = 'done'
+          AND yaml_sha256 = $3 AND base_yaml_sha256 = $4
+        ORDER BY done_at DESC LIMIT 1`,
+      [repo, prNumber, yamlSha256, baseYamlSha256]
+    );
+    return rows[0] || null;
   },
 };
 
@@ -3355,7 +3480,7 @@ module.exports = {
   productMap,
   shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
   projectMembers, projectInvites, recommendations, userGithubLinks, MEMBER_LABELS,
-  agreements, agreementVotes, notificationOutbox,
+  agreements, agreementVotes, notificationOutbox, driftDecisions,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

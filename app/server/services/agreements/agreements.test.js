@@ -326,7 +326,7 @@ test('emails: at most 3 singles an hour, then one digest, then hold', async () =
   for (let i = 3; i <= 5; i += 1) await queue(i);
   // 2 sent + 3 waiting > 3: the three go together as the hour's digest.
   assert.strictEqual(await notify.flush(flushDeps), 1);
-  assert.strictEqual(sent[2].subject, '3 updates on agreements in Takeoff');
+  assert.strictEqual(sent[2].subject, '3 updates in Takeoff');
   await queue(6);
   assert.strictEqual(await notify.flush(flushDeps), 0); // this hour is used up
   state.now = new Date(T0.getTime() + HOUR + 60000);

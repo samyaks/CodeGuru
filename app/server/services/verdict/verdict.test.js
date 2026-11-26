@@ -195,7 +195,7 @@ test('a drift comment quotes the rule and links to Takeoff; a ✅ has no review 
   assert.ok(body.startsWith(MARKER));
   assert.match(body, /⚠️ Takeoff: Drifts from intent/);
   assert.match(body, /> Never store card numbers\./);
-  assert.match(body, /\[Review in Takeoff\]\(https:\/\/takeoff\.example\/projects\/proj-1\)/);
+  assert.match(body, /\[Review in Takeoff\]\(https:\/\/takeoff\.example\/read\/proj-1\/drift\/7\)/);
   assert.strictEqual(body.split(MARKER).length, 2, 'model text cannot add a second marker');
   assert.ok(!/@everyone/.test(body), 'model text cannot ping anyone');
   assert.ok(!body.includes('not/in/this/pr.js'), 'only files the PR changed are listed');
@@ -712,4 +712,61 @@ test('fencing leaves comparisons in code as written', () => {
   const { fence } = require('./prompt');
   assert.strictEqual(fence('if (a < 5 && b <= c && d << 1)'), 'if (a < 5 && b <= c && d << 1)');
   assert.strictEqual(fence('x < /diff> y <／diff>'), 'x ‹ /diff> y ‹／diff>');
+});
+
+// ── Milestone 5: accepted intent and the drift email ──────────────
+
+const crypto = require('crypto');
+const hash = (t) => crypto.createHash('sha256').update(t, 'utf8').digest('hex');
+
+test('a takeoff.yaml change accepted in Takeoff is trusted while the PR keeps exactly that file over that base', async () => {
+  const c = readCase('intent_edit');
+  const lookups = [];
+  const accepted = (q) => q.yamlSha256 === hash(c.headYaml) && q.baseYamlSha256 === hash(BASE_YAML);
+  const w = world(c);
+  w.deps.acceptedDecision = async (q) => { lookups.push(q); return accepted(q) ? { actor_name: 'Sam  Lee' } : null; };
+  w.model.text = '{"verdict":"matches","summary":"Trips can have three travellers, as the intent now says.","conflicts":[]}';
+  const out = await runPrCheck(job(), w.deps);
+  assert.deepStrictEqual(lookups, [{ repo: 'acme/web', prNumber: 7, yamlSha256: hash(c.headYaml), baseYamlSha256: hash(BASE_YAML) }]);
+  assert.strictEqual(out.verdict, 'matches', 'judged against the accepted intent, with no floor for editing it');
+  assert.ok(!/<proposed_intent_change>/.test(w.prompts[0].user));
+  assert.match(w.gh.state.comments[0].body, /This PR's changes to takeoff\.yaml were accepted in Takeoff by Sam Lee\./);
+
+  // The same file over a different base is not what was accepted.
+  const moved = world(c, { baseYaml: `${BASE_YAML}\n# moved\n` });
+  moved.deps.acceptedDecision = async (q) => (accepted(q) ? { actor_name: 'Sam' } : null);
+  moved.model.text = w.model.text;
+  assert.strictEqual((await runPrCheck(job(), moved.deps)).verdict, 'needs_decision');
+
+  // A failed lookup falls back to the usual rules.
+  const broken = world(c);
+  broken.deps.acceptedDecision = async () => { throw new Error('db down'); };
+  broken.model.text = w.model.text;
+  assert.strictEqual((await runPrCheck(job(), broken.deps)).verdict, 'needs_decision');
+});
+
+test('a posted ⚠️ or ❓ verdict starts the drift email; a ✅ or a failed post does not', async () => {
+  const drift = world(readCase('drifts'));
+  const calls = [];
+  drift.deps.onDrift = async (input) => { calls.push(input); throw new Error('email is down'); };
+  assert.deepStrictEqual(await runPrCheck(job(), drift.deps), { status: 'done', verdict: 'drifts' }, 'an email error never fails the check');
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].prNumber, 7);
+  assert.strictEqual(calls[0].headSha, SHA1);
+  assert.strictEqual(calls[0].project.id, 'proj-1');
+  assert.strictEqual(calls[0].result.verdict, 'drifts');
+  assert.ok(calls[0].intent.areas.length > 0);
+  assert.ok(Array.isArray(calls[0].touchedAreaIds) && calls[0].touchedAreaIds.length > 0);
+  assert.match(drift.gh.state.comments[0].body, /https:\/\/takeoff\.example\/read\/proj-1\/drift\/7/);
+
+  const ok = world(readCase('matches'));
+  ok.deps.onDrift = async (input) => calls.push(input);
+  await runPrCheck(job(), ok.deps);
+  assert.strictEqual(calls.length, 1);
+
+  const unposted = world(readCase('drifts'));
+  unposted.gh.client.createIssueComment = async () => { throw Object.assign(new Error('nope'), { status: 500 }); };
+  unposted.deps.onDrift = async (input) => calls.push(input);
+  await runPrCheck(job(), unposted.deps);
+  assert.strictEqual(calls.length, 1);
 });
