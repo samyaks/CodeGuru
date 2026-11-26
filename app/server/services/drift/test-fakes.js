@@ -114,13 +114,18 @@ function fakeGithub({ headFiles = {}, fork = false } = {}) {
       if (gh.loseUpdateAnswer) { const e = new Error('socket hang up'); e.status = 502; throw e; }
       return {};
     },
+    async fetchBranch(_o, _r, branch) {
+      if (!gh.branches[branch]) { const e = new Error('Not Found'); e.status = 404; throw e; }
+      return { name: branch, commit: { sha: gh.branches[branch] } };
+    },
     async findIssueCommentWithMarker(_o, _r, number, marker, { accept = () => true } = {}) {
       gh.calls.push(['findIssueCommentWithMarker', number]);
       return gh.comments.filter((c) => Number(c.number) === Number(number) && c.body.startsWith(marker) && accept(c)).at(-1) || null;
     },
     async createIssueComment(_o, _r, number, body) {
       if (gh.failComment) { const e = new Error(gh.failComment); e.status = gh.failCommentStatus || 403; throw e; }
-      const c = { id: 900 + gh.comments.length, number, body, user: { type: 'Bot', login: 'takeoff[bot]' }, html_url: `https://github.com/acme/web/pull/${number}#issuecomment-${900 + gh.comments.length}` };
+      const at = new Date('2026-11-26T12:00:00Z').toISOString();
+      const c = { id: 900 + gh.comments.length, number, body, user: { type: 'Bot', login: 'takeoff[bot]' }, created_at: at, updated_at: at, html_url: `https://github.com/acme/web/pull/${number}#issuecomment-${900 + gh.comments.length}` };
       gh.comments.push(c);
       return c;
     },
@@ -153,23 +158,32 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
   });
   // Like the database: repos are keyed by their lower-case name.
   const key = (repo) => String(repo).toLowerCase();
-  const latest = (repo, pr, inst = null) => state.checks.filter((c) => key(c.repo_full_name) === key(repo) && Number(c.pr_number) === Number(pr)
-    && (inst === null || Number(c.installation_id) === Number(inst))).at(-1) || null;
+  const inScope = (c, inst, pid) => (inst === null && pid === null) || Number(c.installation_id) === Number(inst) || (pid !== null && c.project_id === pid);
+  const latest = (repo, pr, inst = null, pid = null) => state.checks.filter((c) => key(c.repo_full_name) === key(repo) && Number(c.pr_number) === Number(pr)
+    && inScope(c, inst, pid)).at(-1) || null;
   const prChecks = {
-    async latestForPr({ repo, prNumber, installationId = null }) {
-      return latest(repo, prNumber, installationId ?? null);
+    async latestForPr({ repo, prNumber, installationId = null, projectId = null }) {
+      return latest(repo, prNumber, installationId ?? null, projectId ?? null);
     },
-    async latestPerPr({ repo, installationId }) {
-      const prs = [...new Set(state.checks.filter((c) => Number(c.installation_id) === Number(installationId) && key(c.repo_full_name) === key(repo)).map((c) => Number(c.pr_number)))];
-      return prs.map((p) => latest(repo, p, installationId));
+    async latestPerPr({ repo, installationId = null, projectId = null }) {
+      const inst = installationId ?? null;
+      const pid = projectId ?? null;
+      const prs = [...new Set(state.checks.filter((c) => key(c.repo_full_name) === key(repo) && (inScope(c, inst, pid) && !(inst === null && pid === null))).map((c) => Number(c.pr_number)))];
+      return prs.map((p) => latest(repo, p, inst, pid));
     },
+  };
+  // The owner's grant for the repo, through installation 77.
+  state.grants = new Map([['owner', { installation_id: 77 }]]);
+  const githubRepoAccess = {
+    async findForUserRepo(uid, owner, repo) { return key(`${owner}/${repo}`) === 'acme/web' ? state.grants.get(uid) || null : null; },
   };
   const isWorking = (repo, pr) => state.decisions.some((d) => key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(pr) && d.state === 'working');
   const driftDecisions = {
-    async create({ id, projectId, repo, prNumber, headSha, branch, type, note = null, edits = null, actorUserId, actorName = null }) {
-      if (isWorking(repo, prNumber)) return null;
+    async create({ id, projectId, repo, prNumber, headSha, branch, type, note = null, edits = null, actorUserId, actorName = null, state: initial = 'working' }) {
+      const start = initial === 'waiting_for_write' ? 'waiting_for_write' : 'working';
+      if (start === 'working' && isWorking(repo, prNumber)) return null;
       const row = {
-        id, project_id: projectId, repo_full_name: key(repo), pr_number: prNumber, head_sha: headSha, branch, type, state: 'working',
+        id, project_id: projectId, repo_full_name: key(repo), pr_number: prNumber, head_sha: headSha, branch, type, state: start,
         note, edits: edits ? JSON.parse(JSON.stringify(edits)) : null, actor_user_id: actorUserId, actor_name: actorName, created_at: iso(), updated_at: iso(),
       };
       state.decisions.unshift(row);
@@ -177,6 +191,7 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
     },
     async get(pid, id) { const d = state.decisions.find((x) => x.project_id === pid && x.id === id); return d ? { ...d } : null; },
     async listForPr(pid, repo, pr) { return state.decisions.filter((d) => d.project_id === pid && key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(pr)).map((d) => ({ ...d })); },
+    async listForRepoPr(repo, pr) { return state.decisions.filter((d) => key(d.repo_full_name) === key(repo) && Number(d.pr_number) === Number(pr)).map((d) => ({ ...d })); },
     async listRecent(pid) { return state.decisions.filter((d) => d.project_id === pid).map((d) => ({ ...d })); },
     async claim(pid, id, { from, confirmedBy = null, confirmedByName = null }) {
       const d = state.decisions.find((x) => x.project_id === pid && x.id === id && from.includes(x.state));
@@ -187,8 +202,8 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
       });
       return { ...d };
     },
-    async finish(id, f) {
-      const d = state.decisions.find((x) => x.id === id && x.state === 'working');
+    async finish(id, f, { from = ['working'] } = {}) {
+      const d = state.decisions.find((x) => x.id === id && from.includes(x.state));
       if (!d) return null;
       const keep = (k, v) => (v === null || v === undefined ? d[k] : v);
       Object.assign(d, {
@@ -238,6 +253,7 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
   const deps = {
     prChecks,
     driftDecisions,
+    githubRepoAccess,
     recommendations,
     notificationOutbox,
     userGithubLinks,
@@ -252,6 +268,7 @@ function setup({ ghOpts, emailEnabled = true, members = ['owner', 'olive'], resu
     committing: committingDeps,
     runPrCheck: async (job) => { state.rechecks.push(job); },
     appUrl: 'https://takeoff.test',
+    appSlug: 'takeoff',
     now: () => state.now,
     newId: () => `dec_${++n}`,
     random: () => `r${++n}`,

@@ -2801,28 +2801,30 @@ const prChecks = {
   },
   /**
    * The PR's newest check: the one its comment shows, else the latest run.
-   * With `installationId`, only a check made through that installation: a
-   * project reads the checks of its repo through the installation its
-   * owner granted it, whichever project the check was filed under.
+   * With `installationId` or `projectId`, only a check made through that
+   * installation or filed under that project: a project reads its repo's
+   * checks through the installation its owner granted it, and keeps its own
+   * after the App is reinstalled.
    */
-  async latestForPr({ repo, prNumber, installationId = null }) {
+  async latestForPr({ repo, prNumber, installationId = null, projectId = null }) {
     const { rows } = await getDb().query(
-      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND ($3::bigint IS NULL OR installation_id = $3)
+      `SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2
+          AND (($3::bigint IS NULL AND $4::text IS NULL) OR installation_id = $3 OR project_id = $4)
         ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
-      [repoKey(repo), prNumber, installationId ?? null]
+      [repoKey(repo), prNumber, installationId ?? null, projectId ?? null]
     );
     return rows[0] || null;
   },
-  /** Each PR's newest check for a repo, made through `installationId`, newest first. */
-  async latestPerPr({ repo, installationId, limit = 50 }) {
+  /** Each PR's newest check for a repo, made through `installationId` or filed under `projectId`, newest first. */
+  async latestPerPr({ repo, installationId = null, projectId = null, limit = 50 }) {
     const { rows } = await getDb().query(
       `SELECT * FROM (
          SELECT DISTINCT ON (pr_number) * FROM pr_checks
-          WHERE repo_full_name = $1 AND installation_id = $2
+          WHERE repo_full_name = $1 AND (installation_id = $2 OR project_id = $4)
           ORDER BY pr_number, comment_at DESC NULLS LAST, updated_at DESC
        ) latest
        ORDER BY COALESCE(comment_at, updated_at) DESC LIMIT $3`,
-      [repoKey(repo), installationId, limit]
+      [repoKey(repo), installationId ?? null, limit, projectId ?? null]
     );
     return rows;
   },
@@ -2865,7 +2867,7 @@ const driftDecisions = {
    * PR after 10 minutes. Returns null when another decision on the PR is
    * running now.
    */
-  async create({ id, projectId, repo, prNumber, headSha, branch = null, type, note = null, edits = null, actorUserId, actorName = null }) {
+  async create({ id, projectId, repo, prNumber, headSha, branch = null, type, note = null, edits = null, actorUserId, actorName = null, state = 'working' }) {
     await getDb().query(
       `UPDATE drift_decisions SET state = 'failed', error = 'interrupted', updated_at = now()
         WHERE repo_full_name = $1 AND pr_number = $2 AND state = 'working'
@@ -2874,9 +2876,10 @@ const driftDecisions = {
     );
     try {
       const { rows } = await getDb().query(
-        `INSERT INTO drift_decisions (id, project_id, repo_full_name, pr_number, head_sha, branch, type, note, edits, actor_user_id, actor_name)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-        [id, projectId, repoKey(repo), prNumber, headSha, branch, type, note, edits ? JSON.stringify(edits) : null, actorUserId, actorName]
+        `INSERT INTO drift_decisions (id, project_id, repo_full_name, pr_number, head_sha, branch, type, note, edits, actor_user_id, actor_name, state)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [id, projectId, repoKey(repo), prNumber, headSha, branch, type, note, edits ? JSON.stringify(edits) : null, actorUserId, actorName,
+          state === 'waiting_for_write' ? 'waiting_for_write' : 'working']
       );
       return rows[0];
     } catch (err) {
@@ -2893,6 +2896,15 @@ const driftDecisions = {
       `SELECT * FROM drift_decisions WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3
         ORDER BY created_at DESC LIMIT 50`,
       [projectId, repoKey(repo), prNumber]
+    );
+    return rows;
+  },
+  /** Every project's decisions on a PR, newest first: they all act on the same branch. */
+  async listForRepoPr(repo, prNumber) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM drift_decisions WHERE repo_full_name = $1 AND pr_number = $2
+        ORDER BY created_at DESC LIMIT 100`,
+      [repoKey(repo), prNumber]
     );
     return rows;
   },
@@ -2924,8 +2936,8 @@ const driftDecisions = {
       throw err;
     }
   },
-  /** Record how a running decision ended. Only lands while it is still running. */
-  async finish(id, { state, commitSha = null, commitUrl = null, yamlSha256 = null, baseYamlSha256 = null, commentId = null, commentUrl = null, agreementId = null, recommendationId = null, error = null }) {
+  /** Record how a running decision ended. Only lands while it is still in one of `from` (running, by default). */
+  async finish(id, { state, commitSha = null, commitUrl = null, yamlSha256 = null, baseYamlSha256 = null, commentId = null, commentUrl = null, agreementId = null, recommendationId = null, error = null }, { from = ['working'] } = {}) {
     const { rows } = await getDb().query(
       `UPDATE drift_decisions
           SET state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
@@ -2933,8 +2945,8 @@ const driftDecisions = {
               comment_id = COALESCE($7, comment_id), comment_url = COALESCE($8, comment_url),
               agreement_id = COALESCE($9, agreement_id), recommendation_id = COALESCE($10, recommendation_id),
               error = $11, updated_at = now(), done_at = CASE WHEN $2 = 'done' THEN now() ELSE done_at END
-        WHERE id = $1 AND state = 'working' RETURNING *`,
-      [id, state, commitSha, commitUrl, yamlSha256, baseYamlSha256, commentId, commentUrl, agreementId, recommendationId, error]
+        WHERE id = $1 AND state = ANY($12) RETURNING *`,
+      [id, state, commitSha, commitUrl, yamlSha256, baseYamlSha256, commentId, commentUrl, agreementId, recommendationId, error, from]
     );
     return rows[0] || null;
   },

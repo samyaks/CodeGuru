@@ -54,6 +54,7 @@ function defaultDeps() {
   return {
     prChecks: db.prChecks,
     driftDecisions: db.driftDecisions,
+    githubRepoAccess: db.githubRepoAccess,
     projectMembers: db.projectMembers,
     userGithubLinks: db.userGithubLinks,
     recommendations: db.recommendations,
@@ -69,6 +70,7 @@ function defaultDeps() {
     },
     runPrCheck: (job) => require('../verdict/runner').runPrCheck(job),
     prCache: sharedPrCache,
+    appSlug: require('../../lib/github-app').readConfigFromEnv().slug || null,
     appUrl: require('../team/members').appUrlFromEnv(),
     now: () => new Date(),
     newId: () => `dec_${crypto.randomBytes(9).toString('base64url')}`,
@@ -90,6 +92,24 @@ function requireRepo(project) {
     throw AppError.badRequest('Connect this project to GitHub through the Takeoff App to review its pull requests.');
   }
 }
+
+/**
+ * Whether the project's GitHub link still stands: its owner's grant for the
+ * repo must be through the installation the project records. A link left
+ * over from an old grant reads nothing.
+ */
+async function isLinked(project, deps) {
+  if (!project.owner || !project.repo || !project.github_installation_id || !project.user_id) return false;
+  const grant = await deps.githubRepoAccess.findForUserRepo(project.user_id, project.owner, project.repo);
+  return !!grant && Number(grant.installation_id) === Number(project.github_installation_id);
+}
+async function requireLinked(project, deps) {
+  requireRepo(project);
+  if (!(await isLinked(project, deps))) {
+    throw AppError.badRequest('Connect this project to GitHub through the Takeoff App to review its pull requests.');
+  }
+}
+const checkScope = (project) => ({ installationId: Number(project.github_installation_id), projectId: project.id });
 
 /** The check result, as stored by the PR verdict. */
 function storedResult(row) {
@@ -194,10 +214,10 @@ async function cachedLivePr(gh, project, prNumber, cache) {
  */
 async function listDrift({ project, user }, deps = defaultDeps()) {
   await assertMember(project, user, deps);
-  if (!project.owner || !project.repo || !project.github_installation_id) return { reviews: [], decisions: [] };
+  if (!(await isLinked(project, deps))) return { reviews: [], decisions: [] };
   const repo = repoOf(project);
   const [rows, recent, members, pendingRecIds] = await Promise.all([
-    deps.prChecks.latestPerPr({ repo, installationId: Number(project.github_installation_id), limit: 50 }),
+    deps.prChecks.latestPerPr({ repo, ...checkScope(project), limit: 50 }),
     deps.driftDecisions.listRecent(project.id, { limit: 20 }),
     currentMembers(project, deps),
     pendingRecommendationIds(project, deps),
@@ -246,10 +266,10 @@ async function accessFor(project, user, deps) {
  */
 async function getReview({ project, user, prNumber: raw }, deps = defaultDeps()) {
   await assertMember(project, user, deps);
-  requireRepo(project);
+  await requireLinked(project, deps);
   const prNumber = parsePrNumber(raw);
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber, installationId: Number(project.github_installation_id) });
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, ...checkScope(project) });
   if (!row) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber).catch((err) => {
@@ -281,13 +301,15 @@ async function getReview({ project, user, prNumber: raw }, deps = defaultDeps())
     .map((a) => ({ id: a.id, name: a.name, creators: a.creators, rules: a.rules.map((r) => r.text), never: a.never.map((r) => r.text) })) || [];
   const allAreas = (headIntent || judged)?.areas.map((a) => ({ id: a.id, name: a.name })) || [];
 
-  const [decisions, members, pendingRecIds, access] = await Promise.all([
+  const [decisions, everyone, members, pendingRecIds, access] = await Promise.all([
     deps.driftDecisions.listForPr(project.id, repo, prNumber),
+    deps.driftDecisions.listForRepoPr(repo, prNumber),
     currentMembers(project, deps),
     pendingRecommendationIds(project, deps),
     accessFor(project, user, deps),
   ]);
-  const working = decisions.some((d) => d.state === 'working');
+  // Every project on the repo commits to the same branch.
+  const working = everyone.some((d) => d.state === 'working');
   const newerPush = !!(pr?.headSha && pr.headSha !== row.head_sha);
   const reviewable = !!pr && pr.state === 'open' && row.status === 'done' && REVIEW_VERDICTS.has(res.verdict);
   return {
@@ -353,7 +375,8 @@ function cleanEdits(raw) {
 async function loadDecidable(project, prNumber, headSha, deps) {
   if (typeof headSha !== 'string' || !SHA_RE.test(headSha)) throw AppError.badRequest('Missing which commit you reviewed.');
   const repo = repoOf(project);
-  const row = await deps.prChecks.latestForPr({ repo, prNumber, installationId: Number(project.github_installation_id) });
+  await requireLinked(project, deps);
+  const row = await deps.prChecks.latestForPr({ repo, prNumber, ...checkScope(project) });
   if (!row) throw AppError.notFound('Takeoff has not checked this pull request.');
   const gh = deps.readClientFor(project);
   const pr = await livePr(gh, project, prNumber);
@@ -399,23 +422,26 @@ async function decide({ project, user, prNumber: raw, body = {}, type }, deps) {
     if (ownChanges) edits.summary.unshift(`Accept this PR's own changes to ${FILENAME}`);
   }
 
+  // Ask about write access first: a recommendation is never 'working', so it
+  // can't hold up, or cancel trust in, someone else's decision meanwhile.
+  const access = await accessFor(project, user, deps);
   const decision = await deps.driftDecisions.create({
     id: deps.newId(), projectId: project.id, repo: repoOf(project), prNumber, headSha: pr.headSha, branch: pr.branch,
     type, note, edits, actorUserId: user.id, actorName: nameOf(user),
+    state: access.canWrite ? 'working' : 'waiting_for_write',
   });
   if (!decision) throw AppError.conflict('Someone is deciding on this pull request right now. Reload in a moment.');
 
-  const access = await accessFor(project, user, deps);
   if (!access.canWrite) {
     const summary = type === 'sent_back' ? sendBackSummary(prNumber, note) : acceptSummary(prNumber, edits.summary);
     try {
       const rec = await deps.committing.recommendations.create({
         id: deps.committing.newId(), projectId: project.id, actionType: ACTION, payload: { decisionId: decision.id, prNumber }, summary, createdBy: user.id,
       });
-      const waiting = await deps.driftDecisions.finish(decision.id, { state: 'waiting_for_write', recommendationId: rec.id });
+      const waiting = await deps.driftDecisions.finish(decision.id, { state: 'waiting_for_write', recommendationId: rec.id }, { from: ['waiting_for_write'] });
       return { decision: publicDecision(waiting || decision), status: 'recommended', reason: access.reason };
     } catch (err) {
-      await deps.driftDecisions.finish(decision.id, { state: 'failed', error: 'Couldn\'t save the recommendation. Try again.' }).catch(() => {});
+      await deps.driftDecisions.finish(decision.id, { state: 'failed', error: 'Couldn\'t save the recommendation. Try again.' }, { from: ['waiting_for_write'] }).catch(() => {});
       throw err;
     }
   }
@@ -582,8 +608,8 @@ async function commitAccept(gh, project, decision, actor, deps) {
   } catch (err) {
     // The branch may have moved even though the answer got lost: if the PR
     // now ends with this commit, the accept landed.
-    const now = await livePr(gh, project, Number(decision.pr_number)).catch(() => null);
-    if (now?.headSha !== commit.sha) {
+    const now = await gh.fetchBranch(owner, repo, pr.branch).catch(() => null);
+    if (now?.commit?.sha !== commit.sha) {
       // Someone pushed after the reviewer looked: never accept on top of that.
       if (err.status === 422 && /fast.?forward/i.test(err.message)) throw staleError();
       throw err;
@@ -612,6 +638,11 @@ function sendBackComment(decision, actorName) {
   ].join('\n');
 }
 
+// Only the App's own comment, as it posted it, says the note went out.
+const ownComment = (slug) => (c) => c?.user?.type === 'Bot'
+  && (!slug || String(c.user.login || '').toLowerCase() === `${slug}[bot]`.toLowerCase())
+  && !(c.updated_at && c.created_at && new Date(c.updated_at) - new Date(c.created_at) > 5000);
+
 /**
  * Run a decision that is 'working'. Records the outcome on the row and
  * returns it; never throws for a GitHub or file problem.
@@ -628,7 +659,7 @@ async function execute(project, decision, actor, deps) {
       // must not post the note twice.
       const marker = `<!-- takeoff:send-back id=${decision.id} `;
       const comment = (await gh.findIssueCommentWithMarker(project.owner, project.repo, Number(decision.pr_number), marker, {
-        accept: (c) => c.user?.type === 'Bot',
+        accept: ownComment(deps.appSlug),
       }).catch(() => null))
         || await gh.createIssueComment(project.owner, project.repo, Number(decision.pr_number), sendBackComment(decision, decision.actor_name));
       return (await deps.driftDecisions.finish(decision.id, {
@@ -663,15 +694,19 @@ const sendBack = (input, deps = defaultDeps()) => decide({ ...input, type: 'sent
 /** Whether someone decided on the decision's PR after it. */
 async function decidedLater(project, row, deps) {
   const [later, pendingRecIds] = await Promise.all([
-    deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)),
+    deps.driftDecisions.listForRepoPr(row.repo_full_name, Number(row.pr_number)),
     pendingRecommendationIds(project, deps),
   ]);
   // Only a decision that stands counts: one that failed, was set aside, or
-  // whose recommendation was turned down doesn't.
+  // whose recommendation was turned down doesn't. Every project on the repo
+  // acts on the same branch; another project's open recommendation is only
+  // a suggestion there.
   return later.some((d) => {
     if (d.id === row.id || new Date(d.created_at) <= new Date(row.created_at)) return false;
     if (d.state === 'done' || d.state === 'working') return true;
-    if (d.state === 'waiting_for_write') return !pendingRecIds || !d.recommendation_id || pendingRecIds.has(d.recommendation_id);
+    if (d.state === 'waiting_for_write' && d.project_id === project.id) {
+      return !pendingRecIds || !d.recommendation_id || pendingRecIds.has(d.recommendation_id);
+    }
     return false;
   });
 }
@@ -680,6 +715,7 @@ const LATER_MESSAGE = 'Someone decided on this pull request after this, so it wa
 /** Run a failed decision again (by someone with write access). */
 async function retryDecision({ project, user, decisionId }, deps = defaultDeps()) {
   await assertMember(project, user, deps);
+  await requireLinked(project, deps);
   const access = await accessFor(project, user, deps);
   if (!access.canWrite) throw AppError.forbidden('Trying again needs write access to the repo on GitHub.');
   const row = await deps.driftDecisions.get(project.id, String(decisionId || ''));
@@ -687,7 +723,8 @@ async function retryDecision({ project, user, decisionId }, deps = defaultDeps()
   if (row.recommendation_id) {
     // A recommendation that was set aside stays set aside.
     const pendingRecIds = await pendingRecommendationIds(project, deps);
-    if (!pendingRecIds || !pendingRecIds.has(row.recommendation_id)) {
+    if (!pendingRecIds) throw new AppError('Takeoff couldn\'t check this recommendation just now. Try again in a minute.', 503, 'UNAVAILABLE');
+    if (!pendingRecIds.has(row.recommendation_id)) {
       throw AppError.conflict('This recommendation was set aside, so it can\'t be tried again.');
     }
   }

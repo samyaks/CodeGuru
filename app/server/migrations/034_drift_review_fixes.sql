@@ -4,7 +4,8 @@
 -- 1. Checks and decisions are keyed by the lower-case repo name. GitHub names
 --    are case-insensitive, and a webhook can spell a repo differently from the
 --    URL a project was set up with, so the two never found each other.
---    Rows that only differ by case are folded into one (the newest is kept).
+--    Rows that only differ by case are folded into one (a row already in
+--    lower case is kept, else the newest).
 -- 2. drift_decisions.confirmed_by_name: who confirmed a recommendation, so
 --    the PR check can say so.
 -- 3. An index for the accepted-intent lookup across a repo's projects.
