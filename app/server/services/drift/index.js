@@ -598,6 +598,13 @@ async function execute(project, decision, actor, deps) {
 const accept = (input, deps = defaultDeps()) => decide({ ...input, type: 'accepted' }, deps);
 const sendBack = (input, deps = defaultDeps()) => decide({ ...input, type: 'sent_back' }, deps);
 
+/** Whether someone decided on the decision's PR after it. */
+async function decidedLater(project, row, deps) {
+  return (await deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)))
+    .some((d) => d.id !== row.id && new Date(d.created_at) > new Date(row.created_at));
+}
+const LATER_MESSAGE = 'Someone decided on this pull request after this, so it was set aside.';
+
 /** Run a failed decision again (by someone with write access). */
 async function retryDecision({ project, user, decisionId }, deps = defaultDeps()) {
   await assertMember(project, user, deps);
@@ -605,9 +612,7 @@ async function retryDecision({ project, user, decisionId }, deps = defaultDeps()
   if (!access.canWrite) throw AppError.forbidden('Trying again needs write access to the repo on GitHub.');
   const row = await deps.driftDecisions.get(project.id, String(decisionId || ''));
   if (!row || row.state !== 'failed') throw AppError.conflict('This decision is not waiting to be tried again.');
-  const later = (await deps.driftDecisions.listForPr(project.id, row.repo_full_name, Number(row.pr_number)))
-    .some((d) => d.id !== row.id && new Date(d.created_at) > new Date(row.created_at));
-  if (later) throw AppError.conflict('Someone decided on this pull request after this, so it can\'t be tried again.');
+  if (await decidedLater(project, row, deps)) throw AppError.conflict('Someone decided on this pull request after this, so it can\'t be tried again.');
   const claimed = await deps.driftDecisions.claim(project.id, row.id, { from: ['failed'], confirmedBy: user.id });
   if (!claimed) throw AppError.conflict('This decision is not waiting to be tried again.');
   return { decision: publicDecision(await execute(project, claimed, { userId: user.id }, deps)) };
@@ -661,11 +666,19 @@ function registerDecisionAction(depsFactory = defaultDeps) {
     run: async ({ project, payload, actor }) => {
       const deps = depsFactory();
       // 'failed': an earlier confirm failed and its recommendation went back to pending.
+      const final = (message) => { const err = AppError.conflict(message); err.final = true; return err; };
       const claimed = await deps.driftDecisions.claim(project.id, String(payload?.decisionId || ''), { from: ['waiting_for_write', 'failed'], confirmedBy: actor.userId });
       if (!claimed) {
         const row = await deps.driftDecisions.get(project.id, String(payload?.decisionId || ''));
         if (row?.state === 'done') return publicDecision(row);
+        // Set aside (or gone): it can never run, so the recommendation closes.
+        if (!row || row.state === 'dismissed') throw final(row?.error || STALE_MESSAGE);
         throw AppError.conflict('This decision is already running or was decided another way.');
+      }
+      // A later decision on the PR wins over this older recommendation.
+      if (await decidedLater(project, claimed, deps)) {
+        await deps.driftDecisions.finish(claimed.id, { state: 'dismissed', error: LATER_MESSAGE });
+        throw final(LATER_MESSAGE);
       }
       const done = await execute(project, claimed, actor, deps);
       if (done.state === 'dismissed') {

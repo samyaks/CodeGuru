@@ -116,3 +116,12 @@ test('a removal that would break an alias is refused, not thrown raw', () => {
     (e) => e instanceof IntentEditError,
   );
 });
+
+test('a rule shared through a YAML anchor is not reworded, since its aliases would change unseen', () => {
+  const anchored = yaml.replace('      - "Stripe holds all billing data."\n', '      - &stripe "Stripe holds all billing data."\n')
+    .replace('    text: "Send a weekly digest, not daily."\n', '    text: *stripe\n');
+  assert.throws(
+    () => applyIntentEdits(anchored, [{ op: 'reword', target: rule('Stripe holds all billing data.'), to: 'Anyone can hold billing data.' }]),
+    (e) => e instanceof IntentEditError && /YAML anchor/.test(e.message),
+  );
+});

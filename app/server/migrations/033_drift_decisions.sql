@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS drift_decisions (
 CREATE INDEX IF NOT EXISTS drift_decisions_pr_idx ON drift_decisions (repo_full_name, pr_number, created_at DESC);
 CREATE INDEX IF NOT EXISTS drift_decisions_project_idx ON drift_decisions (project_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS drift_decisions_accepted_idx ON drift_decisions (repo_full_name, pr_number, yaml_sha256)
-  WHERE type = 'accepted' AND state = 'done';
+  WHERE type = 'accepted' AND state IN ('done', 'working');
 -- One decision runs at a time per PR.
 CREATE UNIQUE INDEX IF NOT EXISTS drift_decisions_one_working ON drift_decisions (repo_full_name, pr_number)
   WHERE state = 'working';

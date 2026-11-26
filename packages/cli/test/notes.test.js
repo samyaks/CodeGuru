@@ -46,6 +46,8 @@ test('takeoff notes prints Bot notes for the branch PR and ignores everyone else
     { ...app('quoter'), body: `> ${marker('Quoted note.')}`, created_at: '2026-11-26T10:03:00Z' },
     { ...app('github-actions'), body: marker('From a workflow.'), created_at: '2026-11-26T10:04:00Z' },
     { user: { type: 'Bot', login: 'takeoff[bot]' }, body: marker('No App on record.'), created_at: '2026-11-26T10:05:00Z' },
+    // A broken marker first, with a good one later in the comment.
+    { ...app('takeoff'), body: `<!-- takeoff:send-back broken -->\n${marker('Second marker.')}`, created_at: '2026-11-26T10:06:00Z' },
   ]);
   const lines = [];
   const code = await run(['notes', '--json'], { out: (s) => lines.push(s), err: (s) => lines.push(s), env: { GITHUB_TOKEN: 't0k' }, exec, fetchImpl });

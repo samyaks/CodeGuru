@@ -146,6 +146,11 @@ function applyIntentEdits(text, edits) {
     const node = seq.items[idx];
     // Change the value in place, so comments and quoting on it stay.
     const scalar = YAML.isMap(node) ? node.get('text', true) : node;
+    // An anchored value is shared with every alias of it: changing it would
+    // change those too, unseen.
+    if (scalar?.anchor || (YAML.isMap(node) && node.anchor)) {
+      throw new IntentEditError(`"${short(e.target.text)}" is shared with other parts of takeoff.yaml (a YAML anchor), so Takeoff won't reword it. Edit the file by hand.`, 'bad_edit');
+    }
     if (YAML.isScalar(scalar)) scalar.value = e.to;
     else node.set('text', e.to);
     summary.push(`Reword "${short(e.target.text)}" to "${short(e.to)}"`);

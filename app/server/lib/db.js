@@ -2943,7 +2943,8 @@ const driftDecisions = {
     const { rows } = await getDb().query(
       `SELECT * FROM drift_decisions
         WHERE project_id = $1 AND repo_full_name = $2 AND pr_number = $3 AND type = 'accepted'
-          AND state IN ('done', 'working') AND yaml_sha256 = $4 AND base_yaml_sha256 = $5
+          AND (state = 'done' OR (state = 'working' AND updated_at > now() - ${DRIFT_DECISION_STALE}))
+          AND yaml_sha256 = $4 AND base_yaml_sha256 = $5
         ORDER BY (state = 'done') DESC, updated_at DESC LIMIT 1`,
       [projectId, repo, prNumber, yamlSha256, baseYamlSha256]
     );

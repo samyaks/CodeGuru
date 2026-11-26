@@ -392,3 +392,23 @@ test('targetFor finds rules, never rules and agreements by their exact text', ()
   assert.strictEqual(svc.targetFor(intent, { area: 'billing', rule_or_agreement: 'Something the model made up.' }), null);
   assert.strictEqual(svc.targetFor(null, { area: 'billing', rule_or_agreement: 'x' }), null);
 });
+
+test('an older recommendation confirmed after a later decision is set aside', async () => {
+  const { project, gh, state, deps, people } = setup();
+  await svc.accept({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, edits: [{ op: 'remove', target: neverRule }] } }, deps);
+  state.now = new Date(state.now.getTime() + 1000);
+  await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  await assert.rejects(committing.confirmRecommendation({ project, user: people.owner, recommendationId: state.recs[0].id }, deps.committing), /decided on this pull request after this/);
+  assert.strictEqual(state.recs[0].status, 'failed');
+  assert.strictEqual(state.decisions.find((d) => d.type === 'accepted').state, 'dismissed');
+  assert.strictEqual(gh.branches['feat/charge'], HEAD, 'nothing was committed');
+});
+
+test('a recommendation whose decision was set aside closes when confirmed', async () => {
+  const { project, gh, state, deps, people } = setup();
+  await svc.sendBack({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  Object.assign(state.decisions[0], { state: 'dismissed', error: 'Set aside.' });
+  await assert.rejects(committing.confirmRecommendation({ project, user: people.owner, recommendationId: state.recs[0].id }, deps.committing), /Set aside/);
+  assert.strictEqual(state.recs[0].status, 'failed');
+  assert.strictEqual(gh.comments.length, 0);
+});

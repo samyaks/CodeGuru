@@ -109,8 +109,9 @@ async function fetchSendBackNotes({ repo, branch, token, fetchImpl = globalThis.
       if (!Array.isArray(comments) || !comments.length) break;
       for (const c of comments) {
         const app = postingApp(c, appSlug);
-        if (!app || !String(c.body || '').startsWith('<!-- takeoff:send-back ')) continue;
-        const parsed = parseSendBack(c.body);
+        const firstLine = String(c.body || '').split('\n', 1)[0];
+        if (!app || !firstLine.startsWith('<!-- takeoff:send-back ')) continue;
+        const parsed = parseSendBack(firstLine);
         if (!parsed) continue;
         out.push({
           pr: Number(pr.number),
