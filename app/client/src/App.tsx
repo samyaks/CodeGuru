@@ -10,6 +10,7 @@ import AnalysisProgress from './pages/AnalysisProgress';
 import ShareableStory from './pages/ShareableStory';
 import AuthCallback from './pages/AuthCallback';
 import NotFound from './pages/NotFound';
+import InvitePage from './pages/team/InvitePage';
 import ReadPage from './pages/read/ReadPage';
 import { ReleaseProject, ReleaseIntake } from './pages/ReleasePreview';
 import SecurityReportV2 from './pages/v2/SecurityReport';
@@ -69,6 +70,8 @@ export default function App() {
               <Route path="/for/:slug" element={<UseCasePage />} />
             </Route>
             <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
+            {/* Project invites: works signed out, signing in happens on the page. */}
+            <Route path="/invite/:token" element={<InvitePage />} />
 
             {/* Public story (no auth required) */}
             <Route path="/story/:slug" element={<ShareableStory />} />

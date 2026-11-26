@@ -7,7 +7,7 @@ const {
 } = require('../lib/db');
 const { productMap } = require('../lib/db-map');
 const { toGap } = require('./v2/gap-mapper');
-const github = require('./github');
+const { clientForProject } = require('./github-access');
 
 const SUMMARY_MAX = 320;
 const MISSING_PER_CARD = 3;
@@ -192,7 +192,7 @@ function withTimeout(promise, ms) {
 async function fetchLatestCommit(project) {
   if (!isGithubProject(project)) return null;
   const commits = await withTimeout(
-    github.fetchCommits(project.owner, project.repo, {
+    clientForProject(project).fetchCommits(project.owner, project.repo, {
       branch: project.branch || 'main',
       perPage: 1,
     }),
@@ -337,7 +337,7 @@ async function enrichProjectsForDashboard(projects) {
 }
 
 async function listDashboardCards(userId) {
-  const projects = await deployments.findByUserId(userId);
+  const projects = await deployments.findByMember(userId);
   return enrichProjectsForDashboard(projects);
 }
 

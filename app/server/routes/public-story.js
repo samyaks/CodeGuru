@@ -29,9 +29,20 @@ const summaryLimit = createRateLimit({
   message: 'Too many summary requests. Please try again in a minute.',
 });
 
+/**
+ * A private repo's project has no public story. A project scanned before
+ * repo_private existed counts as private when it reads through the GitHub App.
+ */
+function isPublicStory(project) {
+  if (!project) return false;
+  if (project.repo_private === true) return false;
+  if (project.repo_private == null && project.github_installation_id) return false;
+  return true;
+}
+
 router.get('/:slug', readLimit, asyncHandler(async (req, res) => {
   const project = await deployments.findBySlug(req.params.slug);
-  if (!project) throw AppError.notFound('Story not found');
+  if (!isPublicStory(project)) throw AppError.notFound('Story not found');
 
   const entries = await buildEntries.findPublicByProjectId(project.id);
 
@@ -53,7 +64,7 @@ router.get('/:slug', readLimit, asyncHandler(async (req, res) => {
 
 router.get('/:slug/summary', summaryLimit, asyncHandler(async (req, res) => {
   const project = await deployments.findBySlug(req.params.slug);
-  if (!project) throw AppError.notFound('Story not found');
+  if (!isPublicStory(project)) throw AppError.notFound('Story not found');
 
   if (project.social_summary) {
     return res.json({ summary: project.social_summary });
@@ -95,3 +106,4 @@ router.get('/:slug/summary', summaryLimit, asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+module.exports._internal = { isPublicStory };

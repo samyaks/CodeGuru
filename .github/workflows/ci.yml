@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   typecheck-and-build:
@@ -25,6 +24,29 @@ jobs:
       - name: Build @takeoff/annotate
         run: npm run build:lib --prefix packages/annotate
 
+      - name: Test @takeoff/cli
+        run: npm test --prefix packages/cli
+
+      - name: Test GitHub App access, webhooks and PR verdict
+        working-directory: app
+        run: >-
+          node --test
+          server/lib/github-app.test.js
+          server/lib/github-client.test.js
+          server/services/github-access.test.js
+          server/services/github-webhook-manager.test.js
+          server/services/v2/shipped-runner.test.js
+          server/routes/github-app.test.js
+          server/routes/github-webhook.test.js
+          server/routes/public-story.test.js
+          server/services/verdict/verdict.test.js
+          server/services/team/team.test.js
+          server/routes/team.test.js
+          server/lib/analysis-access.test.js
+          server/routes/access-gaps.test.js
+          server/services/agreements/agreements.test.js
+          server/routes/agreements.test.js
+
       - name: TypeScript check (client)
         run: npm run typecheck
 
@@ -33,7 +55,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); require('./server/routes/agreements'); require('./server/services/agreements/notify'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build

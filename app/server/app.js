@@ -13,6 +13,7 @@ const projectRoutes = require('./routes/projects');
 const buildStoryRoutes = require('./routes/build-story');
 const publicStoryRoutes = require('./routes/public-story');
 const reviewRoutes = require('./routes/reviews');
+const githubAppRoutes = require('./routes/github-app');
 const githubRoutes = require('./routes/github');
 const fixPromptRoutes = require('./routes/fix-prompts');
 const projectAnalyticsRoutes = require('./routes/project-analytics');
@@ -33,10 +34,20 @@ const {
 } = require('./routes/v2/security-shares');
 const { router: railwayRouter, callbackRouter: railwayCallbackRouter } = require('./routes/railway');
 const { recoverStaleCommitReviews } = require('./routes/github-webhook');
+const { recoverStalePrChecks } = require('./services/verdict/runner');
 const { waitlistRouter, eventsRouter } = require('./routes/telemetry');
 const { createRateLimit } = require('./lib/rate-limit');
+const { loadMemberships } = require('./lib/memberships');
+const { createTeamRoutes } = require('./routes/team');
+const { createAgreementRoutes } = require('./routes/agreements');
+const agreementService = require('./services/agreements');
+const agreementNotify = require('./services/agreements/notify');
+
+// The agreement commit is a committing action; register it before any route runs.
+agreementService.registerCommitAction();
+const { createInviteRoutes } = require('./routes/invites');
 const { getDb, closeDb } = require('./lib/db');
-const { requestLogger } = require('./lib/logger');
+const { requestLogger, redactUrl } = require('./lib/logger');
 const { AppError } = require('./lib/app-error');
 
 const { createClient, createAuthRouter, requireAuth, optionalAuth, COOKIE_OPTIONS } = require('@codeguru/auth');
@@ -115,8 +126,6 @@ app.use(collectRoutes);
 app.use('/api/github/webhook', githubWebhookRoutes);
 app.use('/api/fix', fixPromptRoutes);
 app.use('/api/story', publicStoryRoutes);
-app.use('/api/railway', railwayRouter);
-app.use('/auth/railway', railwayCallbackRouter);
 // Public security-report share read endpoint. Mounted before the
 // authed `/api/v2/...` routes so `optionalAuth` doesn't accidentally
 // gate it. The route itself enforces the share's active-state filter.
@@ -142,38 +151,69 @@ app.get('/auth/github/reconnect', reconnectRateLimit, (req, res) => {
   }).catch((err) => res.status(500).json({ error: err.message }));
 });
 
+// Project members: req.memberProjectIds for checkProjectAccess (lib/helpers.js).
+const withMembers = loadMemberships();
+
+// Invite emails go out as Supabase magic links that land back on the invite.
+// The redirect URL (<app>/auth/callback?next=/invite/...) must be on the
+// Supabase project's redirect allowlist.
+const sendSignInLink = supabase
+  ? async (email, redirectTo) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo, shouldCreateUser: true },
+    });
+    if (error) throw new Error(error.message || 'sign-in email failed');
+  }
+  : null;
+
 // Routes with optional/required auth depending on Supabase config
 if (supabase) {
-  app.use('/api/analyze', optionalAuth(supabase), analyzeRoutes);
-  app.use('/api/takeoff', optionalAuth(supabase), takeoffRoutes);
+  // Analyses and their Railway links: owner (or project member, to read) only.
+  app.use('/api/analyze', optionalAuth(supabase), withMembers, analyzeRoutes);
+  app.use('/api/railway', optionalAuth(supabase), withMembers, railwayRouter);
+  app.use('/auth/railway', optionalAuth(supabase), withMembers, railwayCallbackRouter);
+  app.use('/api/takeoff', optionalAuth(supabase), withMembers, takeoffRoutes);
   // Public: waitlist + first-party funnel events. optionalAuth only so
   // signed-in visitors' rows carry a user_id.
   app.use('/api/waitlist', optionalAuth(supabase), waitlistRouter);
   app.use('/api/events', optionalAuth(supabase), eventsRouter);
+  app.use('/api/github-app', optionalAuth(supabase), githubAppRoutes);
   app.use('/api/deploy', requireAuth(supabase), deployRoutes);
-  app.use('/api/projects', optionalAuth(supabase), projectRoutes);
-  app.use('/api/projects/:projectId/story', requireAuth(supabase), buildStoryRoutes);
-  app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), projectAnalyticsRoutes);
-  app.use('/api/product-map', optionalAuth(supabase), productMapRoutes);
+  // Members and invites (Milestone 2). Mounted before projectRoutes so the
+  // team paths don't run auth twice.
+  app.use('/api/projects/:id/team', requireAuth(supabase), withMembers, createTeamRoutes({ sendSignInLink }));
+  app.use('/api/projects/:id/agreements', requireAuth(supabase), withMembers, createAgreementRoutes());
+  app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
+  app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
+  app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
+  app.use('/api/projects', optionalAuth(supabase), withMembers, projectRoutes);
+  app.use('/api/product-map', optionalAuth(supabase), withMembers, productMapRoutes);
   // v2 (Takeoff) — additive routes alongside v1 until Phase 6b cutover
-  app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), v2GapsRoutes);
-  app.use('/api/v2/projects/:id/intent', optionalAuth(supabase), v2IntentRoutes);
-  app.use('/api/v2/projects/:id/read', optionalAuth(supabase), v2ReadRoutes);
-  app.use('/api/v2/projects/:id/launch', optionalAuth(supabase), v2LaunchRoutes);
-  app.use('/api/v2/projects/:id/slice', optionalAuth(supabase), v2SliceRoutes);
-  app.use('/api/v2/projects/:id/shipped', optionalAuth(supabase), v2ShippedRoutes);
-  app.use('/api/v2/projects/:id/security-summary', optionalAuth(supabase), v2SecurityRoutes);
+  app.use('/api/v2/projects/:id/gaps', optionalAuth(supabase), withMembers, v2GapsRoutes);
+  app.use('/api/v2/projects/:id/intent', optionalAuth(supabase), withMembers, v2IntentRoutes);
+  app.use('/api/v2/projects/:id/read', optionalAuth(supabase), withMembers, v2ReadRoutes);
+  app.use('/api/v2/projects/:id/launch', optionalAuth(supabase), withMembers, v2LaunchRoutes);
+  app.use('/api/v2/projects/:id/slice', optionalAuth(supabase), withMembers, v2SliceRoutes);
+  app.use('/api/v2/projects/:id/shipped', optionalAuth(supabase), withMembers, v2ShippedRoutes);
+  app.use('/api/v2/projects/:id/security-summary', optionalAuth(supabase), withMembers, v2SecurityRoutes);
   // Share-link routes — owner endpoints require auth so anonymous
   // visitors on a public project can't mint or revoke share links.
-  app.use('/api/v2/projects/:id/security-shares', requireAuth(supabase), v2SecurityShareOwnerRoutes);
-  app.use('/api/v2/security-shares', requireAuth(supabase), v2SecurityShareSlugRoutes);
+  app.use('/api/v2/projects/:id/security-shares', requireAuth(supabase), withMembers, v2SecurityShareOwnerRoutes);
+  app.use('/api/v2/security-shares', requireAuth(supabase), withMembers, v2SecurityShareSlugRoutes);
 } else {
   app.use('/api/analyze', analyzeRoutes);
+  app.use('/api/railway', railwayRouter);
+  app.use('/auth/railway', railwayCallbackRouter);
   app.use('/api/takeoff', takeoffRoutes);
   app.use('/api/waitlist', waitlistRouter);
   app.use('/api/events', eventsRouter);
+  app.use('/api/github-app', githubAppRoutes);
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
+  });
+  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/invites'], (req, res) => {
+    res.status(503).json({ error: 'Authentication must be configured for project members, agreements and invites.' });
   });
   app.use('/api/projects', projectRoutes);
   app.use('/api/projects/:projectId/story', (req, res) => {
@@ -214,7 +254,7 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use((err, req, res, _next) => {
   if (err instanceof AppError) {
-    if (err.statusCode >= 500) console.error(`[AppError] ${req.method} ${req.originalUrl}:`, err);
+    if (err.statusCode >= 500) console.error(`[AppError] ${req.method} ${redactUrl(req.originalUrl)}:`, err);
     return res.status(err.statusCode).json({ error: err.message, code: err.code });
   }
 
@@ -236,7 +276,7 @@ app.use((err, req, res, _next) => {
   }
 
   console.error(
-    `[UnhandledError] ${req.method} ${req.originalUrl}\n  name=${err.name}\n  code=${err.code}\n  message=${err.message}\n  stack=${err.stack}`
+    `[UnhandledError] ${req.method} ${redactUrl(req.originalUrl)}\n  name=${err.name}\n  code=${err.code}\n  message=${err.message}\n  stack=${err.stack}`
   );
   const message = process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message;
   res.status(500).json({ error: message, code: 'INTERNAL_ERROR' });
@@ -274,7 +314,22 @@ async function start() {
     console.error('[startup] recoverStaleCommitReviews failed:', err.message)
   );
 
+  // PR verdict checks a restart left running (needs migration 030).
+  const sweepPrChecks = () => recoverStalePrChecks().catch((err) =>
+    console.error('[pr-checks] recoverStalePrChecks failed:', err.message)
+  );
+  sweepPrChecks();
+  setInterval(sweepPrChecks, 15 * 60 * 1000).unref();
+
   validateEnv();
+
+  // Agreement emails (Milestone 3) go out in the background once a provider is set.
+  const emailTransport = agreementNotify.transportFromEnv();
+  if (emailTransport) {
+    const { notificationOutbox } = require('./lib/db');
+    agreementNotify.startFlusher({ transport: emailTransport, notificationOutbox, now: () => new Date() });
+    console.log('Agreement emails: on');
+  }
 
   server = app.listen(PORT, () => {
     console.log(`Takeoff server running on port ${PORT}`);

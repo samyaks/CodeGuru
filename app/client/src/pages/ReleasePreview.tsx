@@ -7,6 +7,8 @@ import { useAuth } from '../hooks/useAuth';
 import { track } from '../services/telemetry';
 import { SAMPLE_INTAKE } from './story/sample';
 import { cx } from '../components/takeoff/status';
+import { TeamSection } from './team/TeamSection';
+import { AgreementsSection } from './team/AgreementsSection';
 import styles from './ReleasePreview.module.css';
 
 // Release 11.15.26: the new project page reads real data (launch checks,
@@ -66,6 +68,12 @@ export function ReleaseProject() {
         onCopyBuild={copyBuild}
         onSignIn={() => login('github')}
         oldHref={`/old/read/${id}`}
+        team={user && id ? (
+          <>
+            <AgreementsSection projectId={id} />
+            <TeamSection projectId={id} />
+          </>
+        ) : null}
       />
     </>
   );

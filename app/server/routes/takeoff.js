@@ -16,7 +16,8 @@ const { runAISuggestions } = require('../services/suggestion-ai');
 const { runSecurityDetectors, listDetectorNames } = require('../services/security');
 const { applySecurityFindings } = require('../services/security/persist');
 const { computeSecurityScore } = require('../services/security/score');
-const { connectWebhook } = require('../services/github-webhook-manager');
+const { autoConnectWebhook } = require('../services/github-webhook-manager');
+const { resolveRepoAccess, clientForProject } = require('../services/github-access');
 const productMapSvc = require('../services/product-map');
 const { linkGapsToJobs } = require('../services/v2/gap-job-linker');
 const { runIntentPipeline } = require('../services/intent/pipeline');
@@ -27,7 +28,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { recordServerEvent } = require('../lib/telemetry');
 const { seedFromAnalysis } = require('../lib/auto-entries');
-const { checkProjectAccess } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { startTimer } = require('../lib/timing');
 const { buildTakeoffCostPlan } = require('../lib/cost-budget');
 const { toCommitSnapshot } = require('../services/dashboard-cards');
@@ -136,6 +137,8 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   const validation = validateRepoUrl(repoUrl);
   if (!validation.valid) throw AppError.badRequest(validation.error);
   const { owner, repo } = validation;
+  // Throws (401/403) for a private repo the user hasn't granted the app.
+  const access = await resolveRepoAccess({ userId: req.user?.id || null, owner, repo });
 
   const id = uuidv4();
   await deployments.create({
@@ -149,6 +152,8 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
   });
 
   let slug = `${owner}-${repo}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  // A private repo's name must not be guessable from its public story URL.
+  if (access.private) slug = `p-${crypto.randomBytes(8).toString('hex')}`;
   try {
     await deployments.update(id, { slug });
   } catch (err) {
@@ -156,6 +161,10 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
     slug = `${slug}-${crypto.randomBytes(2).toString('hex')}`;
     await deployments.update(id, { slug });
   }
+  await deployments.update(id, {
+    repo_private: !!access.private,
+    ...(access.installationId ? { github_installation_id: access.installationId } : {}),
+  });
 
   inFlightAnalyses.add(id);
   setImmediate(() => {
@@ -168,16 +177,12 @@ router.post('/', takeoffRateLimit, asyncHandler(async (req, res) => {
       });
   });
 
-  // Auto-connect webhook for GitHub-linked projects when the user has a GH token
+  // Auto-connect a per-repo push webhook when the user has a GH token, unless
+  // the GitHub App already delivers this repo's pushes.
   const ghToken = req.cookies?.['gh-provider-token'] || null;
   if (ghToken) {
     setImmediate(() => {
-      connectWebhook({ projectId: id, owner, repo, userToken: ghToken })
-        .then((result) => {
-          if (!result.ok) {
-            console.log(JSON.stringify({ event: 'webhook_auto_connect_skipped', projectId: id, reason: result.error }));
-          }
-        })
+      autoConnectWebhook({ projectId: id, owner, repo, userToken: ghToken, installationId: access.installationId })
         .catch((err) => console.warn(`webhook auto-connect ${id}:`, err.message));
     });
   }
@@ -214,10 +219,20 @@ async function runTakeoff(id, repoUrl) {
     await deployments.update(id, { status: 'analyzing', updated_at: new Date().toISOString() });
     broadcast(id, { type: 'status', status: 'analyzing' });
 
+    // Private repos read through the project's GitHub App installation;
+    // everything else uses the server token and must be public.
+    const project = await deployments.findById(id);
+    const gh = clientForProject(project);
+
     const tAnalyze = startTimer('analyze_repo', id);
     const codebaseModel = await analyzeRepo(repoUrl, (progress) => {
       broadcast(id, { type: 'progress', ...progress });
-    }, id);
+    }, id, { github: gh, publicOnly: !(project && project.owner && project.repo) });
+    // clientForProject already refused a private repo the owner hasn't granted
+    // (it only falls back to the bare server client for a row with no repo).
+    if (typeof codebaseModel?.meta?.private === 'boolean' && codebaseModel.meta.private !== project?.repo_private) {
+      await deployments.update(id, { repo_private: codebaseModel.meta.private });
+    }
     tAnalyze.end({
       files: Array.isArray(codebaseModel?.fileTree?.files) ? codebaseModel.fileTree.files.length : null,
       readBytes: codebaseModel?.meta?.ingestedBytes ?? null,
@@ -225,7 +240,7 @@ async function runTakeoff(id, repoUrl) {
 
     const currentDeployment = await deployments.findById(id);
     const userId = currentDeployment?.user_id;
-    await runPipeline(id, codebaseModel, userId, label);
+    await runPipeline(id, codebaseModel, userId, label, { github: gh });
 
     try {
       await analyses.update(id, { status: 'completed', completed_at: new Date().toISOString() });
@@ -304,7 +319,7 @@ async function runUploadAnalysis(id, fileEntries, projectName, userId) {
   }
 }
 
-async function runPipeline(id, codebaseModel, userId, label) {
+async function runPipeline(id, codebaseModel, userId, label, { github: gh = github } = {}) {
   const tPipeline = startTimer('pipeline_total', id);
 
   // ── Triage preservation for re-analyses ──────────────────────
@@ -355,7 +370,7 @@ async function runPipeline(id, codebaseModel, userId, label) {
     && !String(repoUrl).startsWith('local://')
   ) {
     try {
-      const commits = await github.fetchCommits(
+      const commits = await gh.fetchCommits(
         codebaseModel.meta.owner,
         codebaseModel.meta.repo,
         { branch: codebaseModel.meta.defaultBranch || 'main', perPage: 1 }
@@ -937,7 +952,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
   checkProjectAccess(project, req);
 
-  res.json(project);
+  res.json(projectForViewer(project, req));
 }));
 
 router.get('/:id/stream', asyncHandler(async (req, res) => {
@@ -998,7 +1013,7 @@ router.post('/:id/reanalyze', reanalyzeRateLimit, asyncHandler(async (req, res) 
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   // triggerReanalyzeForProject throws AppError.{badRequest,conflict} for the
   // same gates as the old inline body; asyncHandler propagates them to the
@@ -1098,7 +1113,7 @@ router.get('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const vars = project.env_vars && typeof project.env_vars === 'object' ? project.env_vars : {};
   res.json({ vars });
@@ -1110,7 +1125,7 @@ router.post('/:id/env-vars', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const { vars } = req.body;
   if (!vars || typeof vars !== 'object') throw AppError.badRequest('vars must be an object');
@@ -1183,7 +1198,7 @@ router.patch('/:id/suggestions/:suggestionId', asyncHandler(async (req, res) => 
 router.post('/:id/suggestions/refresh', asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   await suggestions.deleteByProjectId(req.params.id);
   await deployments.update(req.params.id, { suggestions_count: 0 });

@@ -19,19 +19,20 @@ function uniqueFiles(commit) {
 
 /**
  * Process a single commit from a push payload. Looks for a matching gap, runs
- * the verifier, and records the result. Safe to call without await — failures
- * are logged but never rethrown.
+ * the verifier, and records the result. Never throws: resolves `{ ok: false }`
+ * when the commit couldn't be processed (failures are logged), so a caller
+ * can retry it.
  */
 async function processCommit({ project, commit, branch }) {
   try {
     const projectId = project.id;
-    if (!commit?.id) return;
+    if (!commit?.id) return { ok: true };
 
     // Fast-path: skip if we've already recorded this commit for this project.
     // The unique index on (project_id, commit_sha) is the durable guarantee;
     // this just avoids redundant work + Anthropic calls under repeat deliveries.
     const existing = await shippedItems.findByCommit(projectId, commit.id);
-    if (existing) return;
+    if (existing) return { ok: true };
 
     const files = uniqueFiles(commit);
     const enrichedCommit = {
@@ -59,11 +60,11 @@ async function processCommit({ project, commit, branch }) {
         `[v2/shipped-runner] no high-confidence gap match for commit ${commit.id} on project ${projectId}` +
           (match ? ` (best: ${match.strategy} @ ${match.confidence})` : '')
       );
-      return;
+      return { ok: true };
     }
 
     const matchedGap = openGaps.find((g) => g.id === match.gapId);
-    if (!matchedGap) return;
+    if (!matchedGap) return { ok: true };
 
     // Run the verifier — falls back to 'pending' on any error.
     let verdict = { verification: 'pending', detail: 'Verifier deferred.' };
@@ -109,8 +110,10 @@ async function processCommit({ project, commit, branch }) {
         committedAt: matchedGap.committedAt || new Date().toISOString(),
       });
     }
+    return { ok: true };
   } catch (err) {
     console.error('[v2/shipped-runner] processCommit failed:', err.message);
+    return { ok: false, error: err };
   }
 }
 
@@ -118,9 +121,11 @@ async function processCommit({ project, commit, branch }) {
 async function processPush({ project, payload }) {
   const branch = payload.ref ? payload.ref.replace('refs/heads/', '') : null;
   const commits = Array.isArray(payload.commits) ? payload.commits : [];
+  const failed = [];
   for (const commit of commits) {
     // run sequentially so we don't stampede Anthropic on a 50-commit force push
-    await processCommit({ project, commit, branch });
+    const result = await processCommit({ project, commit, branch });
+    if (result && result.ok === false) failed.push(commit.id);
   }
 
   // After per-commit gap matching is done, schedule a debounced full
@@ -147,6 +152,12 @@ async function processPush({ project, payload }) {
       `[v2/shipped-runner] skipping auto-reanalyze for ${project.id}: ` +
       `push to '${branch}' is not default branch '${defaultBranch}'`
     );
+  }
+
+  // Reject so the webhook releases its claim on this push and a redelivery
+  // retries; commits already recorded are skipped on the retry.
+  if (failed.length) {
+    throw new Error(`${failed.length} of ${commits.length} commits failed: ${failed.slice(0, 5).join(', ')}`);
   }
 }
 

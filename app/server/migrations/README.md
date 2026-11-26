@@ -76,10 +76,30 @@ Postgres, not ANSI SQL.
   objective / audience / core_job — with confidence, JSONB evidence, and an
   optional alternative question). `UNIQUE (project_id, slot)` makes re-drafting
   an upsert; settled (human-corrected) claims survive re-analysis.
-- `025` / `026` — reserved by PR #28 (GitHub App access, processed pushes).
+- `025_github_app_access.sql` — private-repo reads through the Takeoff GitHub
+  App. `github_repo_access` (repos each user can read through an installation,
+  captured at install/authorize time) and `deployments.github_installation_id`
+  (the installation a project reads through; NULL = public, server token).
+- `026_processed_pushes.sql` — `processed_pushes`, one row per (project, ref,
+  before, after). The webhook handler claims a push here before running the
+  Shipped matcher/verifier and auto re-analyze, so a push delivered twice (a
+  per-repo hook plus the GitHub App) runs them once.
 - `027_waitlist_and_funnel.sql` — `waitlist` (unique on lower(email)) and
   `funnel_events` (closed event set in `lib/telemetry.js`).
 - `028_intent_slices.sql` — intent loop V1: `intent_slices` (one row per
   slice, JSONB sub-objects mirroring `lib/slice-types.js`, partial unique
   index = one open slice per project) and `slice_events` (the verification
   log; `kind` from `SLICE_EVENT_KINDS`). Owned by `lib/slice-store.js`.
+- `029_github_access_revocation.sql` — `github_repo_access.github_user_id`
+  (so a revoked GitHub authorization drops its grants) and
+  `deployments.repo_private` (private repos get no public story).
+- `030_pr_checks.sql` — Takeoff PR verdict (Milestone 4). `pr_checks`, one row
+  per (repo, PR, head sha): verdict, the parsed result, the one Takeoff comment
+  and the check run. `services/verdict/runner.js` claims the row first, so a
+  duplicate delivery doesn't pay for a second model call.
+- `031_project_members.sql` — Takeoff projects, members, invites (Milestone 2).
+  `project_members` (owner stays `deployments.user_id`; labels `creator` /
+  `builder` never gate access), `project_invites` (by email or GitHub login;
+  only a hash of the token is stored), `recommendations` (a committing action
+  from a member without GitHub write access, confirmed by one who has it) and
+  `user_github_links` (the GitHub account each user connected).

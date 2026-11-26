@@ -102,6 +102,25 @@ if (typeof window !== 'undefined') {
   });
 }
 
+// Invite links carry a secret token: never send it in telemetry, whether in
+// the path or in a referrer (after a magic link, the referrer is
+// /auth/callback?next=%2Finvite%2F<token>).
+const INVITE_TOKEN = /(\/invite\/|%2Finvite%2F)[^/?#&%]+/gi;
+const maskInvite = (s: string) => s.replace(INVITE_TOKEN, '$1:token');
+
+function safeReferrer(): string | null {
+  const ref = document.referrer;
+  if (!ref) return null;
+  try {
+    const url = new URL(ref);
+    // Our own pages: the path is enough, and their queries can hold tokens.
+    if (url.origin === window.location.origin) return maskInvite(url.pathname);
+    return maskInvite(url.origin + url.pathname);
+  } catch {
+    return null;
+  }
+}
+
 /** Record a funnel event. Safe to call anywhere; never throws. */
 export function track(
   event: FunnelEvent,
@@ -117,8 +136,8 @@ export function track(
     queue.push({
       event,
       projectId: opts.projectId ?? null,
-      path: window.location.pathname,
-      referrer: document.referrer || null,
+      path: maskInvite(window.location.pathname),
+      referrer: safeReferrer(),
       metadata: opts.metadata ?? null,
     });
     if (queue.length >= MAX_BATCH) flush();

@@ -2,11 +2,11 @@ const express = require('express');
 const { deployments, buildEntries, commitReviews, analyses } = require('../lib/db');
 const { createRateLimit } = require('../lib/rate-limit');
 const railway = require('@codeguru/railway');
-const github = require('../services/github');
+const { clientForProject } = require('../services/github-access');
 const { connectWebhook, disconnectWebhook, getWebhookStatus } = require('../services/github-webhook-manager');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
-const { checkProjectAccess } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner, projectForViewer } = require('../lib/helpers');
 const { listDashboardCards } = require('../services/dashboard-cards');
 
 const router = express.Router();
@@ -46,7 +46,7 @@ router.get('/:id', readLimit, asyncHandler(async (req, res) => {
   ]);
 
   res.json({
-    ...project,
+    ...projectForViewer(project, req),
     entries,
     context_files: analysisRow?.context_files ?? null,
     completion_pct: analysisRow?.completion_pct ?? null,
@@ -64,7 +64,7 @@ router.get('/:id/commits', readLimit, asyncHandler(async (req, res) => {
   }
 
   try {
-    const commits = await github.fetchCommits(project.owner, project.repo, {
+    const commits = await clientForProject(project).fetchCommits(project.owner, project.repo, {
       branch: project.branch || 'main',
       perPage: 50,
     });
@@ -80,8 +80,9 @@ router.get('/:id/commits/:sha', readLimit, asyncHandler(async (req, res) => {
   if (!project) throw AppError.notFound('Project not found');
 
   checkProjectAccess(project, req);
+  if (!/^[0-9a-f]{4,40}$/i.test(req.params.sha)) throw AppError.badRequest('sha must be a commit hash');
 
-  const detail = await github.fetchCommitDetail(project.owner, project.repo, req.params.sha);
+  const detail = await clientForProject(project).fetchCommitDetail(project.owner, project.repo, req.params.sha);
   res.json(detail);
 }));
 
@@ -192,7 +193,7 @@ router.post('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) =>
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   if (!project.owner || !project.repo || project.repo_url?.startsWith('local://')) {
     throw AppError.badRequest('Webhook connect is only available for GitHub-linked projects');
@@ -214,7 +215,7 @@ router.delete('/:id/webhook/connect', writeLimit, asyncHandler(async (req, res) 
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   const userToken = req.cookies?.['gh-provider-token'] || null;
   const result = await disconnectWebhook({
@@ -234,7 +235,7 @@ router.delete('/:id', writeLimit, asyncHandler(async (req, res) => {
   const project = await deployments.findById(req.params.id);
   if (!project) throw AppError.notFound('Project not found');
 
-  checkProjectAccess(project, req);
+  checkProjectOwner(project, req);
 
   if (project.railway_project_id) {
     try {

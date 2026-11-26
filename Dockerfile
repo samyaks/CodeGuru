@@ -16,6 +16,7 @@ COPY package.json package-lock.json ./
 COPY packages/annotate/package.json packages/annotate/package.json
 COPY packages/analytics/package.json packages/analytics/package.json
 COPY packages/auth/package.json packages/auth/package.json
+COPY packages/cli/package.json packages/cli/package.json
 COPY packages/github/package.json packages/github/package.json
 COPY packages/sse/package.json packages/sse/package.json
 COPY packages/railway/package.json packages/railway/package.json
@@ -34,7 +35,7 @@ RUN npm run build --prefix app/client \
   && mv app/client/dist /app/.client-dist-artifact \
   && rm -rf app/client \
   && npm prune --omit=dev \
-  && rm -rf node_modules/@takeoff packages/annotate \
+  && rm -rf node_modules/@takeoff/annotate packages/annotate \
   && npm cache clean --force
 
 # Production: slim runtime — reuse pruned node_modules from builder
@@ -46,6 +47,7 @@ COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/analytics ./packages/analytics
 COPY --from=builder /app/packages/auth ./packages/auth
+COPY --from=builder /app/packages/cli ./packages/cli
 COPY --from=builder /app/packages/github ./packages/github
 COPY --from=builder /app/packages/railway ./packages/railway
 COPY --from=builder /app/packages/sse ./packages/sse

@@ -330,7 +330,7 @@ const DEPLOYMENTS_ALLOWED_COLUMNS = new Set([
   'railway_project_id', 'railway_service_id', 'railway_environment_id',
   'railway_deployment_id', 'railway_domain', 'live_url', 'error', 'build_logs',
   'updated_at', 'deployed_at', 'user_id', 'slug', 'social_summary', 'env_vars',
-  'suggestions_count', 'security_score',
+  'suggestions_count', 'security_score', 'github_installation_id', 'repo_private',
 ]);
 
 const deployments = {
@@ -354,6 +354,17 @@ const deployments = {
   async findBySlug(slug) {
     const { rows } = await getDb().query('SELECT * FROM deployments WHERE slug = $1', [slug]);
     return rows[0] || null;
+  },
+  /** Projects `userId` owns or is a member of, newest first. */
+  async findByMember(userId, { limit = 20, offset = 0 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT d.* FROM deployments d
+        WHERE d.user_id = $1
+           OR EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = d.id AND m.user_id = $1)
+        ORDER BY d.created_at DESC LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+    return rows;
   },
   async findByUserId(userId, { limit = 20, offset = 0 } = {}) {
     const { rows } = await getDb().query(
@@ -397,6 +408,86 @@ const deployments = {
          AND repo_url NOT LIKE 'local://%'
        ORDER BY updated_at DESC NULLS LAST, created_at DESC`,
       [owner, repo]
+    );
+    return rows;
+  },
+};
+
+// Projects stop reading through an installation that is gone or no longer covers their repo.
+deployments.clearInstallation = async function clearInstallation(installationId) {
+  const { rowCount } = await getDb().query(
+    'UPDATE deployments SET github_installation_id = NULL WHERE github_installation_id = $1',
+    [installationId]);
+  return rowCount;
+};
+deployments.clearInstallationForRepos = async function clearInstallationForRepos(installationId, fullNames) {
+  if (!fullNames.length) return 0;
+  const { rowCount } = await getDb().query(
+    `UPDATE deployments SET github_installation_id = NULL
+      WHERE github_installation_id = $1 AND LOWER(owner || '/' || repo) = ANY($2::text[])`,
+    [installationId, fullNames.map((n) => n.toLowerCase())]);
+  return rowCount;
+};
+
+// ── GitHub App repo access ────────────────────────────────────────
+
+const GRANT_UPSERT_SQL = `INSERT INTO github_repo_access
+     (user_id, installation_id, repo_id, repo_full_name, private, account_login, github_user_id, granted_at)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+   ON CONFLICT (user_id, repo_id) DO UPDATE SET
+     installation_id = EXCLUDED.installation_id,
+     repo_full_name = EXCLUDED.repo_full_name,
+     private = EXCLUDED.private,
+     account_login = EXCLUDED.account_login,
+     github_user_id = EXCLUDED.github_user_id,
+     granted_at = now()`;
+
+const githubRepoAccess = {
+  /** Replace everything a user can read via the app with a fresh listing. */
+  async replaceForUser(userId, grants) {
+    await withTransaction(async (client) => {
+      await client.query('DELETE FROM github_repo_access WHERE user_id = $1', [userId]);
+      for (const g of grants) {
+        await client.query(GRANT_UPSERT_SQL,
+          [userId, g.installationId, g.repoId, g.repoFullName, g.private, g.accountLogin, g.githubUserId ?? null]);
+      }
+    });
+  },
+  /** A GitHub user revoked their authorization of the app: drop what they granted. */
+  async deleteForGithubUser(githubUserId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE github_user_id = $1', [githubUserId]);
+    return rowCount;
+  },
+  /** The app was uninstalled: nobody reads through this installation any more. */
+  async deleteForInstallation(installationId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1', [installationId]);
+    return rowCount;
+  },
+  /** Repos were removed from an installation. */
+  async deleteForRepos(installationId, repoIds) {
+    if (!repoIds.length) return 0;
+    const { rowCount } = await getDb().query(
+      'DELETE FROM github_repo_access WHERE installation_id = $1 AND repo_id = ANY($2::bigint[])',
+      [installationId, repoIds]);
+    return rowCount;
+  },
+  async findForUserRepo(userId, owner, repo) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM github_repo_access
+        WHERE user_id = $1 AND LOWER(repo_full_name) = LOWER($2)
+        LIMIT 1`,
+      [userId, `${owner}/${repo}`],
+    );
+    return rows[0] || null;
+  },
+  async listForUser(userId) {
+    const { rows } = await getDb().query(
+      `SELECT repo_full_name, private, account_login, granted_at
+         FROM github_repo_access WHERE user_id = $1
+        ORDER BY LOWER(repo_full_name)`,
+      [userId],
     );
     return rows;
   },
@@ -2139,6 +2230,591 @@ const webhookEvents = {
   },
 };
 
+// ── Processed pushes (webhook dedupe) ─────────────────────────────
+
+// A claim that never completed (crash, deploy) can be taken over after this
+// long. Well past the longest push run (commits run one at a time with LLM
+// calls), so a slow run is never processed twice.
+const PUSH_CLAIM_STALE_MINUTES = 60;
+
+const processedPushes = {
+  /**
+   * True when this delivery should process the push: it is the first, or the
+   * earlier claim never completed and has gone stale. False when another
+   * delivery is working on it or finished it. Migration 026 adds the table.
+   */
+  async claim({ projectId, ref, before, after, deliveryId, source }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO processed_pushes (project_id, ref, before_sha, after_sha, delivery_id, source)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (project_id, ref, before_sha, after_sha) DO UPDATE
+          SET delivery_id = EXCLUDED.delivery_id, source = EXCLUDED.source, received_at = now()
+          WHERE processed_pushes.completed_at IS NULL
+            AND processed_pushes.received_at < now() - ($7 || ' minutes')::interval
+        RETURNING project_id`,
+      [projectId, ref, before, after, deliveryId ?? null, source, String(PUSH_CLAIM_STALE_MINUTES)]
+    );
+    return rows.length > 0;
+  },
+  /** Processing finished; later deliveries of this push are true duplicates. */
+  async complete({ projectId, ref, before, after }) {
+    await getDb().query(
+      `UPDATE processed_pushes SET completed_at = now()
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4`,
+      [projectId, ref, before, after]
+    );
+  },
+  /** Processing failed; let a redelivery try again. */
+  async release({ projectId, ref, before, after }) {
+    await getDb().query(
+      `DELETE FROM processed_pushes
+        WHERE project_id = $1 AND ref = $2 AND before_sha = $3 AND after_sha = $4
+          AND completed_at IS NULL`,
+      [projectId, ref, before, after]
+    );
+  },
+};
+
+// ── Projects, members, invites (Takeoff Milestone 2, migration 031) ─────
+// The owner is deployments.user_id; everyone else is a project_members row.
+
+const MEMBER_LABELS = Object.freeze(['creator', 'builder']);
+
+const projectMembers = {
+  /** Ids of the projects `userId` is a member of (owners not included). */
+  async projectIdsForUser(userId) {
+    const { rows } = await getDb().query('SELECT project_id FROM project_members WHERE user_id = $1', [userId]);
+    return rows.map((r) => r.project_id);
+  },
+  async list(projectId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_members WHERE project_id = $1 ORDER BY joined_at, user_id',
+      [projectId]
+    );
+    return rows;
+  },
+  async get(projectId, userId) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [projectId, userId]
+    );
+    return rows[0] || null;
+  },
+  async setLabels(projectId, userId, labels) {
+    const { rows } = await getDb().query(
+      `UPDATE project_members SET labels = $3::TEXT[], updated_at = now()
+        WHERE project_id = $1 AND user_id = $2 RETURNING *`,
+      [projectId, userId, labels]
+    );
+    return rows[0] || null;
+  },
+  /** The owner's own row, made on first use so the owner has labels too. */
+  async ensure(projectId, userId, { email = null, displayName = null, labels = [] } = {}) {
+    const { rows } = await getDb().query(
+      `INSERT INTO project_members (project_id, user_id, email, display_name, labels)
+        VALUES ($1, $2, $3, $4, $5::TEXT[])
+        ON CONFLICT (project_id, user_id) DO UPDATE
+          SET email = COALESCE(EXCLUDED.email, project_members.email),
+              display_name = COALESCE(EXCLUDED.display_name, project_members.display_name)
+        RETURNING *`,
+      [projectId, userId, email, displayName, labels]
+    );
+    return rows[0];
+  },
+  async remove(projectId, userId) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM project_members WHERE project_id = $1 AND user_id = $2',
+      [projectId, userId]
+    );
+    return rowCount > 0;
+  },
+};
+
+const projectInvites = {
+  async create({ id, projectId, email = null, githubLogin = null, githubUserId = null, tokenHash, invitedBy, invitedByName = null, expiresAt }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO project_invites (id, project_id, email, github_login, github_user_id, token_hash, invited_by, invited_by_name, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT DO NOTHING
+        RETURNING *`,
+      [id, projectId, email, githubLogin, githubUserId, tokenHash, invitedBy, invitedByName, expiresAt]
+    );
+    return rows[0] || null;
+  },
+  /** The open invite for this address, if one exists (for "invite again"). */
+  async findOpen(projectId, { email = null, githubLogin = null }) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_invites
+        WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+          AND (($2::TEXT IS NOT NULL AND LOWER(email) = LOWER($2::TEXT))
+            OR ($3::TEXT IS NOT NULL AND LOWER(github_login) = LOWER($3::TEXT)))`,
+      [projectId, email, githubLogin]
+    );
+    return rows[0] || null;
+  },
+  /** A new token for an open invite (the old link stops working). */
+  async rotateToken(id, tokenHash, expiresAt, { githubUserId = null } = {}) {
+    // The original inviter stays on the invite (they can still cancel it).
+    const { rows } = await getDb().query(
+      `UPDATE project_invites SET token_hash = $2, expires_at = $3,
+          github_user_id = COALESCE($4, github_user_id)
+        WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL RETURNING *`,
+      [id, tokenHash, expiresAt, githubUserId]
+    );
+    return rows[0] || null;
+  },
+  async findByTokenHash(tokenHash) {
+    const { rows } = await getDb().query('SELECT * FROM project_invites WHERE token_hash = $1', [tokenHash]);
+    return rows[0] || null;
+  },
+  async listOpen(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM project_invites
+        WHERE project_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+        ORDER BY created_at DESC LIMIT 200`,
+      [projectId]
+    );
+    return rows;
+  },
+  async revoke(projectId, id) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET revoked_at = now()
+        WHERE project_id = $1 AND id = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [projectId, id]
+    );
+    return rowCount > 0;
+  },
+  /** Cancel the open invites someone sent (when they leave or are removed). */
+  async revokeByInviter(projectId, userId) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET revoked_at = now()
+        WHERE project_id = $1 AND invited_by = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [projectId, userId]
+    );
+    return rowCount;
+  },
+  /** Undo markLinkSent after a send that failed, so a retry isn't blocked. */
+  async clearLinkSent(id) {
+    await getDb().query('UPDATE project_invites SET last_link_sent_at = NULL WHERE id = $1', [id]);
+  },
+  /**
+   * Note a sign-in link send, at most one per `minSeconds` per invite.
+   * @returns {Promise<boolean>} false when one was sent too recently
+   */
+  async markLinkSent(id, minSeconds = 60) {
+    const { rowCount } = await getDb().query(
+      `UPDATE project_invites SET last_link_sent_at = now()
+        WHERE id = $1 AND (last_link_sent_at IS NULL OR last_link_sent_at < now() - ($2 || ' seconds')::interval)`,
+      [id, String(minSeconds)]
+    );
+    return rowCount > 0;
+  },
+  /**
+   * Use the invite and add the member, in one transaction. The invite is
+   * claimed first (still open and unexpired), so a link works once.
+   * @returns {Promise<{ member: object, alreadyMember: boolean }|null>} null when the invite can't be used
+   */
+  async accept({ id, userId, email, displayName = null, labels }) {
+    return withTransaction(async (client) => {
+      const { rows: inv } = await client.query(
+        `UPDATE project_invites SET accepted_at = now(), accepted_by = $2
+          WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+          RETURNING *`,
+        [id, userId]
+      );
+      if (!inv[0]) return null;
+      const { rows } = await client.query(
+        `INSERT INTO project_members (project_id, user_id, email, display_name, labels, invited_by)
+          VALUES ($1, $2, $3, $4, $5::TEXT[], $6)
+          ON CONFLICT (project_id, user_id) DO NOTHING
+          RETURNING *`,
+        [inv[0].project_id, userId, email, displayName, labels, inv[0].invited_by]
+      );
+      if (rows[0]) return { member: rows[0], alreadyMember: false };
+      const { rows: existing } = await client.query(
+        'SELECT * FROM project_members WHERE project_id = $1 AND user_id = $2',
+        [inv[0].project_id, userId]
+      );
+      return { member: existing[0], alreadyMember: true };
+    });
+  },
+};
+
+const recommendations = {
+  async create({ id, projectId, actionType, payload, summary, createdBy }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO recommendations (id, project_id, action_type, payload, summary, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [id, projectId, actionType, JSON.stringify(payload || {}), summary, createdBy]
+    );
+    return rows[0];
+  },
+  async get(projectId, id) {
+    const { rows } = await getDb().query('SELECT * FROM recommendations WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] || null;
+  },
+  async listPending(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM recommendations WHERE project_id = $1 AND status IN ('pending', 'confirming')
+        ORDER BY created_at DESC LIMIT 100`,
+      [projectId]
+    );
+    return rows;
+  },
+  /**
+   * Take a pending recommendation to run it. Only one confirmer wins; a run
+   * that died mid-way is taken again after 10 minutes.
+   */
+  async claimForConfirm(projectId, id, userId) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'confirming', decided_by = $3, decided_at = now()
+        WHERE project_id = $1 AND id = $2
+          AND (status = 'pending' OR (status = 'confirming' AND decided_at < now() - interval '10 minutes'))
+        RETURNING *`,
+      [projectId, id, userId]
+    );
+    return rows[0] || null;
+  },
+  async finish(id, { status, result = null, error = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = $2, result = $3, error = $4, decided_at = now()
+        WHERE id = $1 AND status = 'confirming' RETURNING *`,
+      [id, status, result ? JSON.stringify(result) : null, error]
+    );
+    return rows[0] || null;
+  },
+  /** Back to pending after a confirm that failed, keeping why, so someone can try again. */
+  async release(id, error = null) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'pending', decided_by = NULL, decided_at = NULL, error = $2
+        WHERE id = $1 AND status = 'confirming' RETURNING *`,
+      [id, error]
+    );
+    return rows[0] || null;
+  },
+  async dismiss(projectId, id, userId) {
+    const { rows } = await getDb().query(
+      `UPDATE recommendations SET status = 'dismissed', decided_by = $3, decided_at = now()
+        WHERE project_id = $1 AND id = $2 AND status = 'pending' RETURNING *`,
+      [projectId, id, userId]
+    );
+    return rows[0] || null;
+  },
+};
+
+// ── Agreements (Milestone 3) ────────────────────────────────────────────
+
+const AGREEMENT_COMMIT_STALE = "interval '10 minutes'";
+
+const agreements = {
+  async create({ id, projectId, areaId = null, text, source = null, proposedBy, proposedByName = null }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO agreements (id, project_id, area_id, text, source, proposed_by, proposed_by_name)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [id, projectId, areaId, text, source, proposedBy, proposedByName]
+    );
+    return rows[0];
+  },
+  async get(projectId, id) {
+    const { rows } = await getDb().query('SELECT * FROM agreements WHERE project_id = $1 AND id = $2', [projectId, id]);
+    return rows[0] || null;
+  },
+  async getById(id) {
+    const { rows } = await getDb().query('SELECT * FROM agreements WHERE id = $1', [id]);
+    return rows[0] || null;
+  },
+  async list(projectId, { limit = 100 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM agreements WHERE project_id = $1
+        ORDER BY (status = 'proposed') DESC, proposed_at DESC LIMIT $2`,
+      [projectId, limit]
+    );
+    return rows;
+  },
+  /** proposed → accepted/declined/withdrawn, once. Returns the row, or null when it was already decided. */
+  async decide(projectId, id, { status, decidedBy, via, note = null, agreedByEmails = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET status = $3, decided_by = $4, decided_at = now(), decided_via = $5,
+          decision_note = $6, agreed_by_emails = $7
+        WHERE project_id = $1 AND id = $2 AND status = 'proposed' RETURNING *`,
+      [projectId, id, status, decidedBy, via, note, agreedByEmails]
+    );
+    return rows[0] || null;
+  },
+  /** Take an accepted agreement to commit it. Only one runner wins; a stuck run is taken again after 10 minutes. */
+  async claimCommit(projectId, id) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET commit_state = 'committing', commit_attempted_at = date_trunc('milliseconds', now()), commit_error = NULL
+        WHERE project_id = $2 AND id = $1 AND status = 'accepted'
+          AND (commit_state IN ('none', 'waiting_for_write', 'failed')
+            OR (commit_state = 'committing' AND commit_attempted_at < now() - ${AGREEMENT_COMMIT_STALE}))
+        RETURNING *`,
+      [id, projectId]
+    );
+    return rows[0] || null;
+  },
+  async setAgreedBy(projectId, id, emails) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET agreed_by_emails = $3::text[] WHERE project_id = $1 AND id = $2 AND status = 'accepted' RETURNING *`,
+      [projectId, id, emails]
+    );
+    return rows[0] || null;
+  },
+  /**
+   * Record the commit outcome. With `from`, only while the state is one of
+   * those; with `claimedAt` (the claim's commit_attempted_at, ms precision),
+   * only while that claim is the current one.
+   */
+  async setCommit(id, { state, sha = null, url = null, prUrl = null, error = null, recommendationId, from = null, claimedAt = null }) {
+    const { rows } = await getDb().query(
+      `UPDATE agreements SET commit_state = $2, commit_sha = COALESCE($3, commit_sha), commit_url = COALESCE($4, commit_url),
+          commit_pr_url = COALESCE($5, commit_pr_url), commit_error = $6,
+          recommendation_id = COALESCE($7, recommendation_id)
+        WHERE id = $1 AND ($8::text[] IS NULL OR commit_state = ANY($8::text[]))
+          AND ($9::timestamptz IS NULL OR commit_attempted_at = $9::timestamptz) RETURNING *`,
+      [id, state, sha, url, prUrl, error, recommendationId ?? null, from, claimedAt]
+    );
+    return rows[0] || null;
+  },
+};
+
+const agreementVotes = {
+  async upsert(agreementId, userId, { vote, comment = null }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO agreement_votes (agreement_id, user_id, vote, comment)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (agreement_id, user_id) DO UPDATE
+          SET vote = EXCLUDED.vote, comment = EXCLUDED.comment, voted_at = now()
+        RETURNING *`,
+      [agreementId, userId, vote, comment]
+    );
+    return rows[0];
+  },
+  async listFor(agreementIds) {
+    if (!agreementIds.length) return [];
+    const { rows } = await getDb().query(
+      'SELECT * FROM agreement_votes WHERE agreement_id = ANY($1::text[]) ORDER BY voted_at ASC',
+      [agreementIds]
+    );
+    return rows;
+  },
+};
+
+const notificationOutbox = {
+  /** Queue one email. A `dedupeKey` already queued is skipped (returns false). */
+  async enqueue({ id, projectId, userId, email, kind, subject, body, link = null, dedupeKey = null }) {
+    const { rowCount } = await getDb().query(
+      `INSERT INTO notification_outbox (id, project_id, recipient_user_id, recipient_email, kind, subject, body, link, dedupe_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING`,
+      [id, projectId, userId, email, kind, subject, body, link, dedupeKey]
+    );
+    return rowCount > 0;
+  },
+  /** Recipients with something unsent who can still get email this hour (no digest in the last hour). */
+  async pendingRecipients({ limit = 200 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT o.recipient_email, MIN(o.created_at) AS oldest FROM notification_outbox o
+        WHERE o.sent_at IS NULL AND o.attempts < 5
+          AND NOT EXISTS (SELECT 1 FROM notification_outbox d
+            WHERE d.recipient_email = o.recipient_email AND d.digest_id IS NOT NULL AND d.sent_at >= now() - interval '1 hour')
+        GROUP BY o.recipient_email ORDER BY oldest LIMIT $1`,
+      [limit]
+    );
+    return rows.map((r) => r.recipient_email);
+  },
+  /** Claim `email`'s unsent emails for sending, so two servers don't both send them. */
+  async claimUnsent(email) {
+    const { rows } = await getDb().query(
+      `UPDATE notification_outbox SET claimed_at = now()
+        WHERE id IN (SELECT id FROM notification_outbox
+          WHERE recipient_email = $1 AND sent_at IS NULL AND attempts < 5
+            AND (claimed_at IS NULL OR claimed_at < now() - interval '5 minutes')
+          ORDER BY created_at ASC LIMIT 100 FOR UPDATE SKIP LOCKED)
+        RETURNING *`,
+      [email]
+    );
+    return rows.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  },
+  async releaseClaims(ids) {
+    if (!ids.length) return;
+    await getDb().query('UPDATE notification_outbox SET claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL', [ids]);
+  },
+  /** What went to `email` since `since`: single emails and digests, counted apart. */
+  async sentSince(email, since) {
+    const { rows } = await getDb().query(
+      `SELECT COUNT(*) FILTER (WHERE digest_id IS NULL)::int AS singles,
+              COUNT(DISTINCT digest_id)::int AS digests
+         FROM notification_outbox
+        WHERE recipient_email = $1 AND sent_at IS NOT NULL AND sent_at >= $2`,
+      [email, since]
+    );
+    return { singles: rows[0]?.singles || 0, digests: rows[0]?.digests || 0 };
+  },
+  async markSent(ids, digestId = null) {
+    if (!ids.length) return;
+    await getDb().query(
+      'UPDATE notification_outbox SET sent_at = now(), digest_id = $2 WHERE id = ANY($1::text[]) AND sent_at IS NULL',
+      [ids, digestId]
+    );
+  },
+  async markFailed(ids, error) {
+    if (!ids.length) return;
+    await getDb().query(
+      'UPDATE notification_outbox SET attempts = attempts + 1, last_error = $2, claimed_at = NULL WHERE id = ANY($1::text[]) AND sent_at IS NULL',
+      [ids, String(error).slice(0, 500)]
+    );
+  },
+};
+
+const userGithubLinks = {
+  async upsert(userId, { githubUserId, githubLogin }) {
+    await getDb().query(
+      `INSERT INTO user_github_links (user_id, github_user_id, github_login)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id) DO UPDATE
+          SET github_user_id = EXCLUDED.github_user_id, github_login = EXCLUDED.github_login, linked_at = now()`,
+      [userId, githubUserId, githubLogin]
+    );
+  },
+  async get(userId) {
+    const { rows } = await getDb().query('SELECT * FROM user_github_links WHERE user_id = $1', [userId]);
+    return rows[0] || null;
+  },
+  async deleteForGithubUser(githubUserId) {
+    await getDb().query('DELETE FROM user_github_links WHERE github_user_id = $1', [githubUserId]);
+  },
+};
+
+// ── PR verdict checks (Takeoff Milestone 4, migration 030) ─────────
+//
+// One row per (repo, PR, head sha). claim() is the dedupe: only the delivery
+// whose claim lands calls the model. The stale window is longer than a run can
+// take (one model call is capped at about 8 minutes with its retry).
+const PR_CHECK_STALE_MINUTES = 30;
+
+const prChecks = {
+  /**
+   * The claimed row, or null when another run holds it or finished it. A row
+   * that failed, or is stuck running past the stale window, is claimed again.
+   * `force` (Re-run on the check) also re-claims a finished row. The returned
+   * `attempts` identifies this claim: later writes only land while it holds.
+   */
+  async claim({ repo, prNumber, headSha, projectId, installationId = null, force = false }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO pr_checks (repo_full_name, pr_number, head_sha, project_id, installation_id)
+        VALUES ($1, $2, $3, $4, $7)
+        ON CONFLICT (repo_full_name, pr_number, head_sha) DO UPDATE
+          SET status = 'running', attempts = pr_checks.attempts + 1, error = NULL,
+              -- A stale running attempt's check run is still open: keep it, so
+              -- the new attempt reuses and closes it.
+              check_run_id = CASE WHEN pr_checks.status = 'running' THEN pr_checks.check_run_id END,
+              project_id = COALESCE(EXCLUDED.project_id, pr_checks.project_id),
+              installation_id = COALESCE(EXCLUDED.installation_id, pr_checks.installation_id),
+              updated_at = now(), completed_at = NULL
+          WHERE pr_checks.status = 'failed'
+             OR (pr_checks.status = 'running' AND pr_checks.updated_at < now() - ($5 || ' minutes')::interval)
+             OR ($6 AND pr_checks.status <> 'running')
+        RETURNING *`,
+      [repo, prNumber, headSha, projectId ?? null, String(PR_CHECK_STALE_MINUTES), !!force, installationId]
+    );
+    return rows[0] || null;
+  },
+  async get({ repo, prNumber, headSha }) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM pr_checks WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3',
+      [repo, prNumber, headSha]
+    );
+    return rows[0] || null;
+  },
+  /** Record this attempt's in-progress check run as soon as it exists, so a sweep can close it. */
+  async setCheckRun({ repo, prNumber, headSha }, attempts, checkRunId) {
+    await getDb().query(
+      `UPDATE pr_checks SET check_run_id = $5, updated_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
+          AND status = 'running' AND attempts = $4`,
+      [repo, prNumber, headSha, attempts, checkRunId]
+    );
+  },
+  /**
+   * Finish this attempt. Only lands while the row is still this attempt's and
+   * running, so a late run never overwrites a newer claim or the sweep.
+   * @returns {Promise<boolean>} whether it landed
+   */
+  async finish({ repo, prNumber, headSha }, { status, verdict = null, result = null, commentId = null, checkRunId = null, model = null, error = null }, attempts) {
+    const { rowCount } = await getDb().query(
+      `UPDATE pr_checks
+          SET status = $4, verdict = $5, result_json = $6, comment_id = COALESCE($7, comment_id),
+              check_run_id = COALESCE($8, check_run_id), model = COALESCE($9, model), error = $10,
+              updated_at = now(), completed_at = now()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3
+          AND status = 'running' AND attempts = $11`,
+      [repo, prNumber, headSha, status, verdict, result ? JSON.stringify(result) : null, commentId, checkRunId, model, error, attempts]
+    );
+    return rowCount > 0;
+  },
+  /** This sha's verdict is now on the PR's comment. Pass the locked client inside withCommentLock. */
+  async setComment({ repo, prNumber, headSha }, commentId, db = getDb()) {
+    await db.query(
+      // clock_timestamp(): now() is the transaction's start, before the lock wait.
+      `UPDATE pr_checks SET comment_id = $4, comment_at = clock_timestamp()
+        WHERE repo_full_name = $1 AND pr_number = $2 AND head_sha = $3`,
+      [repo, prNumber, headSha, commentId]
+    );
+  },
+  /** The row whose verdict the PR's Takeoff comment shows now, if any. */
+  async latestComment({ repo, prNumber }, db = getDb()) {
+    const { rows } = await db.query(
+      `SELECT head_sha, comment_id FROM pr_checks
+        WHERE repo_full_name = $1 AND pr_number = $2 AND comment_id IS NOT NULL
+        ORDER BY comment_at DESC NULLS LAST, updated_at DESC LIMIT 1`,
+      [repo, prNumber]
+    );
+    return rows[0] ? { headSha: rows[0].head_sha, commentId: Number(rows[0].comment_id) } : null;
+  },
+  /**
+   * Run `fn(client)` holding a per-PR lock, so two checks of one PR never both
+   * post the first comment, and which sha the comment shows is decided and
+   * recorded atomically. A transaction-scoped advisory lock, which works
+   * through the transaction pooler too. Waiting is capped so a burst can't
+   * tie up the pool.
+   */
+  async withCommentLock({ repo, prNumber }, fn) {
+    const client = await getDb().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL lock_timeout = '20s'");
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pr_comment:${repo}#${prNumber}`]);
+      const out = await fn(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+  /**
+   * Take over runs left 'running' past the stale window (e.g. a restart
+   * mid-check): marks them failed in one statement and returns them, so a
+   * run claimed or finished meanwhile is never touched.
+   */
+  async failStale() {
+    const { rows } = await getDb().query(
+      `UPDATE pr_checks SET status = 'failed', error = 'interrupted', updated_at = now(), completed_at = now()
+        WHERE (repo_full_name, pr_number, head_sha) IN (
+          SELECT repo_full_name, pr_number, head_sha FROM pr_checks
+           WHERE status = 'running' AND updated_at < now() - ($1 || ' minutes')::interval
+           ORDER BY updated_at LIMIT 100
+           FOR UPDATE SKIP LOCKED)
+          AND status = 'running'
+        RETURNING *`,
+      [String(PR_CHECK_STALE_MINUTES)]
+    );
+    return rows;
+  },
+};
+
 // ── Intent statements (Takeoff intent substrate) ──────────────────
 //
 // The first-class "what this app is meant to do" object. Gaps and
@@ -2673,11 +3349,13 @@ const readClaims = {
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
-  analyses, deployments, buildEntries, projectServices, projectEvents,
+  analyses, deployments, githubRepoAccess, buildEntries, projectServices, projectEvents,
   suggestions, analysisFiles, analysisFileChunks, analysisLlmCalls, analysisEvents,
   commitReviews,
   productMap,
-  shippedItems, webhookEvents, securityShares,
+  shippedItems, webhookEvents, processedPushes, prChecks, securityShares,
+  projectMembers, projectInvites, recommendations, userGithubLinks, MEMBER_LABELS,
+  agreements, agreementVotes, notificationOutbox,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   // Pure query builders exported for unit tests only.

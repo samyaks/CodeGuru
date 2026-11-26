@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const express = require('express');
 const railway = require('@codeguru/railway');
-const { analyses } = require('../lib/db');
+const { analyses, deployments } = require('../lib/db');
+const { checkAnalysisView, checkAnalysisManage } = require('../lib/analysis-access');
 const { createRateLimit } = require('../lib/rate-limit');
 const { AppError } = require('../lib/app-error');
 
@@ -142,8 +143,7 @@ router.get('/connect', connectRateLimit, async (req, res, next) => {
     if (!analysisId || typeof analysisId !== 'string') {
       throw AppError.badRequest('analysisId query parameter is required');
     }
-    const analysis = await analyses.findById(analysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found');
+    const analysis = await checkAnalysisManage(await analyses.findById(analysisId), req, { deployments });
 
     if (analysis.railway_access_token) {
       throw AppError.conflict('A Railway account is already connected to this analysis. Disconnect first to reconnect.');
@@ -170,8 +170,7 @@ router.get('/connect', connectRateLimit, async (req, res, next) => {
 
 router.get('/status/:analysisId', statusRateLimit, async (req, res, next) => {
   try {
-    const analysis = await analyses.findById(req.params.analysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found');
+    const analysis = await checkAnalysisView(await analyses.findById(req.params.analysisId), req, { deployments });
 
     if (!analysis.railway_access_token) {
       return res.json({ connected: false });
@@ -227,8 +226,7 @@ router.get('/status/:analysisId', statusRateLimit, async (req, res, next) => {
 
 router.delete('/disconnect/:analysisId', disconnectRateLimit, async (req, res, next) => {
   try {
-    const analysis = await analyses.findById(req.params.analysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found');
+    const analysis = await checkAnalysisManage(await analyses.findById(req.params.analysisId), req, { deployments });
     await analyses.update(analysis.id, clearRailwayColumns());
     res.json({ ok: true });
   } catch (err) {
@@ -238,8 +236,7 @@ router.delete('/disconnect/:analysisId', disconnectRateLimit, async (req, res, n
 
 router.post('/relookup/:analysisId', relookupRateLimit, async (req, res, next) => {
   try {
-    const analysis = await analyses.findById(req.params.analysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found');
+    const analysis = await checkAnalysisManage(await analyses.findById(req.params.analysisId), req, { deployments });
     if (!analysis.railway_access_token) {
       throw AppError.badRequest('Railway is not connected for this analysis');
     }
@@ -325,8 +322,10 @@ callbackRouter.get('/callback', callbackRateLimit, async (req, res, next) => {
       throw AppError.badRequest('OAuth state mismatch. Please retry the connection.');
     }
 
-    const analysis = await analyses.findById(stateAnalysisId);
-    if (!analysis) throw AppError.notFound('Analysis not found for callback');
+    // The nonce cookie is not signed, so anyone can set one in their own
+    // browser: the signed-in user finishing the flow must also own the
+    // analysis, or they could attach their Railway account to someone else's.
+    const analysis = await checkAnalysisManage(await analyses.findById(stateAnalysisId), req, { deployments });
 
     const tokens = await exchangeCode(code);
     const accessToken = tokens.access_token;

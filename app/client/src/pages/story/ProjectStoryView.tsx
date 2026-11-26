@@ -135,6 +135,8 @@ export interface ProjectStoryViewProps {
   onRedo?: () => void;
   /** Signed-out and non-owner visitors: no editing or copying. */
   readOnly?: boolean;
+  /** Members and invites, shown above the footer for signed-in members. */
+  team?: ReactNode;
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -178,6 +180,7 @@ export function ProjectStoryView({
   onRedo,
   readOnly = false,
   oldHref,
+  team,
 }: ProjectStoryViewProps) {
   const [doneOpen, setDoneOpen] = useState<boolean | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -504,6 +507,8 @@ export function ProjectStoryView({
             </ol>
           </section>
           ) : null}
+
+          {team}
 
           <footer className={styles.foot}>
             <p className={cx('type-small', styles.muted)}>Project updated {story.readAt}.</p>

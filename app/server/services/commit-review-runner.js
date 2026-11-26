@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
-const github = require('./github');
 const { commitReviews, deployments, buildEntries } = require('../lib/db');
+const { clientForProject } = require('./github-access');
 const { detectDeploymentInPR } = require('./deployment');
 const reviewer = require('./reviewer');
 const { generateCommitContextDraft } = require('./commit-context-generator');
@@ -93,16 +93,17 @@ async function runCommitReviewJob({
   let before = beforeSha;
   let commitTitle = headCommitTitle || '';
   let commitBody = headCommitBody || '';
+  const gh = clientForProject(await deployments.findById(projectId));
 
   if (isZeroSha(beforeSha)) {
-    const detail = await github.fetchCommitWithPatches(owner, repo, afterSha);
+    const detail = await gh.fetchCommitWithPatches(owner, repo, afterSha);
     files = prepareFiles(detail.files || []);
     before = detail.parents && detail.parents[0] ? detail.parents[0] : null;
     if (!commitTitle) commitTitle = detail.title || '';
     if (!commitBody) commitBody = detail.message || '';
   } else {
     try {
-      const compare = await github.fetchCompare(owner, repo, beforeSha, afterSha);
+      const compare = await gh.fetchCompare(owner, repo, beforeSha, afterSha);
       const raw = (compare.files || []).map((f) => ({
         filename: f.filename,
         status: f.status,
@@ -119,7 +120,7 @@ async function runCommitReviewJob({
         commitBody = msg;
       }
     } catch {
-      const detail = await github.fetchCommitWithPatches(owner, repo, afterSha);
+      const detail = await gh.fetchCommitWithPatches(owner, repo, afterSha);
       files = prepareFiles(detail.files || []);
       if (!commitTitle) commitTitle = detail.title || '';
       if (!commitBody) commitBody = detail.message || '';

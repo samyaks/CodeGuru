@@ -1,7 +1,7 @@
 const express = require('express');
 const { deployments, productMap: productMapStore } = require('../lib/db');
 const { asyncHandler } = require('../lib/async-handler');
-const { checkProjectAccess } = require('../lib/helpers');
+const { checkProjectAccess, checkProjectOwner } = require('../lib/helpers');
 const { AppError } = require('../lib/app-error');
 const {
   createProductMap,
@@ -167,7 +167,16 @@ router.post(
       // MUST run the same check before handing back the map, or any
       // caller can read any private project's map by POSTing here.
       let project = null;
-      if (!force) {
+      if (force) {
+        // A forced re-run is a fresh model run: owner-only, like Read's
+        // regenerate. Members still get the existing map, or bootstrap the
+        // first one, through the non-forced path.
+        project = await deployments.findById(projectId);
+        if (!project) {
+          return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });
+        }
+        checkProjectOwner(project, req);
+      } else {
         project = await deployments.findById(projectId);
         if (!project) {
           return res.status(404).json({ error: 'Project not found', code: 'NOT_FOUND' });

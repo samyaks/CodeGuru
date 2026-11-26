@@ -1,0 +1,25 @@
+version: 2
+product:
+  name: Delta-V
+  summary: "Plans trips for two people and splits the costs."
+areas:
+  - id: billing
+    name: Billing & pricing
+    paths: ["src/billing/**", "src/pages/checkout*"]
+    creators: ["samyak@example.com"]
+    rules:
+      - "Stripe holds all billing data; we store only Stripe IDs."
+    never:
+      - "Never store card numbers."
+  - id: trips
+    name: Trips
+    paths: ["src/trips/**"]
+    creators: ["saagar@example.com"]
+    rules:
+      - "A trip has two or three travellers."
+agreements:
+  - id: agr_2026_11_24_annual_plan
+    area: billing
+    text: "Offer an annual plan at 20% off monthly."
+    agreed_by: ["samyak@example.com", "saagar@example.com"]
+    agreed_on: 2026-11-24
