@@ -118,7 +118,12 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
       case 'migrate': return migrateCommand({ yamlPath, label, dryRun: args.flags.has('--dry-run'), out, err });
       case 'notes': return notesCommand({ dir, args, out, err, ...io });
       case 'hook': return hookCommand({ dir, args, out, err, ...io });
-      case 'mcp': return serve({ dir, err, ...io });
+      case 'mcp':
+        if (args.file || rest.length) {
+          err('`takeoff mcp` reads takeoff.yaml at the root of the repo; it takes no file. Use --dir to point it at another repo.');
+          return 2;
+        }
+        return serve({ dir, err, ...io });
       default:
         err(`Unknown command "${command}".\n\n${HELP}`);
         return 2;

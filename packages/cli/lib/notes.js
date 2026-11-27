@@ -38,8 +38,9 @@ function parseSendBack(body) {
 
 /** "owner/repo" from a GitHub remote URL (https or ssh), or null. */
 function repoFromRemote(url) {
-  const m = /github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
-  return m ? `${m[1]}/${m[2]}` : null;
+  const m = /(?:^|[@/])github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
+  if (!m || /^\.+$/.test(m[1]) || /^\.+$/.test(m[2])) return null;
+  return `${m[1]}/${m[2]}`;
 }
 
 function defaultExec(cmd, args, cwd) {
@@ -104,7 +105,9 @@ function edited(c) {
 // a note is text for a person or an agent, not instructions to a terminal.
 // Nor are characters nobody can see but a model reads: zero-width ones and
 // Unicode tag characters, which can spell out hidden text.
-const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
+// Characters a reader can't see but a model can: controls, bidi and zero-width
+// marks, fillers, variation selectors and tag characters.
+const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 const printable = (t) => String(t ?? '').replace(CONTROL, '');
 
 /**

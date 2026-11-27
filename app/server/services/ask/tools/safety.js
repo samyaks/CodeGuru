@@ -17,8 +17,6 @@ class AskToolError extends Error {
   }
 }
 
-const MAX_PATH = 1024;
-
 /**
  * A repo-relative path, normalized. Refuses absolute paths, `..`, empty
  * segments after cleaning, backslashes and control characters.

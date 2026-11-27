@@ -87,7 +87,7 @@ function upstreamOf(info, exec) {
   try {
     const [remote, ref] = String(exec('git', ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${info.branch}`], info.root))
       .replace(/\n$/, '').split('\0');
-    if (!remote || !ref || !ref.startsWith('refs/heads/')) return null;
+    if (!remote || remote.startsWith('-') || !ref || !ref.startsWith('refs/heads/')) return null;
     const repo = repoFromRemote(one(exec, ['remote', 'get-url', remote], info.root));
     return repo ? { repo, branch: ref.slice('refs/heads/'.length) } : null;
   } catch {
@@ -570,6 +570,9 @@ function installCommand({ dir, args, out, err, exec, env }) {
       return 1;
     }
   }
+  // Check .mcp.json before writing anything, so a refusal there leaves both files as they were.
+  const mcp = args.flags.has('--mcp') ? prepareMcp({ root, program, local, err }) : null;
+  if (mcp && mcp.code) return mcp.code;
   const lines = [];
   let changed = false;
   for (const w of INSTALLED) {
@@ -604,12 +607,12 @@ function installCommand({ dir, args, out, err, exec, env }) {
     out(`Wrote ${rel}. Claude Code picks the hooks up in its next session.`);
     if (!local) out(`${rel} is shared with everyone who clones the repo; use --local to keep the hooks to yourself.`);
   }
-  if (args.flags.has('--mcp')) {
-    const code = installMcp({ root, program, local, out, err });
+  if (mcp) {
+    const code = mcp.apply(out, err);
     if (code) return code;
   }
   if (!onPath(program, env)) {
-    out(`Note: \`${program.split(' ')[0]}\` isn't on your PATH, so the hooks do nothing until it is. Install @takeoff/cli globally, or run this again with --command "npx --no-install takeoff".`);
+    out(`Note: \`${program.split(' ')[0]}\` isn't on your PATH, so the hooks do nothing until it is${mcp && !local ? ' and Claude Code shows the plan tools as failed' : ''}. Install @takeoff/cli globally, or run this again with --command "npx --no-install takeoff".`);
   }
   return 0;
 }
@@ -622,20 +625,34 @@ const mcpEntry = (program) => {
   return { type: 'stdio', command, args: [...rest, 'mcp'] };
 };
 
-/** An entry Takeoff wrote, with any program. */
-const isOurMcp = (e) => !!e && typeof e === 'object' && !Array.isArray(e) && typeof e.command === 'string'
-  && Array.isArray(e.args) && e.args[e.args.length - 1] === 'mcp'
-  && /takeoff/.test([e.command, ...e.args].join(' '));
+/**
+ * An entry Takeoff wrote, for any program: exactly { type: "stdio", command,
+ * args: [...rest, "mcp"] } where the program is a plain command naming
+ * takeoff. Anything more (env, cwd, a shell) isn't ours, so it isn't touched.
+ */
+function isOurMcp(e) {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return false;
+  if (Object.keys(e).some((k) => !['type', 'command', 'args'].includes(k))) return false;
+  if (e.type !== undefined && e.type !== 'stdio') return false;
+  if (typeof e.command !== 'string' || !Array.isArray(e.args) || e.args.at(-1) !== 'mcp') return false;
+  if (!e.args.every((a) => typeof a === 'string')) return false;
+  const program = [e.command, ...e.args.slice(0, -1)].join(' ');
+  return COMMAND_RE.test(program) && /(?:^|[ /@])takeoff(?:$|[ @])/.test(program);
+}
+
+const sameEntry = (a, b) => a.type === b.type && a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args);
 
 /**
- * Add `takeoff mcp` to the repo's .mcp.json, where Claude Code finds servers
- * shared with the repo. With --local nothing is written: Claude Code keeps a
- * private server in its own settings, so this prints the command that adds it.
+ * Plan the change to the repo's .mcp.json, where Claude Code finds servers
+ * shared with the repo: { code } when it can't be made, else { apply(out, err) }.
+ * With --local nothing is written: Claude Code keeps a private server in its
+ * own settings, so apply prints the command that adds it.
  */
-function installMcp({ root, program, local, out, err }) {
+function prepareMcp({ root, program, local, err }) {
   if (local) {
-    out(`To add the plan tools for yourself only, run:\n  claude mcp add --scope local takeoff -- ${program} mcp`);
-    return 0;
+    return {
+      apply: (out) => { out(`To add the plan tools for yourself only, run:\n  claude mcp add --scope local takeoff -- ${program} mcp`); return 0; },
+    };
   }
   const file = path.join(root, MCP_FILE);
   let text;
@@ -643,49 +660,55 @@ function installMcp({ root, program, local, out, err }) {
     assertNoSymlink(root, MCP_FILE);
     text = readIfExists(file);
   } catch (e) {
-    if (e instanceof TakeoffError) { err(e.message); return 1; }
-    err(`Couldn't read ${MCP_FILE} (${e.code || e.message}), so it wasn't changed.`);
-    return 1;
+    if (e instanceof TakeoffError) { err(e.message); return { code: 1 }; }
+    err(`Couldn't read ${MCP_FILE} (${e.code || e.message}), so nothing was changed.`);
+    return { code: 1 };
   }
   let config = {};
   if (text !== null && text.trim()) {
     try { config = JSON.parse(text); } catch {
-      err(`${MCP_FILE} isn't valid JSON, so it wasn't changed. Fix it, then run this again.`);
-      return 1;
+      err(`${MCP_FILE} isn't valid JSON, so nothing was changed. Fix it, then run this again.`);
+      return { code: 1 };
     }
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      err(`${MCP_FILE} isn't a JSON object, so it wasn't changed.`);
-      return 1;
+      err(`${MCP_FILE} isn't a JSON object, so nothing was changed.`);
+      return { code: 1 };
     }
   }
   if (config.mcpServers !== undefined && (typeof config.mcpServers !== 'object' || config.mcpServers === null || Array.isArray(config.mcpServers))) {
-    err(`"mcpServers" in ${MCP_FILE} isn't an object, so it wasn't changed.`);
-    return 1;
+    err(`"mcpServers" in ${MCP_FILE} isn't an object, so nothing was changed.`);
+    return { code: 1 };
   }
   const servers = config.mcpServers || {};
   const want = mcpEntry(program);
   const existing = Object.prototype.hasOwnProperty.call(servers, 'takeoff') ? servers.takeoff : undefined;
   if (existing !== undefined && !isOurMcp(existing)) {
-    err(`${MCP_FILE} already has a server called "takeoff" that Takeoff didn't add, so it wasn't changed.`);
-    return 1;
+    err(`${MCP_FILE} already has a server called "takeoff" that Takeoff didn't write, so nothing was changed. Remove it, then run this again.`);
+    return { code: 1 };
   }
-  if (existing && JSON.stringify(existing) === JSON.stringify(want)) {
-    out(`unchanged  ${MCP_FILE} takeoff server`);
-    return 0;
-  }
-  const keep = existing ? { ...existing } : {};
-  delete keep.type; delete keep.command; delete keep.args;
-  servers.takeoff = { ...want, ...keep };
-  config.mcpServers = servers;
-  try {
-    fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-  } catch (e) {
-    err(`Couldn't write ${MCP_FILE} (${e.code || e.message}).`);
-    return 1;
-  }
-  out(`${existing ? 'updated' : 'added'}      ${MCP_FILE} takeoff server`);
-  out(`Wrote ${MCP_FILE}. Claude Code asks each person to approve the plan tools the first time it starts in this repo.`);
-  return 0;
+  return {
+    apply(out, errOut) {
+      if (existing && sameEntry({ type: 'stdio', ...existing }, want)) {
+        out(`unchanged  ${MCP_FILE} takeoff server`);
+        return 0;
+      }
+      servers.takeoff = want;
+      config.mcpServers = servers;
+      try {
+        // A new file, renamed into place, so a symlink made since the check above is replaced, not followed.
+        const tmp = `${file}.takeoff-${process.pid}.tmp`;
+        try { fs.unlinkSync(tmp); } catch { /* none left over */ }
+        fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' });
+        fs.renameSync(tmp, file);
+      } catch (e) {
+        errOut(`Couldn't write ${MCP_FILE} (${e.code || e.message}). The hooks were installed.`);
+        return 1;
+      }
+      out(`${existing ? 'updated' : 'added'}      ${MCP_FILE} takeoff server`);
+      out(`Wrote ${MCP_FILE}. Claude Code asks each person to approve the plan tools the first time it starts in this repo; anyone without @takeoff/cli installed sees them as failed.`);
+      return 0;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -765,5 +788,5 @@ function hookCommand({ dir, args, out, err, env = process.env, exec = null, fetc
 }
 
 module.exports = {
-  hookCommand, renderContext, repoInfo, upstreamOf, defaultBranch, makeExec, onPath, HOOK_EVENTS, NOTES_TTL_MS, COMMAND_RE,
+  hookCommand, renderContext, repoInfo, upstreamOf, defaultBranch, makeExec, onPath, realish, HOOK_EVENTS, NOTES_TTL_MS, COMMAND_RE,
 };

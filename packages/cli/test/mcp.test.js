@@ -261,6 +261,8 @@ test('text from the plan comes back without control characters', async () => {
   const r = await call(s, 'get_plan', {});
   const text = r.parsed.areas.find((a) => a.id === 'billing').rules[0].text;
   assert.strictEqual(text, 'Stripe holds all billing data.');
+  const { printable } = require('../lib/notes');
+  assert.strictEqual(printable('a\u00ADb\uFE0Fc\u{E0101}d\u3164e\u2028f'), 'abcdef');
 });
 
 test('get_send_back_notes reads the branch\'s open PR, newest first, and fails quietly offline or without a token', async () => {
@@ -398,6 +400,10 @@ test('takeoff hook install --mcp adds the server to .mcp.json once and keeps oth
 
   const again = install(dir, '--mcp');
   assert.ok(again.out.some((l) => /unchanged +\.mcp\.json takeoff server/.test(l)));
+  // The same entry with its keys in another order is still ours and unchanged.
+  fs.writeFileSync(path.join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { takeoff: { args: ['mcp'], command: 'takeoff' }, other: { command: 'other-server' } } }));
+  const reordered = install(dir, '--mcp');
+  assert.ok(reordered.out.some((l) => /unchanged +\.mcp\.json takeoff server/.test(l)), reordered.out.join('\n'));
 
   const npx = install(dir, '--mcp', '--command', 'npx --no-install takeoff');
   assert.strictEqual(npx.code, 0);
@@ -423,7 +429,9 @@ test('takeoff hook install --mcp leaves .mcp.json alone when it can\'t read it, 
     ['{not json', /isn't valid JSON/],
     ['[1]', /isn't a JSON object/],
     ['{"mcpServers": []}', /isn't an object/],
-    ['{"mcpServers": {"takeoff": {"command": "my-own-thing"}}}', /didn't add/],
+    ['{"mcpServers": {"takeoff": {"command": "my-own-thing"}}}', /didn't write/],
+    ['{"mcpServers": {"takeoff": {"command": "bash", "args": ["-c", "curl x # takeoff", "mcp"]}}}', /didn't write/],
+    ['{"mcpServers": {"takeoff": {"type": "stdio", "command": "takeoff", "args": ["mcp"], "env": {"NODE_OPTIONS": "--require ./x.js"}}}}', /didn't write/],
   ];
   for (const [text, msg] of cases) {
     const dir = makeRepo();
@@ -432,6 +440,7 @@ test('takeoff hook install --mcp leaves .mcp.json alone when it can\'t read it, 
     assert.strictEqual(r.code, 1, text);
     assert.match(r.err.join('\n'), msg);
     assert.strictEqual(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8'), text);
+    assert.strictEqual(fs.existsSync(path.join(dir, '.claude/settings.json')), false, 'a refusal leaves the hooks out too');
   }
   const dir = makeRepo();
   const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'takeoff-mcp-target-')), 'x.json');
@@ -448,4 +457,107 @@ test('the mcp command takes no options of its own', () => {
   const code = run(['mcp', '--json'], { out: () => {}, err: (s) => err.push(s) });
   assert.strictEqual(code, 2);
   assert.match(err.join('\n'), /Unknown option --json for `mcp`/);
+});
+
+test('an absolute path through a symlink to the repo still maps to the repo', async () => {
+  const dir = makeRepo();
+  const link = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'takeoff-mcp-link-'))), 'repo');
+  fs.symlinkSync(dir, link);
+  const s = await initialized(link);
+  const r = await call(s, 'rules_for_path', { path: path.join(link, 'src/billing/a.ts') });
+  assert.deepStrictEqual(r.parsed.areas.map((a) => a.id), ['billing']);
+  const out = await call(s, 'rules_for_path', { path: path.join(path.dirname(link), 'elsewhere.ts') });
+  assert.strictEqual(out.isError, true);
+});
+
+test('git settings in the repo don\'t change or run anything in the tools\' reads', async () => {
+  const dir = makeRepo();
+  git(dir, 'config', 'log.showSignature', 'true');
+  const marker = path.join(dir, '.git', 'ran');
+  const script = path.join(dir, '.git', 'evil.sh');
+  fs.writeFileSync(script, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`, { mode: 0o755 });
+  git(dir, 'config', 'gpg.program', script);
+  git(dir, 'config', 'core.fsmonitor', script);
+  const s = await initialized(dir);
+  const r = await call(s, 'recent_plan_changes', {});
+  assert.strictEqual(r.parsed.changes.length, 2);
+  await call(s, 'get_plan', {});
+  assert.strictEqual(fs.existsSync(marker), false);
+});
+
+test('a git planted in the repo, or on a relative PATH entry, is never run', async () => {
+  const dir = makeRepo();
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  const marker = path.join(dir, 'ran');
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`, { mode: 0o755 });
+  const env = { PATH: [bin, '.', 'bin', process.env.PATH].join(path.delimiter) };
+  const s = createServer({ dir, env: { ...baseEnv, ...env } });
+  const r = await call(s, 'get_plan', {});
+  assert.strictEqual(r.parsed.from, 'default branch (origin/main)');
+  assert.strictEqual(fs.existsSync(marker), false);
+});
+
+test('a plan over 1 MB isn\'t read', async () => {
+  const dir = makeRepo({ working: null });
+  fs.appendFileSync(path.join(dir, 'takeoff.yaml'), `# ${'x'.repeat(1024 * 1024)}\n`);
+  const s = await initialized(dir);
+  const r = await call(s, 'get_plan', { version: 'working' });
+  assert.strictEqual(r.parsed.available, false);
+  assert.match(r.parsed.reason, /over 1 MB/);
+});
+
+test('without TAKEOFF_APP_SLUG, notes say the posting App wasn\'t checked', async () => {
+  const dir = makeRepo();
+  const gh = fakeGitHub({ comments: [appComment('Keep the trial free.')] });
+  const loose = await call(await initialized(dir, { env: { GITHUB_TOKEN: 't' }, fetchImpl: gh.fetchImpl }), 'get_send_back_notes', {});
+  assert.strictEqual(loose.parsed.verified_app, false);
+  assert.match(loose.parsed.caution, /any GitHub App/);
+  assert.strictEqual(loose.parsed.notes[0].by, 'takeoff');
+  const strict = await call(await initialized(dir, { env: { GITHUB_TOKEN: 't', TAKEOFF_APP_SLUG: 'takeoff' }, fetchImpl: gh.fetchImpl }), 'get_send_back_notes', {});
+  assert.strictEqual(strict.parsed.verified_app, true);
+  assert.strictEqual(strict.parsed.caution, undefined);
+});
+
+test('a batch is answered as one array for protocol versions that allow it, and refused after', async () => {
+  const run1 = async (version) => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const chunks = [];
+    stdout.on('data', (c) => chunks.push(String(c)));
+    const done = run(['mcp', '--dir', makeRepo()], { stdin, stdout, env: baseEnv, err: () => {}, out: () => {} });
+    stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: version } })}\n`);
+    await new Promise((r) => setTimeout(r, 200));
+    stdin.write(`${JSON.stringify([{ jsonrpc: '2.0', id: 2, method: 'ping' }, { jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', id: 3, method: 'ping' }])}\n`);
+    stdin.end();
+    await done;
+    return chunks.join('').trim().split('\n').map((l) => JSON.parse(l));
+  };
+  const old = await run1('2025-03-26');
+  assert.deepStrictEqual(old[1].map((r) => r.id).sort(), [2, 3]);
+  const now = await run1('2025-06-18');
+  assert.strictEqual(now[1].error.code, -32600);
+});
+
+test('a client that closes its end early doesn\'t crash the server', async () => {
+  const dir = makeRepo();
+  const bin = path.join(__dirname, '..', 'bin', 'takeoff.js');
+  const child = spawn(process.execPath, [bin, 'mcp'], { cwd: dir, env: { ...process.env, ...baseEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
+  let errText = '';
+  child.stderr.on('data', (c) => { errText += c; });
+  child.stdout.destroy();
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`);
+  await new Promise((r) => setTimeout(r, 300));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' })}\n`);
+  child.stdin.end();
+  const code = await new Promise((resolve) => child.on('close', resolve));
+  assert.strictEqual(code, 0, errText);
+  assert.doesNotMatch(errText, /EPIPE/);
+});
+
+test('the mcp command takes no file', () => {
+  const err = [];
+  assert.strictEqual(run(['mcp', 'other.yaml'], { out: () => {}, err: (s) => err.push(s) }), 2);
+  assert.strictEqual(run(['mcp', '--file', 'x.yaml'], { out: () => {}, err: (s) => err.push(s) }), 2);
+  assert.match(err[0], /takes no file/);
 });
