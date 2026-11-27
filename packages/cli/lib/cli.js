@@ -7,7 +7,7 @@ const { migrateData, stringifyV2 } = require('./migrate');
 const { sync, TakeoffError, readIfExists } = require('./sync');
 const { FILENAME, CURRENT_VERSION } = require('./schema');
 const { notesCommand } = require('./notes');
-const { hookCommand } = require('./hook');
+const { hookCommand, HOOK_EVENTS } = require('./hook');
 
 const FLAGS = {
   validate: ['--strict'],
@@ -75,7 +75,7 @@ function formatIssue(file, i) {
  */
 function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s) => console.error(s), ...io } = {}) {
   // A hook Claude Code runs must never exit 2: on a prompt, that blocks it.
-  const hookEvent = argv[0] === 'hook' && ['prompt-submit', 'post-edit', 'refresh-notes'].includes(argv[1]);
+  const hookEvent = argv[0] === 'hook' && HOOK_EVENTS.includes(argv[1]);
   let args;
   try {
     args = parseArgs(argv);
@@ -85,7 +85,7 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
     return 2;
   }
   const [command, ...rest] = args._;
-  if (!command || args.flags.has('-h') || args.flags.has('--help')) {
+  if (!command || (!hookEvent && (args.flags.has('-h') || args.flags.has('--help')))) {
     out(HELP);
     return command || args.flags.size ? 0 : 2;
   }
