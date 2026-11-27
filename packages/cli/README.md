@@ -6,6 +6,8 @@
 takeoff validate [file] [--strict]   check takeoff.yaml; errors show file:line:col
 takeoff sync [file] [--check] [--dry-run]   write CLAUDE.md, AGENTS.md, .cursor/rules/takeoff.mdc
 takeoff migrate [file] [--dry-run]   upgrade a v1 file to v2
+takeoff notes [--branch <name>] [--repo <owner/name>] [--json]   reviewers' send-back notes for this branch's PR
+takeoff hook install [--local] [--command <cmd>]   add Takeoff's Claude Code hooks
 ```
 
 Exit codes: 0 ok, 1 problems found, 2 usage error. `--dir` and `--file` pick another folder or filename.
@@ -44,5 +46,15 @@ Writes only between `<!-- takeoff:start -->` and `<!-- takeoff:end -->`; everyth
 ## v1
 
 There was no v1 schema in the repo, so `migrate` accepts the plain shapes a hand-written file would use (`name`/`product`, `summary`/`description`, top-level `rules`/`never`, `areas` with `path`/`paths`). Top-level rules move into a "General" area covering every path. Where v2 is stricter, it adjusts and says so: an area with no paths covers `**`, creators that aren't email addresses are dropped, and invalid or repeated rule ids are removed (the rule stays). Anything it can't carry over is listed, not dropped silently. Comments are not kept.
+
+## Claude Code hook
+
+`takeoff hook install` adds three hooks to `.claude/settings.json` (`--local` writes `.claude/settings.local.json` instead, which isn't committed; `settings.json` is shared with everyone who clones the repo). It keeps everything already in the file, adds each hook once (running it again updates Takeoff's own hooks in place), and changes nothing if the file isn't valid JSON. Each hook first checks that the program is on PATH, so a teammate without Takeoff runs nothing. `--command "npx --no-install takeoff"` sets how the hooks call Takeoff when it isn't installed globally; `--no-install` keeps npx from downloading a package on every prompt.
+
+- **Each prompt** (`UserPromptSubmit`): the agent gets the rules, nevers and agreements for the areas this branch changes (committed since it left the default branch, plus uncommitted and new files), and any send-back notes reviewers left on the open PR for the branch it pushes to. The rules come from `takeoff.yaml` on the default branch; changes the branch makes to `takeoff.yaml` are shown as proposals, not as agreed. A session gets this once, and again when it changes.
+- **After an edit** (`PostToolUse` on Edit, Write, MultiEdit and NotebookEdit): when the file is in an area with Creators and your `git config user.email` isn't one of them, you see one line, once per area per session: `Takeoff: this edit is in Billing (Creator: saagar@example.com), which you aren't a Creator of. It'll be flagged on the PR if it drifts.` The agent gets the area's rules with it. An area with rules and no Creators tells only the agent.
+- **A new session** (`SessionStart`, including after `/clear` or a compact): the session hears the context again.
+
+The hooks never block the agent and never show an error. In a repo without `takeoff.yaml` they do nothing. Notes are read only for a branch with an upstream on GitHub. They're cached in `.git/takeoff/` and refreshed in the background every two minutes, so a prompt only waits on GitHub the first time on a branch (about two seconds at most). Offline, the last notes it read stay. Anything that went wrong is written to `.git/takeoff/hook.log`. Reading notes needs `GITHUB_TOKEN` or the gh CLI's sign-in, like `takeoff notes`; set `TAKEOFF_APP_SLUG` to trust only the Takeoff App's comments (without it, each note says which App posted it).
 
 The library is exported too (`require('@takeoff/cli')`): `validateText`, `migrateData`, `renderBlock`, `applyBlock`, `sync`.

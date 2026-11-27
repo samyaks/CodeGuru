@@ -7,12 +7,14 @@ const { migrateData, stringifyV2 } = require('./migrate');
 const { sync, TakeoffError, readIfExists } = require('./sync');
 const { FILENAME, CURRENT_VERSION } = require('./schema');
 const { notesCommand } = require('./notes');
+const { hookCommand, HOOK_EVENTS } = require('./hook');
 
 const FLAGS = {
   validate: ['--strict'],
   sync: ['--check', '--dry-run'],
   migrate: ['--dry-run'],
   notes: ['--json', '--branch', '--repo'],
+  hook: ['--local', '--command'],
 };
 
 const HELP = `takeoff: keep what you build matching what you agreed
@@ -25,6 +27,12 @@ Usage:
   takeoff notes [--branch <name>] [--repo <owner/name>] [--json]
                                      Show reviewers' send-back notes for this branch's PR
                                      (reads GitHub with GITHUB_TOKEN or the gh CLI's sign-in)
+  takeoff hook install [--local] [--command <cmd>]
+                                     Add Takeoff's hooks to .claude/settings.json (or
+                                     settings.local.json with --local): each prompt gets
+                                     the intent for the areas this branch changes and
+                                     reviewers' send-back notes; an edit in someone
+                                     else's area gets a one-line heads-up
 
 Options:
   --dir <path>   Run in another directory (default: current)
@@ -33,11 +41,11 @@ Options:
 `;
 
 function parseArgs(argv) {
-  const opts = { _: [], flags: new Set(), dir: null, file: null, branch: null, repo: null };
+  const opts = { _: [], flags: new Set(), dir: null, file: null, branch: null, repo: null, command: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--dir' || a === '--file' || a === '--branch' || a === '--repo') {
-      if (a === '--branch' || a === '--repo') opts.flags.add(a);
+    if (a === '--dir' || a === '--file' || a === '--branch' || a === '--repo' || a === '--command') {
+      if (a === '--branch' || a === '--repo' || a === '--command') opts.flags.add(a);
       const value = argv[i + 1];
       if (!value || value.startsWith('-')) throw new UsageError(`${a} needs a value.`);
       opts[a.slice(2)] = value;
@@ -63,24 +71,27 @@ function formatIssue(file, i) {
  * @param {string[]} argv arguments after the program name
  * @param {{ cwd?: string, out?: (s: string) => void, err?: (s: string) => void, env?: object, exec?: Function, fetchImpl?: Function }} io
  * @returns {number|Promise<number>} exit code: 0 ok, 1 problems found, 2 usage error
- *   (`notes` reads GitHub, so it returns a promise)
+ *   (`notes` and `hook` can read GitHub, so they may return a promise)
  */
 function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s) => console.error(s), ...io } = {}) {
+  // A hook Claude Code runs must never exit 2: on a prompt, that blocks it.
+  const hookEvent = argv[0] === 'hook' && HOOK_EVENTS.includes(argv[1]);
   let args;
   try {
     args = parseArgs(argv);
   } catch (e) {
+    if (hookEvent) return 0;
     err(e.message);
     return 2;
   }
   const [command, ...rest] = args._;
-  if (!command || args.flags.has('-h') || args.flags.has('--help')) {
+  if (!command || (!hookEvent && (args.flags.has('-h') || args.flags.has('--help')))) {
     out(HELP);
     return command || args.flags.size ? 0 : 2;
   }
 
   const allowed = FLAGS[command];
-  if (allowed) {
+  if (allowed && !hookEvent) {
     const unknown = [...args.flags].filter((f) => !allowed.includes(f));
     if (unknown.length) {
       err(`Unknown option ${unknown.join(', ')} for \`${command}\`. It accepts: ${allowed.join(', ')}, --dir, --file.`);
@@ -99,6 +110,7 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
       case 'sync': return syncCommand({ dir, file: args.file || rest[0] || null, args, out, err });
       case 'migrate': return migrateCommand({ yamlPath, label, dryRun: args.flags.has('--dry-run'), out, err });
       case 'notes': return notesCommand({ dir, args, out, err, ...io });
+      case 'hook': return hookCommand({ dir, args, out, err, ...io });
       default:
         err(`Unknown command "${command}".\n\n${HELP}`);
         return 2;

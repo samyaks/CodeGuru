@@ -102,7 +102,9 @@ function edited(c) {
 
 // Control characters (terminal escape codes among them) are never printed:
 // a note is text for a person or an agent, not instructions to a terminal.
-const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+// Nor are characters nobody can see but a model reads: zero-width ones and
+// Unicode tag characters, which can spell out hidden text.
+const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
 const printable = (t) => String(t ?? '').replace(CONTROL, '');
 
 /**
@@ -190,4 +192,4 @@ async function notesCommand({ dir, args, out, err, env = process.env, exec = def
   }
 }
 
-module.exports = { sendBackMarker, parseSendBack, repoFromRemote, fetchSendBackNotes, notesCommand, NotesError, MAX_SEND_BACK_NOTE: MAX_NOTE };
+module.exports = { sendBackMarker, parseSendBack, repoFromRemote, fetchSendBackNotes, notesCommand, tokenFrom, printable, NotesError, MAX_SEND_BACK_NOTE: MAX_NOTE };

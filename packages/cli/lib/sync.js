@@ -97,4 +97,4 @@ function sync({ dir = process.cwd(), file = null, check = false, dryRun = false 
   };
 }
 
-module.exports = { sync, TakeoffError, readIfExists };
+module.exports = { sync, TakeoffError, readIfExists, assertNoSymlink };
