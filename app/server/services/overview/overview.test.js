@@ -23,6 +23,15 @@ function world({ labels = {}, agreements = [], votes = [] } = {}) {
     agreements: { async list(pid) { return agreements.filter((a) => a.project_id === pid); } },
     agreementVotes: { async listFor(ids) { return votes.filter((v) => ids.includes(v.agreement_id)); } },
     prCache: null,
+    openPrCache: null,
+  };
+  // The open PRs on GitHub: PR #7 by Olive, at the checked head.
+  ctx.openPrs = [{ number: 7, title: 'Charge at signup', html_url: 'https://github.com/acme/web/pull/7', user: { login: 'olivegh' }, head: { sha: 'a1a1a1a1' } }];
+  ctx.pulls = { fail: false };
+  ctx.client.fetchRepoPulls = async () => {
+    ctx.gh.calls.push(['fetchRepoPulls']);
+    if (ctx.pulls.fail) { const e = new Error('Forbidden'); e.status = 403; throw e; }
+    return ctx.openPrs;
   };
   return { ...ctx, deps };
 }
@@ -45,7 +54,7 @@ test('the overview shows areas with their Creators, open PRs with verdicts, pend
   assert.deepStrictEqual(o.view, { default: 'creator', labels: ['creator'] });
   assert.strictEqual(o.linked, true);
   assert.deepStrictEqual(o.areas[0], { id: 'billing', name: 'Billing', creators: [{ email: 'sam@acme.test', name: 'Sam', member: true }] });
-  assert.deepStrictEqual(o.areas[1].creators, [{ email: 'nobody@acme.test', name: null, member: false }]);
+  assert.deepStrictEqual(o.areas[1].creators, [{ email: 'n*****@acme.test', name: null, member: false }], 'a Creator off the project is masked');
 
   assert.strictEqual(o.pullRequests.length, 1);
   const pr = o.pullRequests[0];
@@ -55,6 +64,8 @@ test('the overview shows areas with their Creators, open PRs with verdicts, pend
   assert.strictEqual(pr.needsDecision, true);
   assert.strictEqual(pr.author, 'olivegh');
   assert.strictEqual(pr.yours, false, 'the owner did not open it');
+  assert.strictEqual(o.githubReachable, true);
+  assert.deepStrictEqual(w.gh.calls.filter((c) => c[0] === 'fetchRepoPulls').length, 1, 'one GitHub call for every PR');
 
   // Only current members' votes count; Rex isn't one.
   assert.deepStrictEqual(o.pendingAgreements.map((a) => [a.id, a.agreed, a.notYet, a.members, a.yourVote, a.areaName]), [['agr_1', 1, 0, 2, null, 'Billing']]);
@@ -93,6 +104,56 @@ test('a decided PR no longer needs a decision, and a closed or unlinked project 
   assert.strictEqual(o.recentDecisions.length, 1, 'decisions already made still show');
 });
 
+test('a newer push, a running decision, a running or failed check, and GitHub being down', async () => {
+  const w = world({ labels: { olive: ['builder'] } });
+  const view = async (who = w.people.owner) => (await overview.getOverview({ project: w.project, user: who }, w.deps)).pullRequests;
+
+  // A newer push: the verdict is stale, so it can't be decided yet.
+  w.openPrs[0].head.sha = 'b2b2b2b2';
+  let [pr] = await view();
+  assert.deepStrictEqual([pr.newerPush, pr.needsDecision], [true, false]);
+  w.openPrs[0].head.sha = 'a1a1a1a1';
+
+  // Someone is deciding right now.
+  w.state.decisions.push({ id: 'dec_w', project_id: 'p1', repo_full_name: 'acme/web', pr_number: 7, head_sha: 'a1a1a1a1', type: 'accepted', state: 'working', actor_user_id: 'owner', created_at: '2026-11-26T11:00:00Z' });
+  [pr] = await view();
+  assert.strictEqual(pr.needsDecision, false);
+  w.state.decisions.pop();
+
+  // A check still running, or one that failed, keeps the PR on the list without a verdict.
+  w.state.checks[0].status = 'running';
+  [pr] = await view(w.people.olive);
+  assert.deepStrictEqual([pr.checking, pr.verdict, pr.needsDecision, pr.yours], [true, null, false, true]);
+  w.state.checks[0].status = 'failed';
+  [pr] = await view();
+  assert.deepStrictEqual([pr.checkFailed, pr.verdict, pr.needsDecision], [true, null, false]);
+  w.state.checks[0].status = 'done';
+
+  // GitHub says the PR isn't open any more.
+  w.openPrs.length = 0;
+  assert.deepStrictEqual(await view(), []);
+
+  // GitHub can't be reached: PRs still show from what Takeoff stored, and the client is told.
+  w.pulls.fail = true;
+  const o = await overview.getOverview({ project: w.project, user: w.people.olive }, w.deps);
+  assert.deepStrictEqual([o.githubReachable, o.pullRequests.length, o.pullRequests[0].author, o.pullRequests[0].yours], [false, 1, null, false]);
+  assert.strictEqual(o.pullRequests[0].url, 'https://github.com/acme/web/pull/7');
+});
+
+test('a builder sees every PR of theirs, however many others there are', async () => {
+  const w = world({ labels: { olive: ['builder'] } });
+  const base = w.state.checks[0];
+  w.openPrs.length = 0;
+  for (let n = 100; n < 120; n += 1) {
+    w.state.checks.push({ ...base, pr_number: n, head_sha: `h${n}`, verdict: 'matches', comment_at: new Date(Date.UTC(2026, 10, 26, 0, n - 100)), updated_at: new Date(Date.UTC(2026, 10, 26, 0, n - 100)) });
+    w.openPrs.push({ number: n, title: `PR ${n}`, html_url: `https://github.com/acme/web/pull/${n}`, user: { login: 'rexgh' }, head: { sha: `h${n}` } });
+  }
+  w.openPrs.push({ number: 7, title: 'Charge at signup', html_url: 'https://github.com/acme/web/pull/7', user: { login: 'olivegh' }, head: { sha: 'a1a1a1a1' } });
+  const o = await overview.getOverview({ project: w.project, user: w.people.olive }, w.deps);
+  assert.ok(o.pullRequests.some((p) => p.prNumber === 7 && p.yours), 'their PR is kept');
+  assert.strictEqual(o.pullRequests.filter((p) => !p.yours && !p.needsDecision).length, 10, 'the others are cut to the newest 10');
+});
+
 test('only members see the overview or the log', async () => {
   const w = world();
   await assert.rejects(overview.getOverview({ project: w.project, user: w.people.rex }, w.deps), /Forbidden/);
@@ -112,6 +173,7 @@ test('the decision log lists decided agreements and finished decisions, newest f
   w.state.decisions.push(
     { id: 'dec_a', project_id: 'p1', repo_full_name: 'acme/web', pr_number: 7, head_sha: 'a1', type: 'accepted', state: 'done', actor_user_id: 'olive', actor_name: 'Olive', confirmed_by: 'owner', edits: { summary: ['Removed the never rule “Charge before the trial ends.”'], agreementText: 'Charge at signup.' }, commit_url: 'https://github.com/acme/web/commit/def', created_at: '2026-11-26T10:00:00Z', done_at: '2026-11-26T10:01:00Z' },
     { id: 'dec_f', project_id: 'p1', repo_full_name: 'acme/web', pr_number: 8, head_sha: 'b1', type: 'sent_back', state: 'failed', actor_user_id: 'owner', created_at: '2026-11-26T09:00:00Z' },
+    { id: 'dec_old_repo', project_id: 'p1', repo_full_name: 'acme/old', pr_number: 3, head_sha: 'd1', type: 'sent_back', state: 'done', actor_user_id: 'owner', created_at: '2026-11-26T08:00:00Z', done_at: '2026-11-26T08:00:00Z' },
     { id: 'dec_other', project_id: 'p2', repo_full_name: 'acme/web', pr_number: 9, head_sha: 'c1', type: 'sent_back', state: 'done', actor_user_id: 'owner', created_at: '2026-11-26T09:00:00Z', done_at: '2026-11-26T09:00:00Z' },
   );
   const log = await overview.getDecisionLog({ project: w.project, user: w.people.olive }, w.deps);
@@ -129,7 +191,7 @@ test('the decision log lists decided agreements and finished decisions, newest f
   // Text from people is plain: no Markdown, links or mentions of its own.
   assert.match(text, /Use \\\*\\\*bold\\\*\\\* \\\[links\\\]\\\(https:\/​\/evil\.test\\\) and @​team/);
   assert.doesNotMatch(text, /javascript:/);
-  assert.doesNotMatch(text, /PR #8|PR #9/);
+  assert.doesNotMatch(text, /PR #8|PR #9|PR #3/);
 
   assert.match(overview.decisionLogMarkdown(w.project, { entries: [], truncated: false }), /Nothing has been decided yet\./);
 });

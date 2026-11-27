@@ -33,11 +33,13 @@ function createOverviewRoutes({ deps = null } = {}) {
 
   router.get('/', readLimit, asyncHandler(async (req, res) => {
     const project = await loadProject(req);
+    res.set('Cache-Control', 'private, no-store');
     res.json(await overview.getOverview({ project, user: req.user }, serviceDeps()));
   }));
 
   router.get('/decisions', readLimit, asyncHandler(async (req, res) => {
     const project = await loadProject(req);
+    res.set('Cache-Control', 'private, no-store');
     res.json(await overview.getDecisionLog({ project, user: req.user }, serviceDeps()));
   }));
 
@@ -51,7 +53,7 @@ function createOverviewRoutes({ deps = null } = {}) {
     res.set('Content-Type', 'text/markdown; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="${file}"`);
     res.set('X-Content-Type-Options', 'nosniff');
-    res.set('Cache-Control', 'no-store');
+    res.set('Cache-Control', 'private, no-store');
     res.send(overview.decisionLogMarkdown(project, log, { now }));
   }));
 

@@ -115,7 +115,7 @@ export default function DecisionLog() {
           </ul>
         </section>
       )) : <p className={cx('type-body', styles.muted)}>Nothing decided yet. Agreements and drift decisions show up here once they’re settled.</p>}
-      {log.truncated ? <p className={cx('type-small', styles.muted)}>This shows the latest 500 agreements and 500 drift decisions. The download holds the same entries.</p> : null}
+      {log.truncated ? <p className={cx('type-small', styles.muted)}>The oldest entries are left out, here and in the download.</p> : null}
       {back}
     </Page>
   );

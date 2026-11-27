@@ -16,8 +16,10 @@ const drift = require('../drift');
 const { assertMember, currentMembers, oneLine } = require('../agreements');
 const { readIntent } = require('../agreements/intent');
 const { clean: mdClean } = require('../verdict/comment');
+const { maskEmail } = require('../team/members');
 
 const MAX_PRS = 10;
+const MAX_SHOWN_PRS = 40;
 const MAX_LOG = 500;
 const MAX_PENDING = 50;
 const RECENT = 5;
@@ -35,7 +37,13 @@ function defaultDeps() {
 }
 
 const repoOf = (project) => `${project.owner}/${project.repo}`;
-const prUrl = (project, n) => `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/pull/${Number(n)}`;
+/** A PR's link, from a repo full name like `owner/repo`. */
+const prUrl = (fullName, n) => {
+  const [owner, repo, extra] = String(fullName || '').split('/');
+  if (!owner || !repo || extra !== undefined || owner === 'undefined' || repo === 'undefined') return null;
+  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull/${Number(n)}`;
+};
+const hasRepo = (project) => !!(project.owner && project.repo);
 /** A stored link is shown only when it is a plain https URL. */
 const httpsOrNull = (u) => (typeof u === 'string' && /^https:\/\/[^\s<>"'`]+$/i.test(u) ? u : null);
 const iso = (t) => (t ? new Date(t).toISOString() : null);
@@ -63,34 +71,86 @@ async function githubLoginOf(user, deps) {
 
 const nameIn = (members) => (id) => members.find((m) => m.userId === id)?.name || null;
 
-/** Open PRs with a finished check, newest first, each with its verdict and whether it waits on a decision. */
-async function openPullRequests(project, { members, pendingRecIds, decisions }, deps) {
-  const rows = await deps.prChecks.latestPerPr({ repo: repoOf(project), ...drift.checkScope(project), limit: 50 });
-  const done = rows.filter((r) => r.status === 'done' && r.verdict && !r.pr_closed_at).slice(0, MAX_PRS);
-  let gh = null;
-  try { gh = deps.readClientFor(project); } catch { gh = null; }
-  const prs = await Promise.all(done.map(async (row) => {
+// Open PRs come from one GitHub call per project, cached briefly. A failure
+// is cached for less time, so a broken install doesn't use up the App's
+// rate limit when the page is reloaded.
+const OPEN_PRS_MS = 60 * 1000;
+const OPEN_PRS_FAIL_MS = 20 * 1000;
+const OPEN_PRS_PAGE = 100;
+const OPEN_PRS_CACHE_MAX = 500;
+const sharedOpenPrCache = new Map();
+
+async function openPrsOnGithub(project, deps) {
+  const cache = deps.openPrCache === undefined ? sharedOpenPrCache : deps.openPrCache;
+  const key = `${project.github_installation_id}:${repoOf(project).toLowerCase()}`;
+  const hit = cache?.get(key);
+  if (hit && Date.now() - hit.at < (hit.value.ok ? OPEN_PRS_MS : OPEN_PRS_FAIL_MS)) return hit.value;
+  let value;
+  try {
+    const gh = deps.readClientFor(project);
+    const list = await gh.fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: OPEN_PRS_PAGE });
+    const prs = new Map();
+    for (const p of Array.isArray(list) ? list : []) {
+      prs.set(Number(p.number), {
+        title: typeof p.title === 'string' ? p.title : null,
+        url: httpsOrNull(p.html_url),
+        author: typeof p.user?.login === 'string' ? p.user.login : null,
+        headSha: p.head?.sha || null,
+      });
+    }
+    // A full page may not be every open PR: then a PR missing from it isn't known to be closed.
+    value = { ok: true, complete: prs.size < OPEN_PRS_PAGE, prs };
+  } catch {
+    value = { ok: false, complete: false, prs: new Map() };
+  }
+  if (cache) {
+    if (cache.size >= OPEN_PRS_CACHE_MAX) cache.delete(cache.keys().next().value);
+    cache.set(key, { at: Date.now(), value });
+  }
+  return value;
+}
+
+const CHECK_STATES = new Set(['done', 'running', 'failed']);
+
+/**
+ * Open PRs with a Takeoff check, newest first: their verdict, whether they
+ * wait on a decision, and whether they're `login`'s. Every PR of `login`'s is
+ * kept; the others are cut to the newest few.
+ */
+async function openPullRequests(project, { members, pendingRecIds, decisions, login }, deps) {
+  const rows = await deps.prChecks.latestPerPr({ repo: repoOf(project), ...drift.checkScope(project), limit: 100 });
+  const live = await openPrsOnGithub(project, deps);
+  const prs = [];
+  for (const row of rows) {
+    if (row.pr_closed_at || !CHECK_STATES.has(row.status)) continue;
     const n = Number(row.pr_number);
-    const res = drift.storedResult(row);
-    const pr = gh ? await drift.cachedLivePr(gh, project, n, deps.prCache).catch(() => null) : null;
+    const pr = live.prs.get(n) || null;
+    if (!pr && live.complete) continue; // GitHub says it isn't open
+    const done = row.status === 'done' && !!row.verdict;
+    const res = done ? drift.storedResult(row) : { verdict: null, summary: '' };
     const forPr = decisions.filter((d) => Number(d.pr_number) === n);
-    const decided = forPr.some((d) => d.head_sha === row.head_sha && d.state === 'done');
-    return {
+    const decided = forPr.some((d) => d.head_sha === row.head_sha && (d.state === 'done' || d.state === 'working'));
+    const newerPush = !!(pr?.headSha && pr.headSha !== row.head_sha);
+    prs.push({
       prNumber: n,
       title: pr?.title || null,
-      url: httpsOrNull(pr?.url) || prUrl(project, n),
+      url: pr?.url || prUrl(repoOf(project), n),  // null only for a project with no repo
       author: pr?.author || null,
-      state: pr?.state || 'open',
       headSha: row.head_sha,
       verdict: res.verdict,
       summary: res.summary,
+      checking: row.status === 'running',
+      checkFailed: row.status === 'failed' || (row.status === 'done' && !row.verdict),
       checkedAt: iso(row.completed_at || row.updated_at),
-      newerPush: !!(pr?.headSha && pr.headSha !== row.head_sha),
-      needsDecision: drift.REVIEW_VERDICTS.has(res.verdict) && !decided,
+      newerPush,
+      needsDecision: done && drift.REVIEW_VERDICTS.has(res.verdict) && !newerPush && !decided,
       lastDecision: forPr[0] ? drift.publicDecision(forPr[0], { members, pendingRecIds }) : null,
-    };
-  }));
-  return prs.filter((p) => p.state === 'open');
+      yours: !!(login && pr?.author && pr.author.toLowerCase() === login),
+    });
+  }
+  let others = 0;
+  const shown = prs.filter((p) => p.yours || p.needsDecision || others++ < MAX_PRS).slice(0, MAX_SHOWN_PRS);
+  return { prs: shown, githubReachable: live.ok };
 }
 
 /** Agreements still waiting on votes, with how many current members agreed and whether you have. */
@@ -139,8 +199,11 @@ function logEntries(project, { agreements, decisions, members, intent }) {
       sourceUrl: httpsOrNull(a.source),
     });
   }
+  const repo = hasRepo(project) ? repoOf(project).toLowerCase() : null;
   for (const d of decisions) {
     if (d.state !== 'done') continue;
+    // Decisions about a repo the project no longer points at stay out.
+    if (repo && d.repo_full_name && String(d.repo_full_name).toLowerCase() !== repo) continue;
     const p = drift.publicDecision(d, { members });
     out.push({
       kind: 'decision',
@@ -148,7 +211,7 @@ function logEntries(project, { agreements, decisions, members, intent }) {
       at: iso(d.done_at || d.updated_at || d.created_at),
       outcome: d.type,
       prNumber: p.prNumber,
-      prUrl: prUrl(project, p.prNumber),
+      prUrl: prUrl(d.repo_full_name || (hasRepo(project) ? repoOf(project) : null), p.prNumber),
       by: p.by,
       confirmedBy: p.confirmedBy,
       note: p.note,
@@ -161,16 +224,24 @@ function logEntries(project, { agreements, decisions, members, intent }) {
   return out.sort((x, y) => String(y.at).localeCompare(String(x.at)) || String(x.id).localeCompare(String(y.id)));
 }
 
-async function loadLog(project, { members, intent }, deps) {
-  const [agreements, decisions] = await Promise.all([
-    deps.agreements.list(project.id, { limit: MAX_LOG }),
-    deps.driftDecisions.listRecent(project.id, { limit: MAX_LOG }),
+// The overview needs open agreements (listed first by the store) and the
+// decisions on open PRs; the full log reads more. One extra row tells
+// whether anything was left out.
+const OVERVIEW_ROWS = { agreements: 150, decisions: 200 };
+
+async function loadLog(project, { members, intent, limit = MAX_LOG, limits = null }, deps) {
+  const max = limits || { agreements: limit, decisions: limit };
+  const [a, d] = await Promise.all([
+    deps.agreements.list(project.id, { limit: max.agreements + 1 }),
+    deps.driftDecisions.listRecent(project.id, { limit: max.decisions + 1 }),
   ]);
+  const agreements = a.slice(0, max.agreements);
+  const decisions = d.slice(0, max.decisions);
   return {
     agreements,
     decisions,
     entries: logEntries(project, { agreements, decisions, members, intent }),
-    truncated: agreements.length >= MAX_LOG || decisions.length >= MAX_LOG,
+    truncated: a.length > max.agreements || d.length > max.decisions,
   };
 }
 
@@ -194,11 +265,11 @@ async function getOverview({ project, user }, deps = defaultDeps()) {
   const [labels, login, log, pendingRecIds] = await Promise.all([
     labelsOf(project, user, deps),
     githubLoginOf(user, deps),
-    loadLog(project, { members, intent }, deps),
+    loadLog(project, { members, intent, limits: OVERVIEW_ROWS }, deps),
     drift.pendingRecommendationIds(project, deps),
   ]);
-  const [prs, pending] = await Promise.all([
-    linked ? openPullRequests(project, { members, pendingRecIds, decisions: log.decisions }, deps) : [],
+  const [open, pending] = await Promise.all([
+    linked ? openPullRequests(project, { members, pendingRecIds, decisions: log.decisions, login }, deps) : { prs: [], githubReachable: true },
     pendingAgreements(project, user, { members, intent, rows: log.agreements }, deps),
   ]);
   const byEmail = new Map(members.filter((m) => m.email).map((m) => [m.email, m]));
@@ -209,9 +280,13 @@ async function getOverview({ project, user }, deps = defaultDeps()) {
     areas: intent.areas.map((a) => ({
       id: a.id,
       name: a.name,
-      creators: a.creators.map((email) => ({ email, name: byEmail.get(email)?.name || null, member: byEmail.has(email) })),
+      // A Creator who isn't on the project shows as a masked address.
+      creators: a.creators.map((email) => (byEmail.has(email)
+        ? { email, name: byEmail.get(email).name || null, member: true }
+        : { email: maskEmail(email), name: null, member: false })),
     })),
-    pullRequests: prs.map((p) => ({ ...p, yours: !!(login && p.author && p.author.toLowerCase() === login) })),
+    pullRequests: open.prs,
+    githubReachable: open.githubReachable,
     githubLinked: !!login,
     pendingAgreements: pending,
     recentDecisions: log.entries.slice(0, RECENT),
@@ -266,7 +341,7 @@ function entryLine(e) {
 function decisionLogMarkdown(project, { entries, truncated }, { now = new Date() } = {}) {
   const name = project.owner && project.repo ? md(repoOf(project), 200) : 'this project';
   const lines = [`# Decision log: ${name}`, '', `Exported from Takeoff on ${now.toISOString().slice(0, 10)}. Newest first; days are in UTC.`];
-  if (truncated) lines.push('', `This export holds the latest ${MAX_LOG} agreements and ${MAX_LOG} decisions.`);
+  if (truncated) lines.push('', 'This export leaves out the oldest entries: it holds the most recent agreements and decisions only.');
   if (!entries.length) lines.push('', 'Nothing has been decided yet.');
   let day = null;
   for (const e of entries) {

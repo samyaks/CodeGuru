@@ -26,8 +26,10 @@ async function withServer(fn) {
     agreements: { async list() { return agreements; } },
     agreementVotes: { async listFor() { return []; } },
     prCache: null,
+    openPrCache: null,
     now: () => new Date('2026-11-27T08:00:00Z'),
   };
+  ctx.client.fetchRepoPulls = async () => [{ number: 7, title: 'Charge at signup', html_url: 'https://github.com/acme/web/pull/7', user: { login: 'olivegh' }, head: { sha: 'a1a1a1a1' } }];
   const app = express();
   app.use((req, _res, next) => {
     req.user = ctx.people[req.get('x-test-user')] || null;
@@ -65,6 +67,7 @@ test('the overview and decision log routes need a member, and the log downloads 
 
     const o = await call(base, 'olive');
     assert.strictEqual(o.status, 200);
+    assert.strictEqual(o.headers.get('cache-control'), 'private, no-store');
     assert.deepStrictEqual(o.json.pullRequests.map((p) => [p.prNumber, p.verdict, p.yours]), [[7, 'drifts', true]]);
     assert.strictEqual(o.json.recentDecisions[0].id, 'agr_1');
 

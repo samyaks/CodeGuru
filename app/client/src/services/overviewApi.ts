@@ -16,11 +16,14 @@ export interface OverviewArea {
 export interface OverviewPr {
   prNumber: number;
   title: string | null;
-  url: string;
+  url: string | null;
   author: string | null;
   headSha: string;
-  verdict: Verdict;
+  /** Null while a check runs or when it didn't finish. */
+  verdict: Verdict | null;
   summary: string;
+  checking: boolean;
+  checkFailed: boolean;
   checkedAt: string | null;
   newerPush: boolean;
   needsDecision: boolean;
@@ -80,6 +83,8 @@ export interface Overview {
   areas: OverviewArea[];
   pullRequests: OverviewPr[];
   githubLinked: boolean;
+  /** False when GitHub couldn't be reached, so authors and titles are unknown. */
+  githubReachable: boolean;
   pendingAgreements: PendingAgreement[];
   recentDecisions: LogEntry[];
 }

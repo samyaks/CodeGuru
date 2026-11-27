@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, ButtonLink, StatusMark, type Status } from '../../components/takeoff';
 import { cx } from '../../components/takeoff/status';
@@ -29,7 +29,7 @@ function connectGithub() {
 }
 
 function PrRow({ pr, projectId, showAuthor }: { pr: OverviewPr; projectId: string; showAuthor: boolean }) {
-  const v = VERDICT[pr.verdict];
+  const v = pr.verdict ? VERDICT[pr.verdict] : null;
   return (
     <li className={styles.row}>
       <div className={styles.who}>
@@ -37,6 +37,8 @@ function PrRow({ pr, projectId, showAuthor }: { pr: OverviewPr; projectId: strin
         {v ? <span><StatusMark status={v.status} showHint hint={v.hint} /></span> : null}
         {showAuthor && pr.author ? <span className={cx('type-small', styles.muted)}>Opened by {pr.author}</span> : null}
         {pr.summary && pr.verdict !== 'matches' ? <span className={cx('type-small', styles.muted)}>{pr.summary}</span> : null}
+        {pr.checking ? <span className={cx('type-small', styles.muted)}>Takeoff is checking this pull request now.</span> : null}
+        {pr.checkFailed ? <span className={cx('type-small', styles.muted)}>The latest Takeoff check didn’t finish. Re-run it from the check on GitHub.</span> : null}
         {pr.newerPush ? <span className={cx('type-small', styles.muted)}>There’s a newer push that Takeoff hasn’t checked yet.</span> : null}
         {pr.lastDecision ? <span className={cx('type-small', styles.muted)}>{decisionLine(pr.lastDecision)}</span> : null}
       </div>
@@ -44,7 +46,9 @@ function PrRow({ pr, projectId, showAuthor }: { pr: OverviewPr; projectId: strin
         {pr.needsDecision ? (
           <ButtonLink variant="quiet" size="sm" to={`/read/${encodeURIComponent(projectId)}/drift/${pr.prNumber}`}>Review</ButtonLink>
         ) : null}
-        <a className={cx('type-small', styles.link)} href={pr.url} target="_blank" rel="noreferrer noopener">On GitHub</a>
+        {pr.url && /^https:\/\//i.test(pr.url) ? (
+          <a className={cx('type-small', styles.link)} href={pr.url} target="_blank" rel="noreferrer noopener">On GitHub</a>
+        ) : null}
       </div>
     </li>
   );
@@ -79,17 +83,32 @@ export function OverviewSection({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View | null>(null);
 
+  // Only the newest request may set state, so a slow answer can't overwrite a newer one.
+  const latest = useRef(0);
+
   const load = useCallback(async () => {
+    const ticket = ++latest.current;
     try {
-      setData(await fetchOverview(projectId));
+      const next = await fetchOverview(projectId);
+      if (ticket !== latest.current) return;
+      setData(next);
+      setHidden(false);
       setError(null);
     } catch (err) {
+      if (ticket !== latest.current) return;
       if (err instanceof ApiError && [401, 403, 404, 503].includes(err.status)) setHidden(true);
       else setError((err as Error).message || 'Couldn’t load the overview.');
     }
   }, [projectId]);
 
-  useEffect(() => { void load(); }, [load]);
+  // Another project starts from nothing, not from the last one's overview.
+  useEffect(() => {
+    setData(null);
+    setHidden(false);
+    setError(null);
+    setView(null);
+    void load();
+  }, [load]);
   useEffect(() => {
     const onChange = () => { void load(); };
     window.addEventListener(TEAM_CHANGED_EVENT, onChange);
@@ -141,6 +160,8 @@ export function OverviewSection({ projectId }: { projectId: string }) {
                   <p className={cx('type-small', styles.muted)}>Connect GitHub so Takeoff knows which pull requests are yours.</p>
                   <Button variant="quiet" size="sm" onClick={connectGithub}>Connect GitHub</Button>
                 </div>
+              ) : !mine.length && !data.githubReachable ? (
+                <p className={cx('type-small', styles.muted)}>Takeoff can’t reach GitHub right now, so it can’t tell which pull requests are yours. Reload in a minute.</p>
               ) : !mine.length ? (
                 <p className={cx('type-small', styles.muted)}>None of your open pull requests has a Takeoff check yet.</p>
               ) : (
