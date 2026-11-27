@@ -4098,6 +4098,87 @@ const codeIndex = {
     return [...new Set(rows.map((r) => r.repo))];
   },
 
+  // ── Reads for Ask's tools (PR 3). Every query filters by project id. ──
+
+  /**
+   * Full-text search. `terms` are plain words (letters, digits, _), matched
+   * as prefixes; all must match, and when none of the files has all of
+   * them, any may. `likePrefix` narrows paths (an escaped LIKE prefix).
+   * Returns the text the search column covers, for snippets.
+   */
+  async search(projectId, { terms, likePrefix = null, likeSuffix = null, limit = 500 }) {
+    if (!terms.length) return [];
+    // Paths and rank only: the caller filters by glob, then reads the text
+    // of the few files it shows with contents().
+    const run = async (op) => {
+      const { rows } = await getDb().query(
+        `SELECT path, ts_rank(tsv, q) AS rank
+           FROM code_index_files, to_tsquery('simple', $2) q
+          WHERE project_id = $1 AND content IS NOT NULL AND tsv @@ q
+            AND ($3::text IS NULL OR path LIKE $3 ESCAPE '\\')
+            AND ($4::text IS NULL OR path LIKE $4 ESCAPE '\\')
+          ORDER BY rank DESC, path
+          LIMIT $5`,
+        [projectId, terms.map((t) => `${t}:*`).join(op), likePrefix, likeSuffix, limit]);
+      return rows;
+    };
+    const all = await run(' & ');
+    if (all.length || terms.length === 1) return all.map((r) => ({ ...r, matchedAll: true }));
+    return (await run(' | ')).map((r) => ({ ...r, matchedAll: false }));
+  },
+
+  /** The stored text of a few files (skipped files are left out). */
+  async contents(projectId, paths) {
+    if (!paths.length) return [];
+    const { rows } = await getDb().query(
+      `SELECT path, content, redactions FROM code_index_files
+        WHERE project_id = $1 AND path = ANY($2::text[]) AND content IS NOT NULL`,
+      [projectId, paths]);
+    return rows;
+  },
+
+  /** Where a name is defined: exact (any case) first, then names that contain it. */
+  async findSymbols(projectId, name, { limit = 20 } = {}) {
+    const like = `%${String(name).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const { rows } = await getDb().query(
+      `SELECT path, symbol, kind, line, (lower(symbol) = lower($2)) AS exact
+         FROM code_index_symbols
+        WHERE project_id = $1 AND (lower(symbol) = lower($2) OR symbol ILIKE $3 ESCAPE '\\')
+        ORDER BY (lower(symbol) = lower($2)) DESC, length(symbol), path, line
+        LIMIT $4`,
+      [projectId, name, like, limit]);
+    return rows;
+  },
+
+  /** Paths, optionally under an escaped LIKE prefix, in order. */
+  async listPathsUnder(projectId, { likePrefix = null, likeSuffix = null, limit = 5000 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT path, size_bytes, language, skipped_reason FROM code_index_files
+        WHERE project_id = $1 AND ($2::text IS NULL OR path LIKE $2 ESCAPE '\\')
+          AND ($3::text IS NULL OR path LIKE $3 ESCAPE '\\')
+        ORDER BY path LIMIT $4`,
+      [projectId, likePrefix, likeSuffix, limit]);
+    return rows;
+  },
+
+  /** One stored file, with its text (null when it was skipped). */
+  async readFile(projectId, path) {
+    const { rows } = await getDb().query(
+      `SELECT path, content, skipped_reason, size_bytes, language, redactions
+         FROM code_index_files WHERE project_id = $1 AND path = $2`,
+      [projectId, path]);
+    return rows[0] || null;
+  },
+
+  /** Files that import this one. */
+  async importersOf(projectId, path, { limit = 30 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT from_path FROM code_index_imports WHERE project_id = $1 AND to_path = $2
+        ORDER BY from_path LIMIT $3`,
+      [projectId, path, limit]);
+    return rows.map((r) => r.from_path);
+  },
+
   /**
    * Rows the nightly check looks at: anything not ready first, then the
    * ones checked longest ago, so every index comes round in turn.

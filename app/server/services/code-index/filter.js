@@ -186,10 +186,22 @@ function prepareText(p, data, { neverReadable = false, size = null } = {}) {
   if (isBinary(p, buf)) return { ...base, skippedReason: 'binary' };
   const text = buf.toString('utf8').replace(/\u0000/g, '');
   if (isMinified(p, text) || longestLine(text) > MAX_LINE_CHARS) return { ...base, skippedReason: 'minified' };
-  if (PRIVATE_KEY_RE.test(text)) return { ...base, skippedReason: 'private_key' };
-  if (/\.(ya?ml|json)$/i.test(p) && K8S_SECRET_RE.test(text)) return { ...base, skippedReason: 'never_readable' };
+  const secret = secretFileReason(p, text);
+  if (secret) return { ...base, skippedReason: secret };
   const { text: clean, count } = redactSecrets(text, p);
   return { ...base, content: clean, skippedReason: null, redactions: count };
+}
+
+/**
+ * Whether a file's whole text marks it as a secret: a private key block, or
+ * a Kubernetes Secret manifest. Returns the skip reason, or null. Ask runs
+ * this again at read time, so an index built before a rule existed is safe.
+ */
+function secretFileReason(p, text) {
+  if (typeof text !== 'string') return null;
+  if (PRIVATE_KEY_RE.test(text)) return 'private_key';
+  if (/\.(ya?ml|json)$/i.test(p) && K8S_SECRET_RE.test(text)) return 'never_readable';
+  return null;
 }
 
 module.exports = {
@@ -200,4 +212,5 @@ module.exports = {
   classifyPath,
   prepareText,
   redactSecrets,
+  secretFileReason,
 };
