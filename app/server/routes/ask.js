@@ -90,10 +90,11 @@ function createAskRoutes({ deps = {} } = {}) {
     if (!project) throw AppError.notFound('Project not found');
     // A project with no owner is open to anyone signed in, so Ask never reads its code.
     if (!project.user_id) throw AppError.notFound('Project not found');
-    // While Ask is tried out, it may be on for a few projects only.
-    const only = config().projects;
-    if (Array.isArray(only) && !only.includes(String(project.id))) throw AppError.notFound('Not found');
     try { checkProjectAccess(project, req); } catch { throw AppError.notFound('Project not found'); }
+    // While Ask is tried out, it may be on for a few projects only. Checked
+    // after access, with the same answer, so it says nothing to outsiders.
+    const only = config().projects;
+    if (Array.isArray(only) && !only.includes(String(project.id))) throw AppError.notFound('Project not found');
     return project;
   }
 

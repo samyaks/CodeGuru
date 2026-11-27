@@ -111,7 +111,7 @@ export default function DecisionLog() {
                 <div className={styles.who}>
                   <span className="type-body">{logSentence(e)}</span>
                   <LogLinks entry={e} className={cx('type-small', styles.muted)} />
-                  <AskAbout projectId={id} question={aboutDecision(logSentence(e))} className="type-small" />
+                  <AskAbout projectId={id} question={aboutDecision(e)} className="type-small" />
                 </div>
               </li>
             ))}

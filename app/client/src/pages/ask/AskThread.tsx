@@ -17,7 +17,7 @@ import {
   type CodeIndex,
 } from '../../services/askApi';
 import { AnswerView } from './AnswerView';
-import { MAX_QUESTION, askPath, forgetAskCheck, prefillFrom, useAskAccess, type AskRouteState } from './handoff';
+import { ASK_FRESH_MS, MAX_QUESTION, askPath, forgetAskCheck, prefillFrom, useAskAccess, type AskRouteState } from './handoff';
 import { Suggestions } from './Suggestions';
 import styles from './Ask.module.css';
 
@@ -52,7 +52,13 @@ const questionRow = (id: string, content: string): AskMessage => ({
   suggestedAgreement: null, didntGetTo: null, dropped: 0, createdAt: new Date().toISOString(),
 });
 
+/** A new project is a new page, so nothing from one project's conversation shows on another's. */
 export default function AskThread() {
+  const { id = '' } = useParams();
+  return <Conversation key={id} />;
+}
+
+function Conversation() {
   const { id = '', threadId = 'new' } = useParams();
   const { user, loading: authLoading, login } = useAuth();
   const location = useLocation();
@@ -79,15 +85,24 @@ export default function AskThread() {
   const run = useRef(0);
   const lastParam = useRef(threadId);
   const ready = useRef(false);
+  // A stream started here is not acted on once the page is gone (moving the URL, above all).
+  // Set in the effect, not on first render, so React's double mount in development keeps it.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const { view } = useAskAccess(id);
 
-  const load = useCallback(async (tid: string) => {
+  const load = useCallback(async (tid: string, { quiet = false } = {}) => {
     try {
       const data = await fetchAskThread(id, tid);
       setThread(data.thread);
       setMessages(data.messages);
       setLoadError(null);
     } catch (err) {
+      // A reload after a dropped answer keeps what's on the page.
+      if (quiet) return;
       if (err instanceof ApiError && err.status === 404) setLoadError('This conversation is gone, or Ask isn’t on for this project.');
       else setLoadError((err as Error).message || 'Couldn’t load this conversation.');
     } finally {
@@ -130,8 +145,9 @@ export default function AskThread() {
     const tid = threadId === 'new' ? active.current : threadId;
     setPending({ question: q, progress: [] });
     setNotice(null);
+    setConfirmDelete(false);
     const mine = ++run.current;
-    const current = () => run.current === mine;
+    const current = () => mounted.current && run.current === mine;
     let started = false;
     let failed = false;
     try {
@@ -140,6 +156,8 @@ export default function AskThread() {
         if (event.type === 'started') {
           started = true;
           active.current = event.threadId;
+          // The conversation exists from now on, so the project page lists it.
+          forgetAskCheck(id);
           setQuestion('');
           if (threadId === 'new') navigate(askPath(id, event.threadId), { replace: true });
         } else if (event.type === 'progress') {
@@ -157,9 +175,12 @@ export default function AskThread() {
       if (err instanceof AskRefused) {
         setNotice({
           text: err.status === 404 ? 'Ask isn’t on for this project, or this conversation is gone.' : err.message,
-          limit: LIMIT_REASONS.has(err.code),
+          limit: err.status === 429 || LIMIT_REASONS.has(err.code),
         });
         if (!started) setQuestion((cur) => cur || q);
+      } else if (!started) {
+        setNotice({ text: 'Your question didn’t reach Takeoff. Check your connection and ask again.', limit: false });
+        setQuestion((cur) => cur || q);
       } else {
         failed = true;
         setNotice({ text: 'The connection dropped before the answer arrived. It may still finish: reload the page in a minute to see it.', limit: false });
@@ -169,17 +190,22 @@ export default function AskThread() {
       if (current()) setPending(null);
     }
     // After a stream error, the saved conversation is the truth.
-    if (current() && started && active.current && failed) void load(active.current);
+    if (current() && started && active.current && failed) void load(active.current, { quiet: true });
   }, [id, threadId, pending, navigate, load]);
 
-  // The person pressed Ask on the project page: ask it here, once.
+  // The person pressed Ask on the project page: ask it here, once, and only
+  // just after the press. Coming back to an old page later only fills the box.
   useEffect(() => {
     const handed = (location.state as AskRouteState | null)?.ask;
-    if (!user || threadId !== 'new' || !handed || typeof handed.question !== 'string' || asked.has(handed.nonce)) return;
+    if (authLoading || threadId !== 'new' || !handed || typeof handed.question !== 'string' || asked.has(handed.nonce)) return;
+    const text = handed.question.slice(0, MAX_QUESTION);
+    const fresh = typeof handed.at === 'number' && Date.now() - handed.at < ASK_FRESH_MS;
     asked.add(handed.nonce);
-    navigate(location.pathname, { replace: true, state: null });
-    void ask(handed.question.slice(0, MAX_QUESTION));
-  }, [user, threadId, location.state, location.pathname, navigate, ask]);
+    const keep: AskRouteState = { prefill: text };
+    navigate(location.pathname, { replace: true, state: keep });
+    if (user && fresh) void ask(text);
+    else setQuestion((cur) => cur || text);
+  }, [authLoading, user, threadId, location.state, location.pathname, navigate, ask]);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -219,7 +245,7 @@ export default function AskThread() {
       <Page>
         <h1 className="type-title">Sign in to ask about this project</h1>
         <p className={cx('type-body', styles.muted)}>Only people on the project can ask Takeoff about it.</p>
-        <div><Button variant="primary" onClick={() => { rememberAfterSignIn(`/read/${id}`); login('github'); }}>Sign in with GitHub</Button></div>
+        <div><Button variant="primary" onClick={() => { rememberAfterSignIn(askPath(id, threadId)); login('github'); }}>Sign in with GitHub</Button></div>
       </Page>
     );
   }
@@ -247,7 +273,7 @@ export default function AskThread() {
           confirmDelete ? (
             <span className={styles.actions}>
               <span className="type-small">Delete this conversation?</span>
-              <Button variant="quiet" size="sm" disabled={busy} onClick={() => { void remove(); }}>Delete</Button>
+              <Button variant="quiet" size="sm" disabled={busy || !!pending} onClick={() => { void remove(); }}>Delete</Button>
               <Button variant="quiet" size="sm" disabled={busy} onClick={() => setConfirmDelete(false)}>Keep</Button>
             </span>
           ) : (

@@ -105,7 +105,7 @@ function describe(id, meta, project) {
     case 'decision':
       return { ...base, label: `Decision on PR #${meta.pr}`, pr: meta.pr };
     case 'pr_check':
-      return { ...base, label: `PR check on #${meta.pr}`, pr: meta.pr, sha: meta.sha || null };
+      return { ...base, label: `PR check on #${meta.pr}`, pr: meta.pr, sha: hexOrNull(meta.sha) };
     case 'capability':
       return { ...base, label: 'Confirmed capability', text: plain(meta.text) };
     case 'commit':

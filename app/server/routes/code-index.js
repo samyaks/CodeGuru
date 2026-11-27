@@ -55,8 +55,8 @@ function createCodeIndexRoutes({ deps = {} } = {}) {
     if (!project) throw AppError.notFound('Project not found');
     // A project with no owner is public to read, but has no code index.
     if (!project.user_id) throw AppError.notFound('This project has no code index.');
-    if (!enabled(project)) throw AppError.notFound('Not found');
     checkProjectAccess(project, req);
+    if (!enabled(project)) throw AppError.notFound('This project has no code index.');
     return project;
   }
 

@@ -30,7 +30,7 @@ export function AskSection({ projectId }: { projectId: string }) {
   const submit = () => {
     const q = question.trim();
     if (!q) return;
-    const state: AskRouteState = { ask: { question: q.slice(0, MAX_QUESTION), nonce: nonce() } };
+    const state: AskRouteState = { ask: { question: q.slice(0, MAX_QUESTION), nonce: nonce(), at: Date.now() } };
     navigate(askPath(projectId), { state });
   };
   const onSubmit = (e: FormEvent) => {

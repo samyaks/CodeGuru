@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ApiError } from '../../lib/api-error';
 import { fetchAskThreads, type AskThreadSummary, type AskView } from '../../services/askApi';
 
 // How the Ask screens hand text to each other. Both ways go through state
@@ -11,8 +12,11 @@ export const MAX_QUESTION = 4000;
 /** Router state for /read/:id/ask/new. `prefill` fills the box; `ask` is a question the person already pressed Ask on. */
 export interface AskRouteState {
   prefill?: string;
-  ask?: { question: string; nonce: string };
+  ask?: { question: string; nonce: string; at: number };
 }
+
+/** A press of Ask older than this is not asked again (Back into an old page, a reload): its words only fill the box. */
+export const ASK_FRESH_MS = 30 * 1000;
 
 export const askPath = (projectId: string, threadId = 'new') =>
   `/read/${encodeURIComponent(projectId)}/ask/${encodeURIComponent(threadId)}`;
@@ -56,12 +60,15 @@ export interface AskAccess {
 }
 
 // One check per project while the page is open, shared by every "Ask about this" link.
+// A clear no (Ask is off for the project, or this person isn't on it) is kept;
+// a network failure is tried again by the next screen that asks.
 const checks = new Map<string, Promise<{ threads: AskThreadSummary[]; view: AskView } | null>>();
 
 function check(projectId: string, fresh = false) {
   if (fresh || !checks.has(projectId)) {
-    checks.set(projectId, fetchAskThreads(projectId).catch(() => {
-      checks.delete(projectId);
+    checks.set(projectId, fetchAskThreads(projectId).catch((err) => {
+      const settled = err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+      if (!settled) checks.delete(projectId);
       return null;
     }));
   }

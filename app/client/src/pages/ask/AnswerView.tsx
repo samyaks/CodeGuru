@@ -10,7 +10,8 @@ import styles from './Ask.module.css';
 // renderer could turn into a link or picture; this view never renders HTML
 // or Markdown, so nothing in an answer can become one either.
 
-const GITHUB = /^https:\/\/github\.com\/[^\s"'<>`]+$/i;
+// Only a file, line range or commit in a repo, as the server builds them.
+const GITHUB = /^https:\/\/github\.com\/[^/\s"'<>`]+\/[^/\s"'<>`]+\/(blob\/[0-9a-f]{7,40}\/[^\s"'<>`]+|commit\/[0-9a-f]{7,40})$/i;
 
 /** Where a source opens: a Takeoff page, a GitHub page or line range, or nowhere. */
 export function sourceHref(projectId: string, s: AskSource): { to?: string; href?: string } {
@@ -30,16 +31,21 @@ export function sourceHref(projectId: string, s: AskSource): { to?: string; href
   }
 }
 
-const KIND_WORD: Record<string, string> = {
-  plan: 'Plan',
-  agreement: 'Agreement',
-  decision: 'Decision',
-  pr_check: 'PR check',
-  capability: 'Capability',
-  commit: 'Commit',
-  file: 'File',
-  code: 'Code, not checked against the plan',
-};
+/** The chip's name, in the app's words. */
+function chipLabel(s: AskSource): string {
+  const n = Number.isInteger(s.pr) && (s.pr as number) > 0 ? ` #${s.pr}` : '';
+  switch (s.kind) {
+    case 'plan': return 'Your plan';
+    case 'agreement': return 'Agreement';
+    case 'decision': return `Decision on change${n}`;
+    case 'pr_check': return `Takeoff’s check of change${n}`;
+    case 'capability': return 'Confirmed capability';
+    case 'commit': return 'A change in the repo';
+    case 'file': return 'A file in the repo';
+    case 'code': return 'The code, not checked against your plan';
+    default: return 'Source';
+  }
+}
 
 /** What the chip says under its label: the rule, the file and lines, or nothing. */
 function detail(s: AskSource): string | null {
@@ -56,7 +62,7 @@ export function SourceChip({ projectId, source, anchor }: { projectId: string; s
     <>
       <span className={styles.chipNumber}>{source.n}</span>
       <span className={styles.chipText}>
-        <span className="type-small">{source.label || KIND_WORD[source.kind] || 'Source'}</span>
+        <span className="type-small">{chipLabel(source)}</span>
         {text ? <span className={cx('type-small', styles.muted, styles.chipDetail)}>{text}</span> : null}
       </span>
     </>
@@ -99,12 +105,12 @@ export function AnswerView({ projectId, message }: { projectId: string; message:
         <div className={styles.callouts}>
           {message.planSilent ? (
             <p className={cx('type-small', styles.callout)}>
-              <span className="type-heading">The plan doesn’t cover this.</span> Nothing in takeoff.yaml or the team’s agreements says how it should work.
+              <span className="type-heading">The plan doesn’t cover this.</span> Nothing in your plan or the team’s agreements says how it should work.
             </p>
           ) : null}
           {message.notBuilt ? (
             <p className={cx('type-small', styles.callout)}>
-              <span className="type-heading">Not built yet.</span> The plan asks for it, but Takeoff didn’t find it in the code.
+              <span className="type-heading">Not built yet.</span> Your plan asks for it, but Takeoff didn’t find it in the code.
             </p>
           ) : null}
         </div>
@@ -117,7 +123,7 @@ export function AnswerView({ projectId, message }: { projectId: string; message:
             {p.refs.filter((n) => known.has(n)).map((n) => (
               <a key={n} className={styles.ref} href={`#${anchor(n)}`} aria-label={`Source ${n}`}>[{n}]</a>
             ))}
-            {p.code_only ? <span className={cx('type-small', styles.muted, styles.codeOnly)}> From the code only, not checked against the plan.</span> : null}
+            {p.code_only ? <span className={cx('type-small', styles.muted, styles.codeOnly)}> From the code only, not checked against your plan.</span> : null}
           </p>
         ))}
       </div>
