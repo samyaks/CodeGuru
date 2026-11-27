@@ -141,7 +141,7 @@ function world(c, opts = {}) {
   const clientScopes = [];
   const model = { text: c.modelText, error: null, onCall: null };
   const deps = {
-    deployments: { findByGithubRepo: async () => [{ id: 'proj-1' }] },
+    deployments: { findByGithubRepo: async () => [{ id: 'proj-1', github_installation_id: 42 }] },
     prChecks,
     clientForInstallation: (id, repo) => { clientScopes.push([id, repo]); return gh.client; },
     callModel: async (prompt) => {
@@ -727,7 +727,7 @@ test('a takeoff.yaml change accepted in Takeoff is trusted while the PR keeps ex
   w.deps.acceptedDecision = async (q) => { lookups.push(q); return accepted(q) ? { actor_name: 'Sam  Lee' } : null; };
   w.model.text = '{"verdict":"matches","summary":"Trips can have three travellers, as the intent now says.","conflicts":[]}';
   const out = await runPrCheck(job(), w.deps);
-  assert.deepStrictEqual(lookups, [{ projectId: 'proj-1', repo: 'acme/web', prNumber: 7, yamlSha256: hash(c.headYaml), baseYamlSha256: hash(BASE_YAML) }]);
+  assert.deepStrictEqual(lookups, [{ projectIds: ['proj-1'], repo: 'acme/web', prNumber: 7, yamlSha256: hash(c.headYaml), baseYamlSha256: hash(BASE_YAML) }]);
   assert.strictEqual(out.verdict, 'matches', 'judged against the accepted intent, with no floor for editing it');
   assert.ok(!/<proposed_intent_change>/.test(w.prompts[0].user));
   assert.match(w.gh.state.comments[0].body, /This PR's changes to takeoff\.yaml were accepted in Takeoff by Sam Lee\./);
@@ -743,6 +743,36 @@ test('a takeoff.yaml change accepted in Takeoff is trusted while the PR keeps ex
   broken.deps.acceptedDecision = async () => { throw new Error('db down'); };
   broken.model.text = w.model.text;
   assert.strictEqual((await runPrCheck(job(), broken.deps)).verdict, 'needs_decision');
+});
+
+test('an accept in any project linked to the repo through this installation counts, and names who confirmed it', async () => {
+  const c = readCase('intent_edit');
+  const w = world(c);
+  w.deps.deployments.findByGithubRepo = async () => [
+    { id: 'stranger', github_installation_id: null },
+    { id: 'proj-1', github_installation_id: 42 },
+    { id: 'proj-2', github_installation_id: 42 },
+  ];
+  const claimedFor = [];
+  const claim = w.deps.prChecks.claim.bind(w.deps.prChecks);
+  w.deps.prChecks.claim = async (q) => { claimedFor.push(q.projectId); return claim(q); };
+  const lookups = [];
+  w.deps.acceptedDecision = async (q) => {
+    lookups.push(q.projectIds);
+    return { actor_name: 'Olive', actor_user_id: 'olive', confirmed_by: 'sam', confirmed_by_name: 'Sam' };
+  };
+  w.model.text = '{"verdict":"matches","summary":"Trips can have three travellers, as the intent now says.","conflicts":[]}';
+  const out = await runPrCheck(job(), w.deps);
+  assert.strictEqual(out.verdict, 'matches');
+  assert.deepStrictEqual(lookups, [['proj-1', 'proj-2']], 'a project not linked through this installation is never asked');
+  assert.match(w.gh.state.comments[0].body, /accepted in Takeoff by Olive, confirmed by Sam\./);
+  assert.deepStrictEqual(claimedFor, ['proj-1'], 'the check is filed under a linked project');
+
+  const unlinked = world(c);
+  unlinked.deps.deployments.findByGithubRepo = async () => [{ id: 'stranger', github_installation_id: 9 }];
+  unlinked.deps.acceptedDecision = async () => { throw new Error('should not be asked'); };
+  unlinked.model.text = w.model.text;
+  assert.strictEqual((await runPrCheck(job(), unlinked.deps)).verdict, 'needs_decision');
 });
 
 test('a posted ⚠️ or ❓ verdict starts the drift email; a ✅ or a failed post does not', async () => {

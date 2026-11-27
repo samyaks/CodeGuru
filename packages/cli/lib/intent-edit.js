@@ -23,7 +23,12 @@ const OPS = new Set(['remove', 'reword', 'add']);
 const MAX_EDITS = 20;
 const MAX_TEXT = 1000;
 const listKey = (kind) => (kind === 'never' ? 'never' : 'rules');
-const norm = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
+// Invisible and control characters (the same set Takeoff's server strips
+// from what people type) don't count when matching or writing a rule, so a
+// rule with a stray zero-width space can still be found by its visible words.
+const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+const INVISIBLE_ASTRAL = /[\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}\uFE00-\uFE0F\u034F\uFFF9-\uFFFB]/gu;
+const norm = (t) => String(t ?? '').replace(INVISIBLE, '').replace(INVISIBLE_ASTRAL, '').replace(/\s+/g, ' ').trim();
 
 /** The text of a rule or agreement item node: a plain string, or a map with `text`. */
 function itemText(node) {
@@ -114,7 +119,8 @@ function checkEdits(edits) {
  * A target is found by its exact text (whitespace aside); it must be there
  * exactly once, so an edit never lands on the wrong rule.
  *
- * @returns {{ text: string, data: object, summary: string[] }}
+ * @returns {{ text: string, data: object, summary: string[] }} summary: one line per edit, with
+ *   the full wording, so whoever confirms an edit sees all of it
  * @throws {IntentEditError} codes: invalid_yaml, needs_migrate, bad_edit, not_found, area_not_found, invalid_result
  */
 function applyIntentEdits(text, edits) {
@@ -138,11 +144,19 @@ function applyIntentEdits(text, edits) {
     seen.set(loc[0], idxs);
   });
 
+  // What each list holds once every edit is made, so a reword is checked
+  // against the result: rewording one rule to the words of a rule removed in
+  // the same accept is fine; ending with two copies of a rule is not.
+  const finalText = (seq, j) => {
+    const k = located.findIndex((loc) => loc && loc[0] === seq && loc[1] === j);
+    if (k === -1) return itemText(seq.items[j]);
+    return list[k].op === 'remove' ? null : list[k].to;
+  };
   // Rewords first (in place), then removals from the end, then additions.
   list.forEach((e, i) => {
     if (e.op !== 'reword') return;
     const [seq, idx] = located[i];
-    if (seq.items.some((n, j) => j !== idx && itemText(n) === e.to)) throw new IntentEditError(`"${short(e.to)}" is already a rule there.`, 'bad_edit');
+    if (seq.items.some((_, j) => j !== idx && finalText(seq, j) === e.to)) throw new IntentEditError(`"${short(e.to)}" is already a rule there.`, 'bad_edit');
     const node = seq.items[idx];
     // Change the value in place, so comments and quoting on it stay.
     const scalar = YAML.isMap(node) ? node.get('text', true) : node;
@@ -153,14 +167,14 @@ function applyIntentEdits(text, edits) {
     }
     if (YAML.isScalar(scalar)) scalar.value = e.to;
     else node.set('text', e.to);
-    summary.push(`Reword "${short(e.target.text)}" to "${short(e.to)}"`);
+    summary.push(`Reword "${e.target.text}" to "${e.to}"`);
   });
   // Highest index first, so removing one item doesn't move the next.
   const removals = list.map((e, i) => [e, located[i]]).filter(([e]) => e.op === 'remove')
     .sort((a, b) => b[1][1] - a[1][1]);
   for (const [e, [seq, idx]] of removals) {
     seq.items.splice(idx, 1);
-    summary.push(`Remove ${e.target.kind === 'agreement' ? 'the agreement' : e.target.kind === 'never' ? 'the never-rule' : 'the rule'} "${short(e.target.text)}"`);
+    summary.push(`Remove ${e.target.kind === 'agreement' ? 'the agreement' : e.target.kind === 'never' ? 'the never-rule' : 'the rule'} "${e.target.text}"`);
   }
   for (const e of list.filter((x) => x.op === 'add')) {
     const area = findArea(doc, e.area);
@@ -174,7 +188,7 @@ function applyIntentEdits(text, edits) {
     } else {
       area.set(key, doc.createNode([e.text]));
     }
-    summary.push(`Add the ${e.kind === 'never' ? 'never-rule' : 'rule'} "${short(e.text)}"`);
+    summary.push(`Add the ${e.kind === 'never' ? 'never-rule' : 'rule'} "${e.text}"`);
   }
   // An emptied block list prints as "[]" so the file stays valid.
   YAML.visit(doc, { Seq(_, node) { if (!node.items.length) node.flow = true; } });

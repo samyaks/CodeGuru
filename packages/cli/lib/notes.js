@@ -94,6 +94,17 @@ async function getJson(fetchImpl, token, path) {
   }
 }
 
+function edited(c) {
+  const made = Date.parse(c.created_at);
+  const changed = Date.parse(c.updated_at);
+  return Number.isFinite(made) && Number.isFinite(changed) && changed - made > 5000;
+}
+
+// Control characters (terminal escape codes among them) are never printed:
+// a note is text for a person or an agent, not instructions to a terminal.
+const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+const printable = (t) => String(t ?? '').replace(CONTROL, '');
+
 /**
  * Send-back notes on the open PR(s) for `branch`.
  * @returns {Promise<Array<{ pr: number, prUrl: string, id: string, sha: string, note: string, by: string, at: string, current: boolean }>>}
@@ -113,11 +124,16 @@ async function fetchSendBackNotes({ repo, branch, token, fetchImpl = globalThis.
         if (!app || !firstLine.startsWith('<!-- takeoff:send-back ')) continue;
         const parsed = parseSendBack(firstLine);
         if (!parsed) continue;
+        // Takeoff never edits a note it posted. Anyone with write access can
+        // edit the App's comment, so an edited one no longer says what the
+        // reviewer sent.
+        if (edited(c)) continue;
         out.push({
           pr: Number(pr.number),
           prUrl: pr.html_url,
           ...parsed,
-          by: app,
+          note: printable(parsed.note),
+          by: printable(app),
           at: c.created_at,
           current: !!pr.head?.sha && pr.head.sha.startsWith(parsed.sha),
         });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '../../components/takeoff';
 import { cx } from '../../components/takeoff/status';
 import { ApiError } from '../../lib/api-error';
@@ -278,6 +279,11 @@ export function TeamSection({ projectId }: { projectId: string }) {
                     <li key={r.id} className={styles.row}>
                       <div className={styles.who}>
                         <span className="type-body">{r.summary}</span>
+                        {r.prNumber ? (
+                          <Link className="type-small" to={`/read/${encodeURIComponent(projectId)}/drift/${r.prNumber}`}>
+                            See every change on the review page
+                          </Link>
+                        ) : null}
                         <span className={cx('type-small', styles.muted)}>
                           Recommended by {by ? by.name || by.email || 'a member' : 'a member'}
                           {r.status === 'confirming' ? ' · being applied now' : ''}

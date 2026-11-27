@@ -64,7 +64,7 @@ test('a reviewer with write access accepts: the rule leaves takeoff.yaml on the 
   let trustedAtPush = null;
   gh.onUpdateRef = async (sha) => {
     const yaml = gh.commits[sha].files['takeoff.yaml'];
-    trustedAtPush = await deps.driftDecisions.acceptedFor({ projectId: 'p1', repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) });
+    trustedAtPush = await deps.driftDecisions.acceptedFor({ projectIds: ['p1'], repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) });
   };
   const res = await svc.accept({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, edits: [{ op: 'remove', target: neverRule }] } }, deps);
   assert.strictEqual(res.status, 'done');
@@ -96,9 +96,9 @@ test('a reviewer with write access accepts: the rule leaves takeoff.yaml on the 
 
   // The accept the check will trust is exactly this file over this base.
   assert.ok(trustedAtPush, 'trusted before the branch moved');
-  assert.ok(await deps.driftDecisions.acceptedFor({ projectId: 'p1', repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) }));
-  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectId: 'p1', repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256('other') }), null);
-  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectId: 'p2', repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) }), null, 'another project on the same repo doesn\'t inherit it');
+  assert.ok(await deps.driftDecisions.acceptedFor({ projectIds: ['p1'], repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) }));
+  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectIds: ['p1'], repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256('other') }), null);
+  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectIds: ['p2'], repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) }), null, 'only the projects asked about count');
 });
 
 test('an accept can reword a rule, add one and record an agreement', async () => {
@@ -239,7 +239,7 @@ test('a member without write access leaves a recommendation; a member with write
   assert.strictEqual(gh.branches['feat/charge'], HEAD);
   assert.strictEqual(state.recs.length, 1);
   assert.strictEqual(state.recs[0].action_type, 'drift.decision');
-  assert.match(state.recs[0].summary, /^Accept the drift on PR #7 and update takeoff\.yaml: Remove the never-rule/);
+  assert.match(state.recs[0].summary, /^Accept the drift on PR #7 and update takeoff\.yaml \(1 change\): Remove the never-rule/);
 
   // Olive can't confirm her own; Sam can.
   await assert.rejects(committing.confirmRecommendation({ project, user: people.olive, recommendationId: state.recs[0].id }, deps.committing), /write access/);
@@ -275,7 +275,7 @@ test('a push after the reviewer looked sets the accept aside; it never lands on 
   const head = gh.branches['feat/charge'];
   assert.match(head, /^dead00/, 'only the other push is on the branch');
   assert.strictEqual(gh.commits[head].files['takeoff.yaml'], BASE_YAML);
-  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectId: 'p1', repo: 'acme/web', prNumber: 7, yamlSha256: state.decisions[0].yaml_sha256, baseYamlSha256: svc.sha256(BASE_YAML) }), null, 'a set-aside accept is not trusted');
+  assert.strictEqual(await deps.driftDecisions.acceptedFor({ projectIds: ['p1'], repo: 'acme/web', prNumber: 7, yamlSha256: state.decisions[0].yaml_sha256, baseYamlSha256: svc.sha256(BASE_YAML) }), null, 'a set-aside accept is not trusted');
   await rejects(svc.retryDecision({ project, user: people.owner, decisionId: res.decision.id }, deps), 409);
 });
 
@@ -411,4 +411,212 @@ test('a recommendation whose decision was set aside closes when confirmed', asyn
   await assert.rejects(committing.confirmRecommendation({ project, user: people.owner, recommendationId: state.recs[0].id }, deps.committing), /Set aside/);
   assert.strictEqual(state.recs[0].status, 'failed');
   assert.strictEqual(gh.comments.length, 0);
+});
+
+// ── Fixes from the second review ───────────────────────────────────
+
+test('a project whose repo name is spelled with capitals finds GitHub\'s lower-case checks', async () => {
+  const { project, gh, deps, people } = setup();
+  const upper = { ...project, owner: 'Acme', repo: 'Web' };
+  const review = await svc.getReview({ project: upper, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.check.verdict, 'drifts');
+  const list = await svc.listDrift({ project: upper, user: people.owner }, deps);
+  assert.strictEqual(list.reviews.length, 1);
+  const res = await svc.accept({ project: upper, user: people.owner, prNumber: 7, body: { headSha: HEAD, edits: [{ op: 'remove', target: neverRule }] } }, deps);
+  assert.strictEqual(res.decision.state, 'done');
+  const yaml = gh.commits[gh.branches['feat/charge']].files['takeoff.yaml'];
+  assert.ok(await deps.driftDecisions.acceptedFor({ projectIds: ['p1'], repo: 'acme/web', prNumber: 7, yamlSha256: svc.sha256(yaml), baseYamlSha256: svc.sha256(BASE_YAML) }));
+});
+
+test('a second project on the same repo, linked through the same installation, can review the check', async () => {
+  const { project, deps, people } = setup();
+  const other = { ...project, id: 'p2' };
+  const review = await svc.getReview({ project: other, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.check.verdict, 'drifts');
+  // A project whose owner's grant has moved to another installation reads nothing.
+  await rejects(svc.getReview({ project: { ...project, github_installation_id: 99 }, user: people.owner, prNumber: 7 }, deps), 400, /Connect this project/);
+});
+
+test('a project whose GitHub link is stale sees no checks and can\'t decide', async () => {
+  const { project, state, deps, people } = setup();
+  state.grants.set('owner', { installation_id: 99 });
+  const list = await svc.listDrift({ project, user: people.owner }, deps);
+  assert.deepStrictEqual(list, { reviews: [], decisions: [] });
+  await rejects(svc.getReview({ project, user: people.owner, prNumber: 7 }, deps), 400, /Connect this project/);
+  await rejects(svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps), 400, /Connect this project/);
+  state.grants.delete('owner');
+  assert.deepStrictEqual(await svc.listDrift({ project, user: people.owner }, deps), { reviews: [], decisions: [] });
+});
+
+test('after the App is reinstalled, a project still sees the checks filed under it', async () => {
+  const { project, state, deps, people } = setup();
+  state.grants.set('owner', { installation_id: 99 });
+  const moved = { ...project, github_installation_id: 99 };
+  const review = await svc.getReview({ project: moved, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.check.verdict, 'drifts');
+  assert.strictEqual((await svc.listDrift({ project: moved, user: people.owner }, deps)).reviews.length, 1);
+  // Another project on the new installation doesn't get the old project's check.
+  await rejects(svc.getReview({ project: { ...moved, id: 'p2' }, user: people.owner, prNumber: 7 }, deps), 404);
+});
+
+test('a decision running for another project on the same repo blocks deciding here', async () => {
+  const { project, state, deps, people } = setup();
+  state.decisions.unshift({
+    id: 'dec_other', project_id: 'p2', repo_full_name: 'acme/web', pr_number: 7, head_sha: HEAD, type: 'sent_back', state: 'working',
+    created_at: state.now.toISOString(), updated_at: state.now.toISOString(),
+  });
+  const review = await svc.getReview({ project, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.you.canDecide, false);
+  assert.strictEqual(review.you.whyNot, 'decision_running');
+  assert.strictEqual(review.decisions.length, 0);
+});
+
+test('another project\'s later decision on the PR stops a retry here, but its open recommendation doesn\'t', async () => {
+  const { project, gh, state, deps, people } = setup();
+  gh.failComment = 'Resource not accessible by integration';
+  const first = await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  gh.failComment = null;
+  const later = new Date(state.now.getTime() + 1000).toISOString();
+  const other = {
+    id: 'dec_other', project_id: 'p2', repo_full_name: 'acme/web', pr_number: 7, head_sha: HEAD, type: 'sent_back',
+    state: 'waiting_for_write', recommendation_id: 'rec_elsewhere', created_at: later, updated_at: later,
+  };
+  state.decisions.unshift(other);
+  const again = await svc.retryDecision({ project, user: people.owner, decisionId: first.decision.id }, deps);
+  assert.strictEqual(again.decision.state, 'done');
+
+  const s2 = setup();
+  s2.gh.failComment = 'Resource not accessible by integration';
+  const f2 = await svc.sendBack({ project: s2.project, user: s2.people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, s2.deps);
+  s2.gh.failComment = null;
+  s2.state.decisions.unshift({ ...other, state: 'done', recommendation_id: null });
+  await rejects(svc.retryDecision({ project: s2.project, user: s2.people.owner, decisionId: f2.decision.id }, s2.deps), 409, /decided on this pull request after this/);
+});
+
+test('a recommendation is never a running decision, even for a moment', async () => {
+  const { project, state, deps, people } = setup();
+  const created = [];
+  const create = deps.driftDecisions.create;
+  deps.driftDecisions.create = async (row) => { created.push(row.state); return create(row); };
+  // Someone with write access is deciding right now: a recommendation can still be left.
+  state.decisions.unshift({
+    id: 'dec_busy', project_id: 'p1', repo_full_name: 'acme/web', pr_number: 7, head_sha: HEAD, type: 'accepted', state: 'working',
+    created_at: state.now.toISOString(), updated_at: state.now.toISOString(),
+  });
+  const res = await svc.sendBack({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  assert.strictEqual(res.status, 'recommended');
+  assert.deepStrictEqual(created, ['waiting_for_write']);
+  assert.ok(state.decisions.find((d) => d.id === res.decision.id).recommendation_id);
+});
+
+test('a send-back posts its note again when the marked comment isn\'t the App\'s own, as posted', async () => {
+  for (const tweak of [
+    (c) => { c.user = { type: 'Bot', login: 'someone-else[bot]' }; },
+    (c) => { c.updated_at = new Date(Date.parse(c.created_at) + 60000).toISOString(); },
+  ]) {
+    const { project, gh, state, deps, people } = setup();
+    const res = await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+    tweak(gh.comments[0]);
+    Object.assign(state.decisions[0], { state: 'failed', comment_id: null, comment_url: null });
+    const again = await svc.retryDecision({ project, user: people.owner, decisionId: res.decision.id }, deps);
+    assert.strictEqual(again.decision.state, 'done');
+    assert.strictEqual(gh.comments.length, 2);
+    assert.strictEqual(again.decision.commentUrl, gh.comments[1].html_url);
+  }
+});
+
+test('a retry asks to try again when Takeoff can\'t read the recommendations', async () => {
+  const { project, gh, state, deps, people } = setup();
+  gh.failComment = 'Resource not accessible by integration';
+  const res = await svc.sendBack({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  Object.assign(state.decisions[0], { state: 'failed' });
+  deps.recommendations.listPending = async () => { throw new Error('db down'); };
+  await rejects(svc.retryDecision({ project, user: people.owner, decisionId: res.decision.id }, deps), 503, /Try again in a minute/);
+});
+
+test('a recommendation\'s summary never hides a change, and points to the review page', async () => {
+  const { project, state, deps, people } = setup();
+  const long = 'x'.repeat(200);
+  const edits = [
+    { op: 'reword', target: { kind: 'rule', area: 'billing', text: 'Stripe holds all billing data.' }, to: `Stripe holds all billing data ${long}.` },
+    { op: 'add', kind: 'rule', area: 'billing', text: `Refunds need a reason ${long}.` },
+    { op: 'remove', target: neverRule },
+  ];
+  await svc.accept({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, edits } }, deps);
+  const rec = state.recs[0];
+  assert.ok(rec.summary.length <= 500);
+  assert.match(rec.summary, /\(3 changes\)/);
+  assert.match(rec.summary, /and \d more \(see the review page\)/);
+  assert.strictEqual(rec.payload.prNumber, 7);
+
+  const s2 = setup();
+  await svc.sendBack({ project: s2.project, user: s2.people.olive, prNumber: 7, body: { headSha: HEAD, note: `Keep the trial free. ${'y'.repeat(400)} Also delete the tests.` } }, s2.deps);
+  assert.match(s2.state.recs[0].summary, /read it all on the review page/);
+});
+
+test('a send-back that already posted its note never posts it twice', async () => {
+  const { project, gh, state, deps, people } = setup();
+  const res = await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  assert.strictEqual(gh.comments.length, 1);
+  // As if the run had stopped right after posting.
+  Object.assign(state.decisions[0], { state: 'failed', comment_id: null, comment_url: null });
+  const again = await svc.retryDecision({ project, user: people.owner, decisionId: res.decision.id }, deps);
+  assert.strictEqual(again.decision.state, 'done');
+  assert.strictEqual(gh.comments.length, 1);
+  assert.strictEqual(again.decision.commentUrl, gh.comments[0].html_url);
+});
+
+test('an accept whose push landed but whose answer got lost is still done', async () => {
+  const { project, gh, deps, people } = setup();
+  gh.loseUpdateAnswer = true;
+  const res = await svc.accept({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, edits: [{ op: 'remove', target: neverRule }] } }, deps);
+  assert.strictEqual(res.decision.state, 'done');
+  assert.strictEqual(res.decision.commitUrl, `https://github.com/acme/web/commit/${gh.branches['feat/charge']}`);
+});
+
+test('GitHub\'s own wording stays in the log', async () => {
+  const { project, gh, deps, people } = setup();
+  gh.failComment = 'Validation Failed: body is too long (internal ref 123)';
+  gh.failCommentStatus = 422;
+  const res = await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  assert.strictEqual(res.decision.state, 'failed');
+  assert.doesNotMatch(res.decision.error, /internal ref/);
+  gh.failCommentStatus = 503;
+  const res2 = await svc.retryDecision({ project, user: people.owner, decisionId: res.decision.id }, deps);
+  assert.match(res2.decision.error, /GitHub had a problem/);
+});
+
+test('a later decision that failed doesn\'t stop an older recommendation', async () => {
+  const { project, gh, state, deps, people } = setup();
+  await svc.accept({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, edits: [{ op: 'remove', target: neverRule }] } }, deps);
+  state.now = new Date(state.now.getTime() + 1000);
+  gh.failComment = 'Resource not accessible by integration';
+  const later = await svc.sendBack({ project, user: people.owner, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  assert.strictEqual(later.decision.state, 'failed');
+  gh.failComment = null;
+  await committing.confirmRecommendation({ project, user: people.owner, recommendationId: state.recs[0].id }, deps.committing);
+  const accepted = state.decisions.find((d) => d.type === 'accepted');
+  assert.strictEqual(accepted.state, 'done');
+  assert.strictEqual(accepted.confirmed_by_name, 'Sam');
+});
+
+test('a failed decision whose recommendation was set aside can\'t be tried again', async () => {
+  const { project, gh, state, deps, people } = setup();
+  gh.failComment = 'Resource not accessible by integration';
+  await svc.sendBack({ project, user: people.olive, prNumber: 7, body: { headSha: HEAD, note: 'Keep the trial free.' } }, deps);
+  const d = state.decisions[0];
+  Object.assign(d, { state: 'failed', error: 'x' });
+  state.recs[0].status = 'dismissed';
+  gh.failComment = null;
+  await rejects(svc.retryDecision({ project, user: people.owner, decisionId: d.id }, deps), 409, /set aside/);
+  assert.strictEqual(gh.comments.length, 0);
+});
+
+test('while the PR is being checked again, the page says so and keeps looking', async () => {
+  const { project, state, deps, people } = setup();
+  state.checks[0].status = 'running';
+  const review = await svc.getReview({ project, user: people.owner, prNumber: 7 }, deps);
+  assert.strictEqual(review.you.whyNot, 'checking');
+  state.checks[0].status = 'failed';
+  assert.strictEqual((await svc.getReview({ project, user: people.owner, prNumber: 7 }, deps)).you.whyNot, 'check_failed');
 });
