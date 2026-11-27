@@ -7,6 +7,7 @@
 
 const { isNeverReadable, redactSecrets, secretFileReason, REDACTED } = require('../../code-index/filter');
 const { expandBraces } = require('@takeoff/cli/lib/braces');
+const { normalizeRepoPath, PathError } = require('@takeoff/cli/lib/plan');
 
 class AskToolError extends Error {
   constructor(message, code = 'invalid_request') {
@@ -23,23 +24,13 @@ const MAX_PATH = 1024;
  * segments after cleaning, backslashes and control characters.
  */
 function normalizePath(raw) {
-  if (typeof raw !== 'string' || !raw.trim()) throw new AskToolError('`path` is required');
-  let p = raw.trim();
-  if (p.length > MAX_PATH) throw new AskToolError('That path is too long.');
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f\\]/.test(p)) throw new AskToolError('That path has characters a repo path never has.');
-  if (p.startsWith('/') || /^[a-z]:/i.test(p) || p.startsWith('~')) {
-    throw new AskToolError('Paths are relative to the repo root, like src/app.js.');
+  // The same rules as `takeoff mcp`, so both answer alike for a path.
+  try {
+    return normalizeRepoPath(raw);
+  } catch (e) {
+    if (e instanceof PathError) throw new AskToolError(e.message);
+    throw e;
   }
-  const parts = [];
-  for (const seg of p.split('/')) {
-    if (seg === '' || seg === '.') continue;
-    if (seg === '..') throw new AskToolError('Paths can’t step outside the repo.');
-    parts.push(seg);
-  }
-  if (!parts.length) throw new AskToolError('`path` is required');
-  p = parts.join('/');
-  return p;
 }
 
 /** A glob for list_files / search_code, length-limited. `null` when absent. */

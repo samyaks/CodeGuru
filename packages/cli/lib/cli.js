@@ -8,13 +8,15 @@ const { sync, TakeoffError, readIfExists } = require('./sync');
 const { FILENAME, CURRENT_VERSION } = require('./schema');
 const { notesCommand } = require('./notes');
 const { hookCommand, HOOK_EVENTS } = require('./hook');
+const { serve } = require('./mcp');
 
 const FLAGS = {
   validate: ['--strict'],
   sync: ['--check', '--dry-run'],
   migrate: ['--dry-run'],
   notes: ['--json', '--branch', '--repo'],
-  hook: ['--local', '--command'],
+  hook: ['--local', '--command', '--mcp'],
+  mcp: [],
 };
 
 const HELP = `takeoff: keep what you build matching what you agreed
@@ -27,12 +29,17 @@ Usage:
   takeoff notes [--branch <name>] [--repo <owner/name>] [--json]
                                      Show reviewers' send-back notes for this branch's PR
                                      (reads GitHub with GITHUB_TOKEN or the gh CLI's sign-in)
-  takeoff hook install [--local] [--command <cmd>]
+  takeoff hook install [--local] [--command <cmd>] [--mcp]
                                      Add Takeoff's hooks to .claude/settings.json (or
                                      settings.local.json with --local): each prompt gets
                                      the intent for the areas this branch changes and
                                      reviewers' send-back notes; an edit in someone
-                                     else's area gets a one-line heads-up
+                                     else's area gets a one-line heads-up. With --mcp,
+                                     also add \`takeoff mcp\` to .mcp.json
+  takeoff mcp                        Serve the plan to a coding agent over MCP (stdin and
+                                     stdout): get_plan, rules_for_path,
+                                     get_send_back_notes and recent_plan_changes. All
+                                     read only
 
 Options:
   --dir <path>   Run in another directory (default: current)
@@ -111,6 +118,7 @@ function run(argv, { cwd = process.cwd(), out = (s) => console.log(s), err = (s)
       case 'migrate': return migrateCommand({ yamlPath, label, dryRun: args.flags.has('--dry-run'), out, err });
       case 'notes': return notesCommand({ dir, args, out, err, ...io });
       case 'hook': return hookCommand({ dir, args, out, err, ...io });
+      case 'mcp': return serve({ dir, err, ...io });
       default:
         err(`Unknown command "${command}".\n\n${HELP}`);
         return 2;

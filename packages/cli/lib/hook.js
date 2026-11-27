@@ -604,9 +604,87 @@ function installCommand({ dir, args, out, err, exec, env }) {
     out(`Wrote ${rel}. Claude Code picks the hooks up in its next session.`);
     if (!local) out(`${rel} is shared with everyone who clones the repo; use --local to keep the hooks to yourself.`);
   }
+  if (args.flags.has('--mcp')) {
+    const code = installMcp({ root, program, local, out, err });
+    if (code) return code;
+  }
   if (!onPath(program, env)) {
     out(`Note: \`${program.split(' ')[0]}\` isn't on your PATH, so the hooks do nothing until it is. Install @takeoff/cli globally, or run this again with --command "npx --no-install takeoff".`);
   }
+  return 0;
+}
+
+const MCP_FILE = '.mcp.json';
+
+/** The .mcp.json entry for `takeoff mcp` run as `program`. */
+const mcpEntry = (program) => {
+  const [command, ...rest] = program.split(' ');
+  return { type: 'stdio', command, args: [...rest, 'mcp'] };
+};
+
+/** An entry Takeoff wrote, with any program. */
+const isOurMcp = (e) => !!e && typeof e === 'object' && !Array.isArray(e) && typeof e.command === 'string'
+  && Array.isArray(e.args) && e.args[e.args.length - 1] === 'mcp'
+  && /takeoff/.test([e.command, ...e.args].join(' '));
+
+/**
+ * Add `takeoff mcp` to the repo's .mcp.json, where Claude Code finds servers
+ * shared with the repo. With --local nothing is written: Claude Code keeps a
+ * private server in its own settings, so this prints the command that adds it.
+ */
+function installMcp({ root, program, local, out, err }) {
+  if (local) {
+    out(`To add the plan tools for yourself only, run:\n  claude mcp add --scope local takeoff -- ${program} mcp`);
+    return 0;
+  }
+  const file = path.join(root, MCP_FILE);
+  let text;
+  try {
+    assertNoSymlink(root, MCP_FILE);
+    text = readIfExists(file);
+  } catch (e) {
+    if (e instanceof TakeoffError) { err(e.message); return 1; }
+    err(`Couldn't read ${MCP_FILE} (${e.code || e.message}), so it wasn't changed.`);
+    return 1;
+  }
+  let config = {};
+  if (text !== null && text.trim()) {
+    try { config = JSON.parse(text); } catch {
+      err(`${MCP_FILE} isn't valid JSON, so it wasn't changed. Fix it, then run this again.`);
+      return 1;
+    }
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      err(`${MCP_FILE} isn't a JSON object, so it wasn't changed.`);
+      return 1;
+    }
+  }
+  if (config.mcpServers !== undefined && (typeof config.mcpServers !== 'object' || config.mcpServers === null || Array.isArray(config.mcpServers))) {
+    err(`"mcpServers" in ${MCP_FILE} isn't an object, so it wasn't changed.`);
+    return 1;
+  }
+  const servers = config.mcpServers || {};
+  const want = mcpEntry(program);
+  const existing = Object.prototype.hasOwnProperty.call(servers, 'takeoff') ? servers.takeoff : undefined;
+  if (existing !== undefined && !isOurMcp(existing)) {
+    err(`${MCP_FILE} already has a server called "takeoff" that Takeoff didn't add, so it wasn't changed.`);
+    return 1;
+  }
+  if (existing && JSON.stringify(existing) === JSON.stringify(want)) {
+    out(`unchanged  ${MCP_FILE} takeoff server`);
+    return 0;
+  }
+  const keep = existing ? { ...existing } : {};
+  delete keep.type; delete keep.command; delete keep.args;
+  servers.takeoff = { ...want, ...keep };
+  config.mcpServers = servers;
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  } catch (e) {
+    err(`Couldn't write ${MCP_FILE} (${e.code || e.message}).`);
+    return 1;
+  }
+  out(`${existing ? 'updated' : 'added'}      ${MCP_FILE} takeoff server`);
+  out(`Wrote ${MCP_FILE}. Claude Code asks each person to approve the plan tools the first time it starts in this repo.`);
   return 0;
 }
 
@@ -641,7 +719,7 @@ function readStdin(stdin) {
   }
 }
 
-const USAGE = 'Usage: takeoff hook install [--local] [--command <cmd>]\n       takeoff hook prompt-submit | post-edit | session-start   (run by Claude Code)';
+const USAGE = 'Usage: takeoff hook install [--local] [--command <cmd>] [--mcp]\n       takeoff hook prompt-submit | post-edit | session-start   (run by Claude Code)';
 
 /**
  * `takeoff hook <install|prompt-submit|post-edit|session-start|refresh-notes>`
@@ -686,4 +764,6 @@ function hookCommand({ dir, args, out, err, env = process.env, exec = null, fetc
   })();
 }
 
-module.exports = { hookCommand, renderContext, repoInfo, HOOK_EVENTS, NOTES_TTL_MS };
+module.exports = {
+  hookCommand, renderContext, repoInfo, upstreamOf, defaultBranch, makeExec, onPath, HOOK_EVENTS, NOTES_TTL_MS, COMMAND_RE,
+};
