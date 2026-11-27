@@ -10,6 +10,7 @@ import { cx } from '../components/takeoff/status';
 import { TeamSection } from './team/TeamSection';
 import { AgreementsSection } from './team/AgreementsSection';
 import { DriftSection } from './team/DriftSection';
+import { OverviewSection } from './team/OverviewSection';
 import styles from './ReleasePreview.module.css';
 
 // Release 11.15.26: the new project page reads real data (launch checks,
@@ -71,6 +72,7 @@ export function ReleaseProject() {
         oldHref={`/old/read/${id}`}
         team={user && id ? (
           <>
+            <OverviewSection projectId={id} />
             <DriftSection projectId={id} />
             <AgreementsSection projectId={id} />
             <TeamSection projectId={id} />

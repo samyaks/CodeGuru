@@ -815,5 +815,7 @@ function registerDecisionAction(depsFactory = defaultDeps) {
 module.exports = {
   listDrift, getReview, accept, sendBack, retryDecision, notifyDrift, registerDecisionAction, defaultDeps,
   sendBackComment, commitMessage, planAccept, targetFor, sha256, ACTION,
+  // For the project overview and decision log (Milestone 7).
+  isLinked, checkScope, storedResult, cachedLivePr, publicDecision, pendingRecommendationIds, REVIEW_VERDICTS,
   _resetRegistration: () => { registered = false; committing._actions.delete(ACTION); },
 };

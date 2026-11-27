@@ -16,6 +16,9 @@ import {
 import styles from './Team.module.css';
 import { TEAM_CHANGED_EVENT } from './TeamSection';
 
+/** Fired after someone proposes, votes on or decides an agreement here, so the overview updates. */
+export const AGREEMENTS_CHANGED_EVENT = 'takeoff:agreements-changed';
+
 const names = (people: Person[]) => people.map((p) => p.name || 'a teammate').join(', ');
 
 const INTENT_NOTE: Record<string, string> = {
@@ -140,6 +143,7 @@ export function AgreementsSection({ projectId }: { projectId: string }) {
     } finally {
       setBusy(null);
       await load();
+      window.dispatchEvent(new Event(AGREEMENTS_CHANGED_EVENT));
     }
   };
 
