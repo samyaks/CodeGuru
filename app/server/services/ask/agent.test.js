@@ -438,6 +438,8 @@ test('nothing in an answer or a source can become a link, image or tag when rend
   assert.strictEqual(commit.sources[0].url, 'https://github.com/acme/delta/commit/abc1234');
   const noRepo = checkAnswer({ paragraphs: [{ text: 'It changed.', source_ids: ['commit:abc1234'] }] }, new Map([['commit:abc1234', { kind: 'commit', sha: 'not a sha' }]]), { project });
   assert.strictEqual(noRepo.sources[0].url, null);
+  const quote = checkAnswer({ paragraphs: [{ text: 'A doc.', source_ids: ['file:x'] }] }, new Map([['file:x', { kind: 'file', path: "docs/it's.md", sha: 'c'.repeat(40) }]]), { project });
+  assert.strictEqual(quote.sources[0].url, `https://github.com/acme/delta/blob/${'c'.repeat(40)}/docs/it%27s.md`);
   assert.strictEqual(progressText('read_file', { path: 'a ![x](//e.com/p) b' }), 'Reading a b');
 });
 

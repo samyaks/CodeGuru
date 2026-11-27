@@ -152,12 +152,12 @@ function Conversation() {
     let failed = false;
     try {
       await askQuestion(id, { question: q, threadId: tid || undefined }, (event) => {
+        // The conversation exists from "started" on, so the project page lists it, whether or not this page is still open.
+        if (event.type === 'started') forgetAskCheck(id);
         if (!current()) return;
         if (event.type === 'started') {
           started = true;
           active.current = event.threadId;
-          // The conversation exists from now on, so the project page lists it.
-          forgetAskCheck(id);
           setQuestion('');
           if (threadId === 'new') navigate(askPath(id, event.threadId), { replace: true });
         } else if (event.type === 'progress') {
@@ -179,7 +179,7 @@ function Conversation() {
         });
         if (!started) setQuestion((cur) => cur || q);
       } else if (!started) {
-        setNotice({ text: 'Your question didn’t reach Takeoff. Check your connection and ask again.', limit: false });
+        setNotice({ text: 'Takeoff may not have received your question. Check your connection, then look under Your questions on the project page before asking again.', limit: false });
         setQuestion((cur) => cur || q);
       } else {
         failed = true;
@@ -326,7 +326,7 @@ function Conversation() {
         />
         <div className={styles.composerRow}>
           <span className={cx('type-small', styles.muted)}>Takeoff only reads. It never changes the repo or the plan.</span>
-          <Button variant="primary" type="submit" disabled={!question.trim() || !!pending}>
+          <Button variant="primary" type="submit" disabled={!question.trim() || !!pending || busy}>
             {pending ? 'Answering…' : 'Ask'}
           </Button>
         </div>

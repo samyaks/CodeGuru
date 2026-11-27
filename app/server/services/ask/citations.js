@@ -88,7 +88,7 @@ function commitUrl(project, rawSha) {
 function blobUrl(project, meta) {
   const sha = hexOrNull(meta.sha);
   if (!project || !project.owner || !project.repo || !sha || !meta.path) return null;
-  const enc = String(meta.path).split('/').map(encodeURIComponent).join('/');
+  const enc = String(meta.path).split('/').map((s) => encodeURIComponent(s).replace(/'/g, '%27')).join('/');
   const start = Number.isInteger(meta.start) ? meta.start : null;
   const end = Number.isInteger(meta.end) ? meta.end : start;
   return `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/blob/${sha}/${enc}${start ? `#L${start}-L${end}` : ''}`;
