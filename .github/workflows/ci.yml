@@ -48,6 +48,8 @@ jobs:
           server/routes/agreements.test.js
           server/services/drift/drift.test.js
           server/routes/drift.test.js
+          server/services/overview/overview.test.js
+          server/routes/overview.test.js
 
       - name: TypeScript check (client)
         run: npm run typecheck
@@ -57,7 +59,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); require('./server/routes/agreements'); require('./server/services/agreements/notify'); require('./server/routes/drift'); require('./server/services/drift'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); require('./server/routes/agreements'); require('./server/services/agreements/notify'); require('./server/routes/drift'); require('./server/services/drift'); require('./server/routes/overview'); require('./server/services/overview'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build

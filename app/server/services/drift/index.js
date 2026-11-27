@@ -195,6 +195,7 @@ async function livePr(gh, project, prNumber) {
 // that polls, or many members opening it, from using up the App's rate limit.
 const MAX_LISTED = 10;
 const PR_CACHE_MS = 60 * 1000;
+const PR_FAIL_CACHE_MS = 20 * 1000;
 const PR_CACHE_MAX = 500;
 const sharedPrCache = new Map();
 
@@ -202,10 +203,23 @@ async function cachedLivePr(gh, project, prNumber, cache) {
   if (!cache) return livePr(gh, project, prNumber);
   const key = `${project.github_installation_id}:${repoOf(project).toLowerCase()}#${prNumber}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < PR_CACHE_MS) return hit.pr;
-  const pr = await livePr(gh, project, prNumber);
-  if (cache.size >= PR_CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(key, { at: Date.now(), pr });
+  if (hit && Date.now() - hit.at < (hit.err ? PR_FAIL_CACHE_MS : PR_CACHE_MS)) {
+    if (hit.err) throw hit.err;
+    return hit.pr;
+  }
+  const remember = (entry) => {
+    if (cache.size >= PR_CACHE_MAX) cache.delete(cache.keys().next().value);
+    cache.set(key, { at: Date.now(), ...entry });
+  };
+  let pr;
+  try {
+    pr = await livePr(gh, project, prNumber);
+  } catch (err) {
+    // A failure is remembered briefly too, so reloads don't keep asking GitHub.
+    remember({ err });
+    throw err;
+  }
+  remember({ pr });
   return pr;
 }
 
@@ -815,5 +829,7 @@ function registerDecisionAction(depsFactory = defaultDeps) {
 module.exports = {
   listDrift, getReview, accept, sendBack, retryDecision, notifyDrift, registerDecisionAction, defaultDeps,
   sendBackComment, commitMessage, planAccept, targetFor, sha256, ACTION,
+  // For the project overview and decision log (Milestone 7).
+  isLinked, checkScope, storedResult, cachedLivePr, publicDecision, pendingRecommendationIds, REVIEW_VERDICTS,
   _resetRegistration: () => { registered = false; committing._actions.delete(ACTION); },
 };

@@ -41,6 +41,7 @@ const { loadMemberships } = require('./lib/memberships');
 const { createTeamRoutes } = require('./routes/team');
 const { createAgreementRoutes } = require('./routes/agreements');
 const { createDriftRoutes } = require('./routes/drift');
+const { createOverviewRoutes } = require('./routes/overview');
 const driftService = require('./services/drift');
 const agreementService = require('./services/agreements');
 const agreementNotify = require('./services/agreements/notify');
@@ -188,6 +189,7 @@ if (supabase) {
   app.use('/api/projects/:id/team', requireAuth(supabase), withMembers, createTeamRoutes({ sendSignInLink }));
   app.use('/api/projects/:id/agreements', requireAuth(supabase), withMembers, createAgreementRoutes());
   app.use('/api/projects/:id/drift', requireAuth(supabase), withMembers, createDriftRoutes());
+  app.use('/api/projects/:id/overview', requireAuth(supabase), withMembers, createOverviewRoutes());
   app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
   app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
@@ -216,7 +218,7 @@ if (supabase) {
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });
-  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/invites'], (req, res) => {
+  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/projects/:id/overview', '/api/invites'], (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured for project members, agreements and invites.' });
   });
   app.use('/api/projects', projectRoutes);
