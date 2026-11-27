@@ -27,7 +27,8 @@ const askLimit = createRateLimit({ windowMs: 60000, max: 6, keyFn: byUser, messa
 const deleteLimit = createRateLimit({ windowMs: 60000, max: 30, keyFn: byUser, message: 'Too many requests. Try again in a minute.' });
 
 const MAX_QUESTION = 4000;
-const LIMIT_STATUS = { daily_limit: 429, monthly_budget: 429, busy: 429, thread_not_found: 404, disabled: 404, unpriced_model: 503 };
+const HISTORY_TURNS = 10;
+const LIMIT_STATUS = { daily_limit: 429, monthly_budget: 429, user_budget: 429, global_budget: 429, busy: 429, thread_not_found: 404, disabled: 404, unpriced_model: 503 };
 
 /** A message as the client sees it. Sources carry no stored code text. */
 function publicMessage(row) {
@@ -140,7 +141,9 @@ function createAskRoutes({ deps = {} } = {}) {
       return res.status(LIMIT_STATUS[v.reason] || 429).json({ error: limitMessage(v), reason: v.reason || null, resetsAt: v.resetsAt || null });
     }
 
-    const rows = await messages().listByThread({ projectId: project.id, userId: req.user.id, threadId: thread.id });
+    // The latest turns only; a history that can't be read just means none.
+    const rows = await messages().listByThread({ projectId: project.id, userId: req.user.id, threadId: thread.id }, { limit: 2 * HISTORY_TURNS + 4, newest: true })
+      .catch((err) => { console.error('[ask] history read failed:', err && err.message); return []; });
     const history = historyFrom(rows, new Set([started.question.id, started.answer.id]));
 
     res.writeHead(200, {

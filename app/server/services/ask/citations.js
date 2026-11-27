@@ -22,18 +22,34 @@ const MIN_QUOTE = 8;
 const sha12 = (sha) => String(sha || '').slice(0, 12);
 const norm = (s) => String(s || '').toLowerCase().replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 
-/** Plain text: no images, links (their words stay), HTML tags or raw URLs. */
-function cleanParagraph(text) {
+/**
+ * Plain text: no images, links (their words stay), link definitions, HTML
+ * or anything a renderer could turn into a link. The client shows answers
+ * as plain text too; this holds even if one doesn't.
+ */
+function cleanParagraph(text, max = MAX_PARAGRAPH_CHARS) {
   return String(text == null ? '' : text)
-    .replace(/\u0000/g, '')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .replace(/^[ \t]{0,3}\[[^\]\n]*\]:.*$/gm, '')
+    .replace(/!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])/g, '')
+    .replace(/\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])/g, '$1')
     .replace(/<[^>]{0,500}>/g, '')
-    .replace(/\b(?:https?|ftp|data|javascript):\/?\/?[^\s)]+/gi, '')
+    .replace(/<[a-z!/?][^\n]*/gi, '')
+    .replace(/\b[a-z][a-z0-9+.-]{1,20}:\/\/\S+/gi, '')
+    .replace(/\b(?:data|javascript|vbscript|file|mailto):\S+/gi, '')
+    .replace(/(^|[^:])\/\/\S+/g, '$1')
+    .replace(/\bwww\.\S+/gi, '')
+    .replace(/[<>]/g, '')
     .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')
     .trim()
-    .slice(0, MAX_PARAGRAPH_CHARS);
+    .slice(0, max);
 }
+
+/** Source text and names from the plan or a member, cleaned the same way for the client. */
+const plain = (v, max = 2000) => (typeof v === 'string' && v ? cleanParagraph(v, max) || null : null);
 
 /** The words a quote is checked against. Code slices drop the line numbers they were shown with. */
 function sourceText(meta) {
@@ -54,30 +70,39 @@ function quotesIn(text) {
   return out;
 }
 
+const hexOrNull = (sha) => (/^[0-9a-f]{7,40}$/i.test(String(sha || '')) ? String(sha) : null);
+
+/** A link to the file (and lines) at that commit on GitHub; the stored text is never served. */
+function blobUrl(project, meta) {
+  const sha = hexOrNull(meta.sha);
+  if (!project || !project.owner || !project.repo || !sha || !meta.path) return null;
+  const enc = String(meta.path).split('/').map(encodeURIComponent).join('/');
+  const start = Number.isInteger(meta.start) ? meta.start : null;
+  const end = Number.isInteger(meta.end) ? meta.end : start;
+  return `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/blob/${sha}/${enc}${start ? `#L${start}-L${end}` : ''}`;
+}
+
 /** What a reader sees for a source. */
 function describe(id, meta, project) {
   const base = { id, kind: meta.kind };
   switch (meta.kind) {
     case 'plan':
-      return { ...base, label: `Plan (takeoff.yaml @ ${sha12(meta.sha)})`, area: meta.area || null, text: meta.text || null, sha: meta.sha || null };
+      return { ...base, label: `Plan (takeoff.yaml @ ${sha12(meta.sha)})`, area: plain(meta.area, 100), text: plain(meta.text), sha: hexOrNull(meta.sha) };
     case 'agreement':
-      return { ...base, label: 'Agreement', text: meta.text || null, status: meta.status || null };
+      return { ...base, label: 'Agreement', text: plain(meta.text), status: plain(meta.status, 40) };
     case 'decision':
       return { ...base, label: `Decision on PR #${meta.pr}`, pr: meta.pr };
     case 'pr_check':
       return { ...base, label: `PR check on #${meta.pr}`, pr: meta.pr, sha: meta.sha || null };
     case 'capability':
-      return { ...base, label: 'Confirmed capability', text: meta.text || null };
+      return { ...base, label: 'Confirmed capability', text: plain(meta.text) };
     case 'commit':
-      return { ...base, label: `Commit ${sha12(meta.sha)}`, sha: meta.sha || null };
+      return { ...base, label: `Commit ${sha12(meta.sha)}`, sha: hexOrNull(meta.sha) };
+    case 'file':
+      return { ...base, label: `File in the repo @ ${sha12(meta.sha)}`, path: meta.path, sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
     case 'code': {
       const lines = meta.start ? `${meta.start}-${meta.end}` : null;
-      // A link to the file at that commit on GitHub; the stored text is never served.
-      const enc = String(meta.path).split('/').map(encodeURIComponent).join('/');
-      const url = project && project.owner && project.repo && /^[0-9a-f]{7,40}$/i.test(String(meta.sha || ''))
-        ? `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/blob/${meta.sha}/${enc}${meta.start ? `#L${meta.start}-L${meta.end}` : ''}`
-        : null;
-      return { ...base, label: `Code @ ${sha12(meta.sha)}, not checked against the plan`, path: meta.path, lines, sha: meta.sha || null, url };
+      return { ...base, label: `Code @ ${sha12(meta.sha)}, not checked against the plan`, path: meta.path, lines, sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
     }
     default:
       return { ...base, label: 'Source' };
@@ -106,7 +131,8 @@ function checkAnswer(answer, sources, { project = null } = {}) {
       if (!numbered.has(id)) numbered.set(id, numbered.size + 1);
       return numbered.get(id);
     });
-    kept.push({ text, source_ids: ids, refs, code_only: ids.every((id) => sources.get(id).kind === 'code') });
+    // Code shows what was built, not what was meant; so does a file listing.
+    kept.push({ text, source_ids: ids, refs, code_only: ids.every((id) => ['code', 'file'].includes(sources.get(id).kind)) });
   }
   const list = [...numbered.entries()].map(([id, n]) => ({ n, ...describe(id, sources.get(id), project) }));
   const short = (v, max) => (typeof v === 'string' && v.trim() ? cleanParagraph(v).slice(0, max) || null : null);

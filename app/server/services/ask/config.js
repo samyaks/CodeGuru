@@ -6,7 +6,9 @@
  *   TAKEOFF_ASK_MODEL          model id, default claude-opus-5-5
  *   TAKEOFF_ASK_DAILY_PER_MEMBER  questions per member per project per rolling 24h (30)
  *   TAKEOFF_ASK_MONTHLY_USD    spend per project per calendar month, UTC (20)
- *   TAKEOFF_ASK_MAX_ROUNDS     tool rounds per question (8)
+ *   TAKEOFF_ASK_USER_MONTHLY_USD   spend per person per month, across all their projects (40)
+ *   TAKEOFF_ASK_GLOBAL_MONTHLY_USD spend per month for the whole deployment (300)
+ *   TAKEOFF_ASK_MAX_ROUNDS     model calls per question (8); the last one answers without lookups
  *   TAKEOFF_ASK_RESERVE_USD    spend held back for each answer still running (1.50, at least 0.05)
  *   TAKEOFF_ASK_MAX_RUNNING_PER_MEMBER   answers one member may have running at once (2)
  *   TAKEOFF_ASK_MAX_RUNNING_PER_PROJECT  answers a project may have running at once (5)
@@ -22,6 +24,8 @@ const DEFAULTS = Object.freeze({
   model: 'claude-opus-5-5',
   dailyPerMember: 30,
   monthlyUsd: 20,
+  userMonthlyUsd: 40,
+  globalMonthlyUsd: 300,
   maxRounds: 8,
   reserveUsd: 1.5,
   minReserveUsd: 0.05,
@@ -49,6 +53,10 @@ function askConfig(env = process.env) {
     model,
     dailyPerMember: positive(env.TAKEOFF_ASK_DAILY_PER_MEMBER, DEFAULTS.dailyPerMember, { integer: true }),
     monthlyUsd: positive(env.TAKEOFF_ASK_MONTHLY_USD, DEFAULTS.monthlyUsd),
+    // Anyone signed in can add projects, each with its own budget, so a
+    // person and the deployment have monthly ceilings too.
+    userMonthlyUsd: positive(env.TAKEOFF_ASK_USER_MONTHLY_USD, DEFAULTS.userMonthlyUsd),
+    globalMonthlyUsd: positive(env.TAKEOFF_ASK_GLOBAL_MONTHLY_USD, DEFAULTS.globalMonthlyUsd),
     maxRounds: Math.min(positive(env.TAKEOFF_ASK_MAX_ROUNDS, DEFAULTS.maxRounds, { integer: true }), 20),
     reserveUsd: Math.max(DEFAULTS.minReserveUsd, positive(env.TAKEOFF_ASK_RESERVE_USD, DEFAULTS.reserveUsd)),
     maxRunningPerMember: positive(env.TAKEOFF_ASK_MAX_RUNNING_PER_MEMBER, DEFAULTS.maxRunningPerMember, { integer: true }),

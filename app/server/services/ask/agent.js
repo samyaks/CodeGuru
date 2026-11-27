@@ -15,7 +15,7 @@
  */
 
 const { SYSTEM_PROMPT, ANSWER_SCHEMA, contextBlock, toolResultText, FINAL_ROUND_NOTE } = require('./prompt');
-const { checkAnswer } = require('./citations');
+const { checkAnswer, cleanParagraph } = require('./citations');
 const { estimateCost } = require('../../lib/model-pricing');
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
@@ -23,7 +23,9 @@ const SUPPORTS_FALLBACKS = /^claude-(opus-5|fable-5|mythos-5|sonnet-5-5)/;
 
 const LIMITS = Object.freeze({
   maxTokens: 8000,
-  inputTokens: 120000,
+  // The prompt one round may send. Spend is bounded by the round cap and the
+  // monthly budget; this keeps a round from carrying an outsized context.
+  promptTokens: 100000,
   toolsPerRound: 3,
   toolCalls: 24,
   historyTurns: 10,
@@ -59,8 +61,12 @@ function costOf(response, requestModel) {
     cacheReadTokens: Number(x.cache_read_input_tokens) || 0,
     cacheCreationTokens: Number(x.cache_creation_input_tokens) || 0,
   });
+  const prompt = (t) => t.inputTokens + t.cacheReadTokens + t.cacheCreationTokens;
   const its = Array.isArray(u.iterations) && u.iterations.length ? u.iterations : null;
-  if (!its) return { cost: estimateCost((response && response.model) || requestModel, tokens(u)), ...tokens(u) };
+  if (!its) {
+    const t = tokens(u);
+    return { cost: estimateCost((response && response.model) || requestModel, t), ...t, lastPrompt: prompt(t) };
+  }
   let cost = 0;
   const sum = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
   for (const it of its) {
@@ -69,7 +75,7 @@ function costOf(response, requestModel) {
     cost += estimateCost(model, t);
     for (const k of Object.keys(sum)) sum[k] += t[k];
   }
-  return { cost, ...sum };
+  return { cost, ...sum, lastPrompt: prompt(tokens(its[its.length - 1])) };
 }
 
 /**
@@ -89,8 +95,9 @@ function echoContent(content) {
 
 /** What the person sees while it works. Inputs come from the model, so they're shortened. */
 function progressText(name, input = {}) {
+  // Inputs come from the model, so they're cleaned like an answer, then shortened.
   const s = (v, n = 60) => {
-    const t = String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' ').trim();
+    const t = cleanParagraph(String(v == null ? '' : v).replace(/[\u0000-\u001f]/g, ' '), 500).replace(/\s+/g, ' ').trim();
     return t.length > n ? `${t.slice(0, n - 1)}…` : t;
   };
   switch (name) {
@@ -144,7 +151,10 @@ async function runQuestion({ project, answer, question, history = [], config, de
   const finish = async (fields) => {
     const row = await deps.askMessages.finishAnswer(answer.id, { model: servedBy || model, usage, costUsd: totalCost, ...fields })
       .catch((err) => { console.error(`[ask] finishAnswer failed for ${answer.id}:`, err && err.message); return null; });
-    return row || { ...answer, ...fields, status: fields.status };
+    if (row) return row;
+    // Not saved: the answer was no longer running (its thread was deleted, or
+    // it was marked interrupted). Show nothing that a reload wouldn't show.
+    return { ...answer, status: 'failed', content: MESSAGES.failed, sources: [], claims: null, error: 'not_saved' };
   };
 
   let tools;
@@ -157,19 +167,22 @@ async function runQuestion({ project, answer, question, history = [], config, de
   try {
     emit({ type: 'progress', text: 'Reading the plan' });
     const plan = await tools.call('get_plan', {});
-    const messages = [
-      ...historyMessages(history),
-      { role: 'user', content: [
-        { type: 'text', text: contextBlock(project, plan.ok ? plan.result : null) },
-        { type: 'text', text: String(question) },
-      ] },
-    ];
+    // The project context leads the first user turn, so a follow-up starts
+    // with the same tools, system and context as the question before it and
+    // reads them from the prompt cache.
+    const context = { type: 'text', text: contextBlock(project, plan.ok ? plan.result : null) };
+    const past = historyMessages(history);
+    const messages = past.length
+      ? [{ role: 'user', content: [context, { type: 'text', text: past[0].content }] }, ...past.slice(1), { role: 'user', content: String(question) }]
+      : [{ role: 'user', content: [context, { type: 'text', text: String(question) }] }];
+    let lastPrompt = 0;
+    // The last round answers without lookups.
+    const isLast = (round) => round >= config.maxRounds || usage.tool_calls >= LIMITS.toolCalls || lastPrompt >= LIMITS.promptTokens;
     // tools render first, then system: the marker caches both, the same for every project.
     const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
 
     for (let round = 1; ; round += 1) {
-      const last = round >= config.maxRounds || usage.tool_calls >= LIMITS.toolCalls
-        || usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens >= LIMITS.inputTokens;
+      const last = isLast(round);
       const params = {
         model,
         max_tokens: LIMITS.maxTokens,
@@ -193,6 +206,7 @@ async function runQuestion({ project, answer, question, history = [], config, de
       usage.cache_read_input_tokens += c.cacheReadTokens;
       usage.cache_creation_input_tokens += c.cacheCreationTokens;
       if (response && response.model) servedBy = response.model;
+      lastPrompt = c.lastPrompt;
       await deps.askMessages.addCost(answer.id, c.cost)
         .catch((err) => console.error(`[ask] addCost failed for ${answer.id}:`, err && err.message));
 
@@ -207,10 +221,14 @@ async function runQuestion({ project, answer, question, history = [], config, de
       const calls = echoed.filter((b) => b && b.type === 'tool_use');
 
       if (stop === 'tool_use' && calls.length && !last) {
-        // Stop before another round once the month's budget is used up.
-        const spent = await deps.askMessages.usage({ projectId: project.id, userId: answer.user_id })
-          .then((u) => u.spentThisMonth).catch(() => 0);
-        if (spent >= config.monthlyUsd) return finish({ status: 'failed', content: MESSAGES.budget, error: 'monthly_budget' });
+        // Stop before another round once a month's budget is used up. If the
+        // spend can't be read, stop too, rather than run on unchecked.
+        const u = await deps.askMessages.usage({ projectId: project.id, userId: answer.user_id })
+          .catch((err) => { console.error(`[ask] usage read failed for ${answer.id}:`, err && err.message); return null; });
+        const over = !u || u.spentThisMonth >= config.monthlyUsd
+          || (config.userMonthlyUsd && u.spentByUserThisMonth >= config.userMonthlyUsd)
+          || (config.globalMonthlyUsd && u.spentAllThisMonth >= config.globalMonthlyUsd);
+        if (over) return finish({ status: 'failed', content: MESSAGES.budget, error: u ? 'monthly_budget' : 'usage_unavailable' });
 
         messages.push({ role: 'assistant', content: echoed });
         const results = [];
@@ -231,15 +249,18 @@ async function runQuestion({ project, answer, question, history = [], config, de
           const out = await tools.call(r.name, r.input);
           return { type: 'tool_result', tool_use_id: r.id, content: toolResultText(out), ...(out.ok ? {} : { is_error: true }) };
         }));
-        const next = round + 1;
-        const nextIsLast = next >= config.maxRounds || usage.tool_calls >= LIMITS.toolCalls;
+        const nextIsLast = isLast(round + 1);
         messages.push({ role: 'user', content: nextIsLast ? [...done, { type: 'text', text: FINAL_ROUND_NOTE }] : done });
         await deps.askMessages.heartbeat(answer.id).catch(() => {});
         continue;
       }
 
-      // The answer: JSON text that the schema shapes.
-      const text = content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
+      // The answer: JSON text that the schema shapes. After a fallback, only
+      // the model that answered wrote it, so text before the last fallback
+      // block (a declined model's partial output) is not part of it.
+      let from = 0;
+      content.forEach((b, i) => { if (b && b.type === 'fallback') from = i + 1; });
+      const text = content.slice(from).filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
       let parsed;
       try { parsed = JSON.parse(text); } catch { parsed = null; }
       if (!parsed || typeof parsed !== 'object') return finish({ status: 'failed', content: MESSAGES.failed, error: 'bad_answer' });

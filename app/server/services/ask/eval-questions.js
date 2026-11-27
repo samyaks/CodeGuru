@@ -49,7 +49,7 @@ const QUESTIONS = [
   { id: 'capability', question: 'Can users split a bill yet?', tool: 'get_capabilities', input: { query: 'split' }, kinds: ['capability'] },
   { id: 'code-search', question: 'Where do we charge the card?', tool: 'search_code', input: { query: 'chargeCard' }, kinds: ['code'] },
   { id: 'code-symbol', question: 'Where is the Trip class defined?', tool: 'find_symbol', input: { name: 'Trip' }, kinds: ['code'] },
-  { id: 'code-list', question: 'What files make up billing?', tool: 'list_files', input: { path_glob: 'src/billing/**' }, kinds: ['code'] },
+  { id: 'code-list', question: 'What files make up billing?', tool: 'list_files', input: { path_glob: 'src/billing/**' }, kinds: ['file'] },
   { id: 'code-read', question: 'What does charge.js do?', tool: 'read_file', input: { path: 'src/billing/charge.js' }, kinds: ['code'] },
   { id: 'code-usages', question: 'What uses the charge module?', tool: 'find_usages', input: { path: 'src/billing/charge.js' }, kinds: ['code'] },
   { id: 'recent', question: 'What changed recently?', tool: 'recent_changes', input: {}, kinds: ['commit'] },

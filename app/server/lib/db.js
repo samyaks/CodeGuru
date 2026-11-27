@@ -3554,14 +3554,15 @@ const askThreads = {
 
 const askMessages = {
   /** A member's thread, oldest first. Scoped to the member, so a stray id reads nothing. */
-  async listByThread({ projectId, userId, threadId }, { limit = 200 } = {}) {
+  async listByThread({ projectId, userId, threadId }, { limit = 200, newest = false } = {}) {
+    // newest: the latest `limit` messages (still returned oldest first), for follow-up history.
     const { rows } = await getDb().query(
       `SELECT * FROM ask_messages
         WHERE thread_id = $1 AND project_id = $2 AND user_id = $3
-        ORDER BY created_at ASC, role DESC LIMIT $4`,
+        ORDER BY created_at ${newest ? 'DESC, role ASC' : 'ASC, role DESC'} LIMIT $4`,
       [String(threadId), String(projectId), String(userId), Math.min(Math.max(Number(limit) || 200, 1), 500)]
     );
-    return rows;
+    return newest ? rows.reverse() : rows;
   },
 
   /**
@@ -3591,7 +3592,16 @@ const askMessages = {
          (SELECT COALESCE(SUM(GREATEST(0, $3::double precision - cost_usd)), 0)::double precision
             FROM ask_messages
            WHERE project_id = $1 AND role = 'assistant' AND status = 'running'
-             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running_reserve`,
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running_reserve,
+         (SELECT COALESCE(SUM(cost_usd), 0)::double precision FROM ask_messages
+           WHERE user_id = $2 AND role = 'assistant'
+             AND created_at >= ${ASK_MONTH_START}) AS spent_by_user_this_month,
+         (SELECT COALESCE(SUM(GREATEST(0, $3::double precision - cost_usd)), 0)::double precision
+            FROM ask_messages
+           WHERE user_id = $2 AND role = 'assistant' AND status = 'running'
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running_reserve_by_user,
+         (SELECT COALESCE(SUM(cost_usd), 0)::double precision FROM ask_messages
+           WHERE role = 'assistant' AND created_at >= ${ASK_MONTH_START}) AS spent_all_this_month`,
       [String(projectId), String(userId), Math.max(0, Number(reserveUsd) || 0)]
     );
     const r = rows[0] || {};
@@ -3604,18 +3614,26 @@ const askMessages = {
       // Without a reserve the held amount is unknown; null tells decide()
       // to hold its full reserve for each running answer.
       runningReserve: reserveUsd == null ? null : Number(r.running_reserve) || 0,
+      spentByUserThisMonth: Number(r.spent_by_user_this_month) || 0,
+      runningReserveByUser: reserveUsd == null ? null : Number(r.running_reserve_by_user) || 0,
+      spentAllThisMonth: Number(r.spent_all_this_month) || 0,
     };
   },
 
   /**
    * Record a question and a 'running' answer row, if the caps allow it.
-   * The check and the insert share one transaction under a per-project
-   * lock, so questions sent at the same moment can't all slip under a cap.
+   * The check and the insert share one transaction under per-person and
+   * per-project locks, so questions sent at the same moment can't all slip
+   * under a cap. The deployment-wide ceiling is checked without a lock, so
+   * it can be passed by the answers that start at the same moment.
    * `decide(usage)` returns { allowed, ... } (services/ask/limits.js).
    * @returns {Promise<{ ok: boolean, verdict: object, question?: object, answer?: object }>}
    */
   async startQuestion({ threadId, projectId, userId, content, reserveUsd = null }, decide) {
     return withTransaction(async (client) => {
+      // The person's lock first, then the project's, always in that order, so
+      // their questions on different projects can't slip under their cap together.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ask:user:${userId}`]);
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ask:${projectId}`]);
       await client.query(
         `UPDATE ask_messages SET status = 'failed', error = 'interrupted', updated_at = now()

@@ -117,3 +117,18 @@ test('limitMessage has a line for every reason', () => {
     assert.ok(limitMessage({ reason }).length > 10, reason);
   }
 });
+
+test('a person and the deployment have monthly ceilings across projects', () => {
+  const c = askConfig({ TAKEOFF_ASK_USER_MONTHLY_USD: '10', TAKEOFF_ASK_GLOBAL_MONTHLY_USD: '100' });
+  assert.deepStrictEqual([askConfig({}).userMonthlyUsd, askConfig({}).globalMonthlyUsd], [40, 300]);
+  const cfg = { ...c, enabled: true };
+  assert.strictEqual(decide({ spentThisMonth: 0, spentByUserThisMonth: 8 }, { config: cfg, now: NOW }).allowed, true);
+  let v = decide({ spentThisMonth: 0, spentByUserThisMonth: 8.6 }, { config: cfg, now: NOW });
+  assert.deepStrictEqual([v.allowed, v.reason, v.resetsAt], [false, 'user_budget', '2026-12-01T00:00:00.000Z']);
+  v = decide({ spentThisMonth: 0, spentByUserThisMonth: 5, runningReserveByUser: 4 }, { config: cfg, now: NOW });
+  assert.strictEqual(v.reason, 'user_budget', 'their answers running on other projects count');
+  v = decide({ spentThisMonth: 0, spentByUserThisMonth: 0, spentAllThisMonth: 99 }, { config: cfg, now: NOW });
+  assert.strictEqual(v.reason, 'global_budget');
+  assert.match(limitMessage({ reason: 'user_budget' }), /across your projects/);
+  assert.match(limitMessage({ reason: 'global_budget' }), /reached its budget/);
+});
