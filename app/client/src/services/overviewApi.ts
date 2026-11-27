@@ -66,7 +66,7 @@ export type LogEntry =
     at: string;
     outcome: 'accepted' | 'sent_back';
     prNumber: number;
-    prUrl: string;
+    prUrl: string | null;
     by: Person;
     confirmedBy: Person | null;
     note: string | null;
@@ -85,6 +85,8 @@ export interface Overview {
   githubLinked: boolean;
   /** False when GitHub couldn't be reached, so authors and titles are unknown. */
   githubReachable: boolean;
+  /** False when the repo has more open PRs than Takeoff reads, so some authors are unknown. */
+  githubComplete: boolean;
   pendingAgreements: PendingAgreement[];
   recentDecisions: LogEntry[];
 }

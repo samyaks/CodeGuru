@@ -162,6 +162,8 @@ export function OverviewSection({ projectId }: { projectId: string }) {
                 </div>
               ) : !mine.length && !data.githubReachable ? (
                 <p className={cx('type-small', styles.muted)}>Takeoff can’t reach GitHub right now, so it can’t tell which pull requests are yours. Reload in a minute.</p>
+              ) : !mine.length && !data.githubComplete ? (
+                <p className={cx('type-small', styles.muted)}>This repo has more open pull requests than Takeoff reads at once, so it can’t tell which of them are yours.</p>
               ) : !mine.length ? (
                 <p className={cx('type-small', styles.muted)}>None of your open pull requests has a Takeoff check yet.</p>
               ) : (

@@ -77,6 +77,7 @@ const nameIn = (members) => (id) => members.find((m) => m.userId === id)?.name |
 const OPEN_PRS_MS = 60 * 1000;
 const OPEN_PRS_FAIL_MS = 20 * 1000;
 const OPEN_PRS_PAGE = 100;
+const OPEN_PRS_PAGES = 3;
 const OPEN_PRS_CACHE_MAX = 500;
 const sharedOpenPrCache = new Map();
 
@@ -88,20 +89,26 @@ async function openPrsOnGithub(project, deps) {
   let value;
   try {
     const gh = deps.readClientFor(project);
-    const list = await gh.fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: OPEN_PRS_PAGE });
+    const fetchedAt = Date.now();
     const prs = new Map();
-    for (const p of Array.isArray(list) ? list : []) {
-      prs.set(Number(p.number), {
-        title: typeof p.title === 'string' ? p.title : null,
-        url: httpsOrNull(p.html_url),
-        author: typeof p.user?.login === 'string' ? p.user.login : null,
-        headSha: p.head?.sha || null,
-      });
+    let complete = false;
+    for (let page = 1; page <= OPEN_PRS_PAGES && !complete; page += 1) {
+      const list = await gh.fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: OPEN_PRS_PAGE, page });
+      const rows = Array.isArray(list) ? list : [];
+      for (const p of rows) {
+        prs.set(Number(p.number), {
+          title: typeof p.title === 'string' ? p.title : null,
+          url: httpsOrNull(p.html_url),
+          author: typeof p.user?.login === 'string' ? p.user.login : null,
+          headSha: p.head?.sha || null,
+        });
+      }
+      // A full page may not be the last: then a PR missing from it isn't known to be closed.
+      complete = rows.length < OPEN_PRS_PAGE;
     }
-    // A full page may not be every open PR: then a PR missing from it isn't known to be closed.
-    value = { ok: true, complete: prs.size < OPEN_PRS_PAGE, prs };
+    value = { ok: true, complete, fetchedAt, prs };
   } catch {
-    value = { ok: false, complete: false, prs: new Map() };
+    value = { ok: false, complete: false, fetchedAt: 0, prs: new Map() };
   }
   if (cache) {
     if (cache.size >= OPEN_PRS_CACHE_MAX) cache.delete(cache.keys().next().value);
@@ -120,15 +127,19 @@ const CHECK_STATES = new Set(['done', 'running', 'failed']);
 async function openPullRequests(project, { members, pendingRecIds, decisions, login }, deps) {
   const rows = await deps.prChecks.latestPerPr({ repo: repoOf(project), ...drift.checkScope(project), limit: 100 });
   const live = await openPrsOnGithub(project, deps);
+  const repo = repoOf(project).toLowerCase();
   const prs = [];
   for (const row of rows) {
     if (row.pr_closed_at || !CHECK_STATES.has(row.status)) continue;
     const n = Number(row.pr_number);
     const pr = live.prs.get(n) || null;
-    if (!pr && live.complete) continue; // GitHub says it isn't open
+    // GitHub says it isn't open, unless Takeoff saw it after that list was read.
+    const seenAt = new Date(row.created_at || row.updated_at || 0).getTime();
+    if (!pr && live.complete && seenAt < live.fetchedAt) continue;
     const done = row.status === 'done' && !!row.verdict;
     const res = done ? drift.storedResult(row) : { verdict: null, summary: '' };
-    const forPr = decisions.filter((d) => Number(d.pr_number) === n);
+    const forPr = decisions.filter((d) => Number(d.pr_number) === n
+      && (!d.repo_full_name || String(d.repo_full_name).toLowerCase() === repo));
     const decided = forPr.some((d) => d.head_sha === row.head_sha && (d.state === 'done' || d.state === 'working'));
     const newerPush = !!(pr?.headSha && pr.headSha !== row.head_sha);
     prs.push({
@@ -148,9 +159,13 @@ async function openPullRequests(project, { members, pendingRecIds, decisions, lo
       yours: !!(login && pr?.author && pr.author.toLowerCase() === login),
     });
   }
-  let others = 0;
-  const shown = prs.filter((p) => p.yours || p.needsDecision || others++ < MAX_PRS).slice(0, MAX_SHOWN_PRS);
-  return { prs: shown, githubReachable: live.ok };
+  // Yours first, then what waits on a decision, then the newest few others,
+  // shown in the order they came (newest first).
+  const yours = prs.filter((p) => p.yours);
+  const deciding = prs.filter((p) => !p.yours && p.needsDecision);
+  const others = prs.filter((p) => !p.yours && !p.needsDecision).slice(0, MAX_PRS);
+  const keep = new Set([...yours, ...deciding, ...others].slice(0, Math.max(MAX_SHOWN_PRS, yours.length)));
+  return { prs: prs.filter((p) => keep.has(p)), githubReachable: live.ok, githubComplete: live.ok && live.complete };
 }
 
 /** Agreements still waiting on votes, with how many current members agreed and whether you have. */
@@ -269,7 +284,7 @@ async function getOverview({ project, user }, deps = defaultDeps()) {
     drift.pendingRecommendationIds(project, deps),
   ]);
   const [open, pending] = await Promise.all([
-    linked ? openPullRequests(project, { members, pendingRecIds, decisions: log.decisions, login }, deps) : { prs: [], githubReachable: true },
+    linked ? openPullRequests(project, { members, pendingRecIds, decisions: log.decisions, login }, deps) : { prs: [], githubReachable: true, githubComplete: true },
     pendingAgreements(project, user, { members, intent, rows: log.agreements }, deps),
   ]);
   const byEmail = new Map(members.filter((m) => m.email).map((m) => [m.email, m]));
@@ -287,6 +302,7 @@ async function getOverview({ project, user }, deps = defaultDeps()) {
     })),
     pullRequests: open.prs,
     githubReachable: open.githubReachable,
+    githubComplete: open.githubComplete,
     githubLinked: !!login,
     pendingAgreements: pending,
     recentDecisions: log.entries.slice(0, RECENT),

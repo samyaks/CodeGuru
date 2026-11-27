@@ -28,10 +28,10 @@ function world({ labels = {}, agreements = [], votes = [] } = {}) {
   // The open PRs on GitHub: PR #7 by Olive, at the checked head.
   ctx.openPrs = [{ number: 7, title: 'Charge at signup', html_url: 'https://github.com/acme/web/pull/7', user: { login: 'olivegh' }, head: { sha: 'a1a1a1a1' } }];
   ctx.pulls = { fail: false };
-  ctx.client.fetchRepoPulls = async () => {
-    ctx.gh.calls.push(['fetchRepoPulls']);
+  ctx.client.fetchRepoPulls = async (_o, _r, { page = 1, perPage = 100 } = {}) => {
+    ctx.gh.calls.push(['fetchRepoPulls', page]);
     if (ctx.pulls.fail) { const e = new Error('Forbidden'); e.status = 403; throw e; }
-    return ctx.openPrs;
+    return ctx.openPrs.slice((page - 1) * perPage, page * perPage);
   };
   return { ...ctx, deps };
 }
@@ -152,6 +152,28 @@ test('a builder sees every PR of theirs, however many others there are', async (
   const o = await overview.getOverview({ project: w.project, user: w.people.olive }, w.deps);
   assert.ok(o.pullRequests.some((p) => p.prNumber === 7 && p.yours), 'their PR is kept');
   assert.strictEqual(o.pullRequests.filter((p) => !p.yours && !p.needsDecision).length, 10, 'the others are cut to the newest 10');
+});
+
+test('a PR opened after GitHub was asked still shows, and a long list is read page by page', async () => {
+  const w = world({ labels: { olive: ['builder'] } });
+  w.deps.openPrCache = new Map();
+  w.openPrs.length = 0;
+  let o = await overview.getOverview({ project: w.project, user: w.people.olive }, w.deps);
+  assert.deepStrictEqual(o.pullRequests, [], 'not open on GitHub and checked before the list was read');
+
+  // Olive opens PR #8 and Takeoff starts checking it; the cached list doesn't have it yet.
+  w.state.checks.push({ ...w.state.checks[0], pr_number: 8, head_sha: 'n8', status: 'running', verdict: null, created_at: new Date(Date.now() + 1000).toISOString() });
+  o = await overview.getOverview({ project: w.project, user: w.people.olive }, w.deps);
+  assert.deepStrictEqual(o.pullRequests.map((p) => [p.prNumber, p.checking]), [[8, true]]);
+
+  // 150 open PRs: two pages, and Olive's on the second page is still hers.
+  const v = world({ labels: { olive: ['builder'] } });
+  v.openPrs.length = 0;
+  for (let n = 200; n < 350; n += 1) v.openPrs.push({ number: n, title: `PR ${n}`, html_url: `https://github.com/acme/web/pull/${n}`, user: { login: 'rexgh' }, head: { sha: `h${n}` } });
+  v.openPrs.push({ number: 7, title: 'Charge at signup', html_url: 'https://github.com/acme/web/pull/7', user: { login: 'olivegh' }, head: { sha: 'a1a1a1a1' } });
+  o = await overview.getOverview({ project: v.project, user: v.people.olive }, v.deps);
+  assert.deepStrictEqual(v.gh.calls.filter((c) => c[0] === 'fetchRepoPulls').map((c) => c[1]), [1, 2]);
+  assert.deepStrictEqual([o.githubComplete, o.pullRequests[0].yours], [true, true]);
 });
 
 test('only members see the overview or the log', async () => {
