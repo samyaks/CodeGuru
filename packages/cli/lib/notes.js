@@ -38,7 +38,9 @@ function parseSendBack(body) {
 
 /** "owner/repo" from a GitHub remote URL (https or ssh), or null. */
 function repoFromRemote(url) {
-  const m = /(?:^|[@/])github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(String(url || '').trim());
+  // The host must be github.com itself: https://, ssh://, git:// (any user, any port) or scp-style user@github.com:.
+  const m = /^(?:(?:https?|ssh|git):\/\/(?:[^@/]+@)?(?:ssh\.)?github\.com(?::\d+)?\/|[^@/:]+@github\.com:)([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i
+    .exec(String(url || '').trim());
   if (!m || /^\.+$/.test(m[1]) || /^\.+$/.test(m[2])) return null;
   return `${m[1]}/${m[2]}`;
 }

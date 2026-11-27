@@ -637,10 +637,11 @@ function isOurMcp(e) {
   if (typeof e.command !== 'string' || !Array.isArray(e.args) || e.args.at(-1) !== 'mcp') return false;
   if (!e.args.every((a) => typeof a === 'string')) return false;
   const program = [e.command, ...e.args.slice(0, -1)].join(' ');
-  return COMMAND_RE.test(program) && /(?:^|[ /@])takeoff(?:$|[ @])/.test(program);
+  return COMMAND_RE.test(program) && /(?:^|[ /@])takeoff(?:$|[ @/.])/.test(program);
 }
 
-const sameEntry = (a, b) => a.type === b.type && a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args);
+const sameEntry = (a, b) => Object.keys(a).every((k) => ['type', 'command', 'args'].includes(k))
+  && a.type === b.type && a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args);
 
 /**
  * Plan the change to the repo's .mcp.json, where Claude Code finds servers
@@ -682,7 +683,7 @@ function prepareMcp({ root, program, local, err }) {
   const servers = config.mcpServers || {};
   const want = mcpEntry(program);
   const existing = Object.prototype.hasOwnProperty.call(servers, 'takeoff') ? servers.takeoff : undefined;
-  if (existing !== undefined && !isOurMcp(existing)) {
+  if (existing !== undefined && !sameEntry({ type: 'stdio', ...existing }, want) && !isOurMcp(existing)) {
     err(`${MCP_FILE} already has a server called "takeoff" that Takeoff didn't write, so nothing was changed. Remove it, then run this again.`);
     return { code: 1 };
   }
@@ -698,8 +699,13 @@ function prepareMcp({ root, program, local, err }) {
         // A new file, renamed into place, so a symlink made since the check above is replaced, not followed.
         const tmp = `${file}.takeoff-${process.pid}.tmp`;
         try { fs.unlinkSync(tmp); } catch { /* none left over */ }
-        fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' });
-        fs.renameSync(tmp, file);
+        try {
+          fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' });
+          fs.renameSync(tmp, file);
+        } catch (e) {
+          try { fs.unlinkSync(tmp); } catch { /* never written */ }
+          throw e;
+        }
       } catch (e) {
         errOut(`Couldn't write ${MCP_FILE} (${e.code || e.message}). The hooks were installed.`);
         return 1;

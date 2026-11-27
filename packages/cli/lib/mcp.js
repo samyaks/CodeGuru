@@ -52,7 +52,8 @@ class ToolError extends Error {}
 const clean = (s) => printable(s).replace(/[\r\n\t]+/g, ' ').trim();
 
 // Settings in the repo's own git config that would make a read run a program.
-const GIT_SAFE = ['-c', 'log.showSignature=false', '-c', 'core.fsmonitor=false'];
+// (An empty core.fsmonitor turns it off on every git version.)
+const GIT_SAFE = ['-c', 'log.showSignature=false', '-c', 'core.fsmonitor='];
 
 /**
  * `name` (git, gh) as an absolute path from PATH, never from the current
@@ -61,9 +62,8 @@ const GIT_SAFE = ['-c', 'log.showSignature=false', '-c', 'core.fsmonitor=false']
  * when it isn't installed.
  */
 function findProgram(name, env, root) {
-  const exts = process.platform === 'win32'
-    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : [''];
+  // Node runs a .bat or .cmd only through a shell, so on Windows only .exe and .com count.
+  const exts = process.platform === 'win32' ? ['.exe', '.com'] : [''];
   const inside = (d) => {
     const rel = path.relative(realish(root), realish(d));
     return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
@@ -82,12 +82,23 @@ function findProgram(name, env, root) {
   return null;
 }
 
+/** The repo folder around `dir`: the nearest one holding .git, else `dir`. */
+function repoFolder(dir) {
+  for (let cur = path.resolve(dir); ;) {
+    try { fs.lstatSync(path.join(cur, '.git')); return cur; } catch { /* keep looking */ }
+    const parent = path.dirname(cur);
+    if (parent === cur) return path.resolve(dir);
+    cur = parent;
+  }
+}
+
 /** What a tool needs to read the repo: { root, info, exec }. */
 function repoContext(dir, env) {
+  const outside = repoFolder(dir);
   const exec = makeExec({ ...env, NoDefaultCurrentDirectoryInExePath: '1' });
   const programs = {};
   const where = (name) => {
-    if (!(name in programs)) programs[name] = findProgram(name, env, dir);
+    if (!(name in programs)) programs[name] = findProgram(name, env, outside);
     return programs[name];
   };
   const safeExec = (cmd, args, cwd, opts = {}) => {

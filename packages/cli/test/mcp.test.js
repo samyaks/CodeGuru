@@ -411,6 +411,14 @@ test('takeoff hook install --mcp adds the server to .mcp.json once and keeps oth
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.takeoff,
     { type: 'stdio', command: 'npx', args: ['--no-install', 'takeoff', 'mcp'] });
 
+  for (const program of ['npx --no-install @takeoff/cli', 'node ./node_modules/takeoff/bin/takeoff.js']) {
+    assert.strictEqual(install(dir, '--mcp', '--command', program).code, 0, program);
+    const second = install(dir, '--mcp', '--command', program);
+    assert.strictEqual(second.code, 0, second.err.join('\n'));
+    assert.ok(second.out.some((l) => /unchanged +\.mcp\.json takeoff server/.test(l)), program);
+  }
+  assert.deepStrictEqual(fs.readdirSync(dir).filter((f) => f.includes('.tmp')), []);
+
   const noFlag = makeRepo();
   install(noFlag);
   assert.strictEqual(fs.existsSync(path.join(noFlag, '.mcp.json')), false, 'without --mcp nothing is added');
@@ -495,6 +503,11 @@ test('a git planted in the repo, or on a relative PATH entry, is never run', asy
   const s = createServer({ dir, env: { ...baseEnv, ...env } });
   const r = await call(s, 'get_plan', {});
   assert.strictEqual(r.parsed.from, 'default branch (origin/main)');
+  assert.strictEqual(fs.existsSync(marker), false);
+  // Started in a subfolder, the repo's own bin is still inside the repo.
+  fs.mkdirSync(path.join(dir, 'sub'));
+  const fromSub = createServer({ dir: path.join(dir, 'sub'), env: { ...baseEnv, ...env } });
+  assert.strictEqual((await call(fromSub, 'get_plan', {})).parsed.available, true);
   assert.strictEqual(fs.existsSync(marker), false);
 });
 
