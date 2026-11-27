@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks, prChecks } = require('../lib/db');
+const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks, prChecks, codeIndex } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 const { runPrCheck, prCheckJobs } = require('../services/verdict/runner');
@@ -32,6 +32,8 @@ function defaultDeps() {
     processPushV2,
     runPrCheck,
     prCheckJobs,
+    // Takeoff's stored code goes when its read access does (Milestone 8).
+    codeIndex,
     // Closed PRs leave the drift review list (Milestone 5).
     setPrClosed: (q) => prChecks.setPrClosed(q),
     appId: process.env.GITHUB_APP_ID || null,
@@ -292,9 +294,18 @@ async function handlePush({ payload, deliveryId, source, installationId }, deps)
 // cached tokens. Everything is archived too.
 async function revokeAccess({ event, payload }, deps) {
   const forget = (id) => { try { if (deps.forgetInstallation) deps.forgetInstallation(id); } catch { /* best effort */ } };
+  // Stored code is deleted before the grants and installation ids it is found by.
+  const dropIndexes = async (fn) => {
+    if (!deps.codeIndex) return 0;
+    try { return await fn(deps.codeIndex); } catch (err) {
+      console.error('code index delete on revoke failed:', err.message);
+      return 0;
+    }
+  };
   if (event === 'github_app_authorization') {
     const githubUserId = Number(payload.sender?.id);
     if (payload.action !== 'revoked' || !githubUserId) return;
+    await dropIndexes((ci) => ci.deleteForGithubUser(githubUserId));
     const grants = await deps.githubRepoAccess.deleteForGithubUser(githubUserId);
     // The link to that GitHub account goes too: committing actions ask again.
     if (deps.userGithubLinks) await deps.userGithubLinks.deleteForGithubUser(githubUserId);
@@ -305,11 +316,13 @@ async function revokeAccess({ event, payload }, deps) {
   if (!installationId) return;
   if (event === 'installation' && payload.action === 'suspend') {
     forget(installationId);
+    await dropIndexes((ci) => ci.deleteForInstallation(installationId));
     console.log(JSON.stringify({ event: 'github_app_suspended', installationId }));
     return;
   }
   if (event === 'installation' && payload.action === 'deleted') {
     forget(installationId);
+    await dropIndexes((ci) => ci.deleteForInstallation(installationId));
     const grants = await deps.githubRepoAccess.deleteForInstallation(installationId);
     const projects = await deps.deployments.clearInstallation(installationId);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: payload.action, installationId, grants, projects }));
@@ -320,6 +333,7 @@ async function revokeAccess({ event, payload }, deps) {
     const removed = Array.isArray(payload.repositories_removed) ? payload.repositories_removed : [];
     const ids = removed.map((r) => Number(r.id)).filter(Number.isFinite);
     const fullNames = removed.map((r) => r.full_name).filter(Boolean);
+    await dropIndexes((ci) => ci.deleteForRepos(fullNames));
     const grants = await deps.githubRepoAccess.deleteForRepos(installationId, ids);
     const projects = await deps.deployments.clearInstallationForRepos(installationId, fullNames);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'repositories_removed', installationId, grants, projects }));

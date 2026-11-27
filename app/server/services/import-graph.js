@@ -243,4 +243,15 @@ function centralityMultiplier(metrics) {
   return raw;
 }
 
-module.exports = { computeImportGraph, centralityMultiplier };
+module.exports = {
+  computeImportGraph,
+  centralityMultiplier,
+  // Used by the code index to keep import specs and re-resolve them when
+  // files are added or removed, without re-reading every file.
+  isPy,
+  extractJsSpecs,
+  extractPySpecs,
+  resolveJsSpec,
+  resolvePyFromSpec,
+  resolvePyAbsoluteModule,
+};

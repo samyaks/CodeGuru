@@ -399,3 +399,42 @@ test('Re-run or Retry on the Takeoff check runs it again, forced', async () => {
   await send(createWebhookHandler(other.deps), delivery(payload, { secret: APP_SECRET, event: 'check_run' }));
   assert.strictEqual(other.runs.length, 0);
 });
+
+test('losing App access deletes the stored code index first (Milestone 8)', async () => {
+  const withIndex = () => {
+    const w = makeWorld();
+    w.deps.codeIndex = {
+      deleteForInstallation: async (id) => { w.calls.revoked.push({ indexForInstallation: id }); return 1; },
+      deleteForRepos: async (names) => { w.calls.revoked.push({ indexForRepos: names }); return 1; },
+      deleteForGithubUser: async (id) => { w.calls.revoked.push({ indexForGithubUser: id }); return 1; },
+    };
+    return w;
+  };
+  let w = withIndex();
+  await send(createWebhookHandler(w.deps),
+    delivery({ action: 'deleted', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }));
+  assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { indexForInstallation: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }]);
+
+  w = withIndex();
+  await send(createWebhookHandler(w.deps),
+    delivery({ action: 'suspend', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }));
+  assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { indexForInstallation: 42 }]);
+
+  w = withIndex();
+  await send(createWebhookHandler(w.deps),
+    delivery({ action: 'removed', installation: { id: 42 }, repositories_removed: [{ id: 9, full_name: 'acme/web' }] },
+      { secret: APP_SECRET, event: 'installation_repositories' }));
+  assert.deepStrictEqual(w.calls.revoked.slice(0, 2), [{ forget: 42 }, { indexForRepos: ['acme/web'] }]);
+
+  w = withIndex();
+  await send(createWebhookHandler(w.deps),
+    delivery({ action: 'revoked', sender: { id: 555 } }, { secret: APP_SECRET, event: 'github_app_authorization' }));
+  assert.deepStrictEqual(w.calls.revoked, [{ indexForGithubUser: 555 }, { deleteForGithubUser: 555 }]);
+
+  // A failing index delete doesn't stop the grants from being revoked.
+  w = withIndex();
+  w.deps.codeIndex.deleteForInstallation = async () => { throw new Error('db down'); };
+  await send(createWebhookHandler(w.deps),
+    delivery({ action: 'deleted', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }));
+  assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }]);
+});

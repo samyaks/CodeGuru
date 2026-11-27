@@ -383,6 +383,25 @@ function createClient({ token, onUnauthorized } = {}) {
     return res.json();
   }
 
+  /**
+   * The repo at `ref` as a gzipped tarball: the fetch Response, whose body is
+   * the stream. GitHub redirects to a short-lived codeload URL that carries
+   * its own token, so the redirect is followed without our Authorization.
+   */
+  async function fetchTarball(owner, repo, ref) {
+    return request(`/repos/${owner}/${repo}/tarball/${enc(ref)}`, { redirect: 'follow' });
+  }
+
+  /**
+   * One blob's raw bytes, as the fetch Response (read the body with a limit:
+   * a blob can be up to 100 MB).
+   */
+  async function fetchBlobRaw(owner, repo, sha) {
+    return request(`/repos/${owner}/${repo}/git/blobs/${enc(sha)}`, {
+      headers: { 'Accept': 'application/vnd.github.raw+json' },
+    });
+  }
+
   /** The commit a git commit sha points at: { sha, tree: { sha } }. */
   async function fetchGitCommit(owner, repo, sha) {
     const res = await request(`/repos/${owner}/${repo}/git/commits/${enc(sha)}`);
@@ -433,6 +452,8 @@ function createClient({ token, onUnauthorized } = {}) {
 
   return {
     fetchBranch,
+    fetchTarball,
+    fetchBlobRaw,
     fetchGitCommit,
     fetchTreeEntries,
     createTextTree,
