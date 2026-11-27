@@ -15,7 +15,7 @@
 
 const crypto = require('crypto');
 const { codeIndex: defaultStore, deployments: defaultDeployments } = require('../../lib/db');
-const { isAskEnabled } = require('../ask/config');
+const { isAskEnabled, isAskEnabledFor } = require('../ask/config');
 const { fullBuild, LIMITS } = require('./build');
 const { applyPush } = require('./update');
 
@@ -69,7 +69,8 @@ function createCodeIndex(deps = {}) {
   const store = deps.store || defaultStore;
   const projects = deps.deployments || defaultDeployments;
   const clientFor = deps.clientFor || ((project) => require('../github-access').clientForProject(project));
-  const enabled = deps.enabled || (() => isAskEnabled(process.env));
+  // With a project: Ask is on for it (TAKEOFF_ASK_PROJECTS may limit it). Without: Ask is on at all.
+  const enabled = deps.enabled || ((project) => (project ? isAskEnabledFor(project, process.env) : isAskEnabled(process.env)));
   const limits = deps.limits || null;
   const log = deps.log || ((obj) => console.log(JSON.stringify({ event: 'code_index', ...obj })));
 
@@ -89,7 +90,7 @@ function createCodeIndex(deps = {}) {
    * claim is always seen, and the index only moves to the current head.
    */
   async function sync(project, { force = false, forcedPush = false, reason = 'sync', rerun = 0 } = {}) {
-    if (!enabled()) return { skipped: 'disabled' };
+    if (!enabled(project)) return { skipped: 'disabled' };
     if (!indexable(project)) return { skipped: 'not_indexable' };
     const projectId = project.id;
     const repoName = projectRepo(project);
@@ -225,7 +226,7 @@ function createCodeIndex(deps = {}) {
 
   /** Start a build when there is no usable index. Resolves with the current status row (or null). */
   async function ensureBuilt(project) {
-    if (!enabled() || !indexable(project)) return null;
+    if (!enabled(project) || !indexable(project)) return null;
     const row = await store.getRepo(project.id);
     const leaseActive = row && row.lease_until && new Date(row.lease_until) > new Date();
     if (row && (row.status === 'ready' || row.status === 'behind' || row.status === 'too_large' || leaseActive)) {
@@ -242,7 +243,7 @@ function createCodeIndex(deps = {}) {
 
   /** A push webhook for this project. Only the indexed branch counts; no index yet means nothing to do. */
   async function onPush(project, payload) {
-    if (!enabled() || !indexable(project) || !payload) return { skipped: 'not_indexable' };
+    if (!enabled(project) || !indexable(project) || !payload) return { skipped: 'not_indexable' };
     if (payload.deleted) return { skipped: 'branch_deleted' };
     const branch = typeof payload.ref === 'string' && payload.ref.startsWith('refs/heads/')
       ? payload.ref.slice('refs/heads/'.length) : null;

@@ -13,6 +13,7 @@ import NotFound from './pages/NotFound';
 import InvitePage from './pages/team/InvitePage';
 import DriftReview from './pages/DriftReview';
 import DecisionLog from './pages/DecisionLog';
+import AskThread from './pages/ask/AskThread';
 import ReadPage from './pages/read/ReadPage';
 import { ReleaseProject, ReleaseIntake } from './pages/ReleasePreview';
 import SecurityReportV2 from './pages/v2/SecurityReport';
@@ -89,6 +90,7 @@ export default function App() {
             <Route path="/read/:id" element={<ReleaseProject />} />
             <Route path="/read/:id/drift/:prNumber" element={<DriftReview />} />
             <Route path="/read/:id/decisions" element={<DecisionLog />} />
+            <Route path="/read/:id/ask/:threadId" element={<AskThread />} />
             <Route path="/old/read/:id" element={<ReadPage />} />
             <Route path="/intake" element={<ReleaseIntake />} />
 

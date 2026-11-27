@@ -238,6 +238,13 @@ test('pushes to other branches, without an index, or with Ask off do nothing', a
   const off = createCodeIndex({ store: memoryStore(), clientFor: () => gh, enabled: () => false, deployments: { findById: async () => project } });
   assert.deepStrictEqual(await off.rebuild(project), { skipped: 'disabled' });
   assert.strictEqual(await off.ensureBuilt(project), null);
+  // Ask can be on for some projects only; the check is asked about this one.
+  const asked = [];
+  const some = createCodeIndex({ store: memoryStore(), clientFor: () => gh, enabled: (p) => { asked.push(p && p.id); return false; }, deployments: { findById: async () => project } });
+  assert.deepStrictEqual(await some.rebuild(project), { skipped: 'disabled' });
+  assert.deepStrictEqual(await some.onPush(project, { ref: 'refs/heads/main', after: 'c9' }), { skipped: 'not_indexable' });
+  assert.strictEqual(await some.ensureBuilt(project), null);
+  assert.deepStrictEqual(asked, ['p1', 'p1', 'p1']);
   const ownerless = { ...project, user_id: null };
   assert.deepStrictEqual(await index.rebuild(ownerless), { skipped: 'not_indexable' });
   assert.deepStrictEqual(await index.rebuild({ ...project, repo_url: 'local://x' }), { skipped: 'not_indexable' });

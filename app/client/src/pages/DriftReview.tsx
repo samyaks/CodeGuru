@@ -19,6 +19,8 @@ import {
   type WhyNot,
 } from '../services/driftApi';
 import { decisionLine } from './team/DriftSection';
+import { AskAbout } from './ask/AskSection';
+import { aboutPr } from './ask/questions';
 import styles from './team/Team.module.css';
 import drift from './DriftReview.module.css';
 
@@ -236,6 +238,7 @@ export default function DriftReview() {
             {pr.author ? `By ${pr.author}` : null}{pr.branch ? <> · <code>{pr.branch}</code></> : null}
             {' · '}<a href={pr.url} target="_blank" rel="noreferrer noopener">Open on GitHub</a>
             {' · '}<a href={pr.filesUrl} target="_blank" rel="noreferrer noopener">See the diff</a>
+            <AskAbout projectId={id} question={aboutPr(pr.number)} before=" · " />
           </p>
         ) : null}
       </div>

@@ -8,6 +8,8 @@ import { ApiError } from '../lib/api-error';
 import { rememberAfterSignIn } from '../lib/safe-next';
 import { downloadDecisionLog, fetchDecisionLog, type DecisionLog as Log, type LogEntry } from '../services/overviewApi';
 import { LogLinks, formatDay, logSentence } from './team/logLine';
+import { AskAbout } from './ask/AskSection';
+import { aboutDecision } from './ask/questions';
 import styles from './team/Team.module.css';
 import drift from './DriftReview.module.css';
 
@@ -109,6 +111,7 @@ export default function DecisionLog() {
                 <div className={styles.who}>
                   <span className="type-body">{logSentence(e)}</span>
                   <LogLinks entry={e} className={cx('type-small', styles.muted)} />
+                  <AskAbout projectId={id} question={aboutDecision(logSentence(e))} className="type-small" />
                 </div>
               </li>
             ))}

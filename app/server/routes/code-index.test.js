@@ -20,7 +20,7 @@ async function withServer(fn, { enabled = true, project = { id: 'p1', user_id: '
     content: 'SECRET TEXT THAT MUST NOT LEAK',
   };
   const deps = {
-    enabled: () => enabled,
+    enabled: typeof enabled === 'function' ? enabled : () => enabled,
     deployments: { async findById(id) { return id === project.id ? project : null; } },
     store: { async status(id) { return id === 'p1' ? row : null; } },
     index: { async rebuild(p) { rebuilds.push(p.id); return { status: 'ready' }; } },
@@ -80,6 +80,12 @@ test('nothing is served while Ask is off, or for a project with no owner', { ski
   await withServer(async ({ call }) => {
     assert.strictEqual((await call('GET', '/api/projects/p1/code-index', 'owner')).status, 404);
   }, { enabled: false });
+  // On, but not for this project.
+  await withServer(async ({ call, rebuilds }) => {
+    assert.strictEqual((await call('GET', '/api/projects/p1/code-index', 'owner')).status, 404);
+    assert.strictEqual((await call('POST', '/api/projects/p1/code-index/rebuild', 'owner')).status, 404);
+    assert.deepStrictEqual(rebuilds, []);
+  }, { enabled: (p) => !p || p.id !== 'p1' });
   await withServer(async ({ call, rebuilds }) => {
     assert.strictEqual((await call('GET', '/api/projects/p1/code-index', 'owner')).status, 404);
     assert.strictEqual((await call('POST', '/api/projects/p1/code-index/rebuild', 'owner')).status, 404);
