@@ -15,6 +15,14 @@ test('repo names come from https and ssh remotes', () => {
   assert.strictEqual(repoFromRemote('https://github.com/samyaks/delta-v.git'), 'samyaks/delta-v');
   assert.strictEqual(repoFromRemote('git@github.com:samyaks/delta-v.git'), 'samyaks/delta-v');
   assert.strictEqual(repoFromRemote('https://gitlab.com/a/b'), null);
+  assert.strictEqual(repoFromRemote('https://evilgithub.com/a/b'), null);
+  assert.strictEqual(repoFromRemote('https://github.com/../b'), null);
+  assert.strictEqual(repoFromRemote('ssh://git@github.com/samyaks/delta-v.git'), 'samyaks/delta-v');
+  assert.strictEqual(repoFromRemote('ssh://git@ssh.github.com:443/samyaks/delta-v.git'), 'samyaks/delta-v');
+  assert.strictEqual(repoFromRemote('https://user:tok@GitHub.com/samyaks/delta-v/'), 'samyaks/delta-v');
+  assert.strictEqual(repoFromRemote('https://evil.com/github.com/o/r'), null);
+  assert.strictEqual(repoFromRemote('https://evil.com/@github.com/o/r'), null);
+  assert.strictEqual(repoFromRemote('git@github.com.evil.com:o/r'), null);
 });
 
 function fakeGitHub(comments, { headSha = 'abcdef1234' } = {}) {

@@ -7,7 +7,8 @@ takeoff validate [file] [--strict]   check takeoff.yaml; errors show file:line:c
 takeoff sync [file] [--check] [--dry-run]   write CLAUDE.md, AGENTS.md, .cursor/rules/takeoff.mdc
 takeoff migrate [file] [--dry-run]   upgrade a v1 file to v2
 takeoff notes [--branch <name>] [--repo <owner/name>] [--json]   reviewers' send-back notes for this branch's PR
-takeoff hook install [--local] [--command <cmd>]   add Takeoff's Claude Code hooks
+takeoff hook install [--local] [--command <cmd>] [--mcp]   add Takeoff's Claude Code hooks (and, with --mcp, its plan tools)
+takeoff mcp   serve the plan to a coding agent over MCP
 ```
 
 Exit codes: 0 ok, 1 problems found, 2 usage error. `--dir` and `--file` pick another folder or filename.
@@ -58,3 +59,16 @@ There was no v1 schema in the repo, so `migrate` accepts the plain shapes a hand
 The hooks never block the agent and never show an error. In a repo without `takeoff.yaml` they do nothing. Notes are read only for a branch with an upstream on GitHub. They're cached in `.git/takeoff/` and refreshed in the background every two minutes, so a prompt only waits on GitHub the first time on a branch (about two seconds at most). Offline, the last notes it read stay. Anything that went wrong is written to `.git/takeoff/hook.log`. Reading notes needs `GITHUB_TOKEN` or the gh CLI's sign-in, like `takeoff notes`; set `TAKEOFF_APP_SLUG` to trust only the Takeoff App's comments (without it, each note says which App posted it).
 
 The library is exported too (`require('@takeoff/cli')`): `validateText`, `migrateData`, `renderBlock`, `applyBlock`, `sync`.
+
+## Plan tools for coding agents (MCP)
+
+`takeoff mcp` is a Model Context Protocol server on stdin and stdout. The hook tells the agent the plan once per prompt; with the server, the agent can also look things up while it works. Every tool only reads, and none runs anything but git (and GitHub's API for notes):
+
+- `get_plan({ area?, version? })`: the product, each area with its paths, rules and nevers, and the agreements.
+- `rules_for_path({ path, version? })`: the areas that cover a file, matched the way the pull request check matches them, with their rules and agreements, plus the product-wide agreements. Takes a repo-relative path or an absolute path inside the repo.
+- `get_send_back_notes({ branch? })`: reviewers' send-back notes on the open PR for the branch this one pushes to, newest first. Needs `GITHUB_TOKEN` or the gh CLI's sign-in, like `takeoff notes`.
+- `recent_plan_changes({ limit? })`: the latest commits on this branch that changed `takeoff.yaml`, each with a short diff.
+
+`version` is `"agreed"` by default, which reads `takeoff.yaml` on the default branch (what pull requests are checked against), or `"working"` for the file on disk, which may hold this branch's unreviewed proposals. When a tool can't answer (no `takeoff.yaml`, a file with errors, no git, GitHub unreachable) it returns `available: false` and a reason instead of an error. A symlinked `takeoff.yaml`, or one over 1 MB, is never read. git and gh are only run from absolute PATH entries outside the repo, and repo git settings that would run a program on a read (signature checks, fsmonitor) are switched off. Without `TAKEOFF_APP_SLUG`, notes come back with `verified_app: false`, since any GitHub App on the repo could have posted them.
+
+`takeoff hook install --mcp` adds the server to `.mcp.json` at the repo root, which is shared with everyone who clones the repo; Claude Code asks each person to approve it the first time. It keeps other servers in the file, and refuses to replace a `takeoff` server it didn't write (one with its own `env`, say), in which case neither file changes. Anyone without @takeoff/cli installed sees the server as failed. With `--local` it writes nothing and prints the `claude mcp add --scope local` command instead.

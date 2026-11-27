@@ -4,57 +4,7 @@
 // migrated in memory (nothing is written back). A file with errors is reported,
 // never guessed at.
 
-const { validateText, migrateData, FILENAME } = require('@takeoff/cli');
-
-function textOf(item) {
-  if (typeof item === 'string') return item.trim();
-  if (item && typeof item === 'object' && typeof item.text === 'string') return item.text.trim();
-  return '';
-}
-
-function normalizeRules(list) {
-  return (Array.isArray(list) ? list : [])
-    .map((r) => ({ id: r && typeof r === 'object' && typeof r.id === 'string' ? r.id : null, text: textOf(r) }))
-    .filter((r) => r.text);
-}
-
-function normalize(data) {
-  const areas = (Array.isArray(data.areas) ? data.areas : []).filter((a) => a && typeof a === 'object').map((a) => ({
-    id: String(a.id || ''),
-    name: typeof a.name === 'string' && a.name.trim() ? a.name.trim() : String(a.id || ''),
-    paths: (Array.isArray(a.paths) ? a.paths : []).filter((p) => typeof p === 'string'),
-    creators: (Array.isArray(a.creators) ? a.creators : []).filter((c) => typeof c === 'string'),
-    rules: normalizeRules(a.rules),
-    never: normalizeRules(a.never),
-  }));
-  const agreements = (Array.isArray(data.agreements) ? data.agreements : [])
-    .filter((g) => g && typeof g === 'object' && typeof g.text === 'string')
-    // An agreement without an area is product-wide (area: null).
-    .map((g) => ({ id: String(g.id || ''), area: typeof g.area === 'string' && g.area.trim() ? g.area.trim() : null, text: g.text.trim() }));
-  return {
-    product: {
-      name: typeof data.product?.name === 'string' ? data.product.name : '',
-      summary: typeof data.product?.summary === 'string' ? data.product.summary : '',
-    },
-    areas,
-    agreements,
-  };
-}
-
-/**
- * @param {string|null} text file contents, or null when the file is absent
- * @returns {{ present: boolean, ok: boolean, intent: object|null, errors: string[] }}
- */
-function loadIntent(text) {
-  if (text === null || text === undefined) return { present: false, ok: false, intent: null, errors: [] };
-  const res = validateText(text);
-  const errors = res.issues
-    .filter((i) => i.severity === 'error')
-    .map((i) => `${i.line ? `line ${i.line}: ` : ''}${i.path ? `${i.path}: ` : ''}${i.message}`);
-  if (!res.ok) return { present: true, ok: false, intent: null, errors };
-  const data = res.version === 1 ? migrateData(res.data).data : res.data;
-  return { present: true, ok: true, intent: normalize(data), errors: [] };
-}
+const { FILENAME, loadIntent, normalizeIntent: normalize } = require('@takeoff/cli');
 
 const short = (t) => (t.length > 160 ? `${t.slice(0, 159)}…` : t);
 
