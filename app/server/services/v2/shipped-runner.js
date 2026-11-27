@@ -155,9 +155,11 @@ async function processPush({ project, payload }) {
   }
 
   // Keep Ask's stored code index current (Milestone 8, behind ASK_ENABLED).
-  // Fire and forget: the index records its own failures and the nightly
-  // check retries them, so it never changes this push's retry behaviour.
-  if (branch && branch === defaultBranch && require('../ask/config').isAskEnabled()) {
+  // Every branch goes in: the index knows which branch it holds (the
+  // repo's default branch, which project.branch may not match) and drops
+  // the rest. Fire and forget: the index records its own failures and the
+  // nightly check retries them, so it never changes this push's retries.
+  if (branch && require('../ask/config').isAskEnabled()) {
     try {
       const { getCodeIndex } = require('../code-index');
       Promise.resolve(getCodeIndex().onPush(project, payload)).catch((err) => {

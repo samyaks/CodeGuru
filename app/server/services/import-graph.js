@@ -24,18 +24,21 @@ const PY_EXT_RE = /\.py$/i;
 
 // JS/TS import-style extractors. Each captures the literal between quotes.
 // `[^'"]` matches across newlines so multi-line destructured imports still work.
-const RE_JS_IMPORT  = /(?:^|\n)\s*import\s+(?:[^'"]+from\s+)?['"]([^'"]+)['"]/g;
-const RE_JS_DYNAMIC = /(?:^|\n)\s*(?:import|export)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-const RE_JS_REQUIRE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+// Every quantifier is bounded or can't overlap its neighbour ([ \t]* after a
+// newline, not \s*), so the scan stays linear on hostile input such as a file
+// of blank lines or of unclosed quotes.
+const RE_JS_IMPORT  = /(?:^|\n)[ \t]*import[ \t\n]+(?:[^'";]{1,500}?[ \t\n]from[ \t\n]+)?['"]([^'"\n]{1,500})['"]/g;
+const RE_JS_DYNAMIC = /(?:^|\n)[ \t]*(?:import|export)[ \t]*\([ \t]*['"]([^'"\n]{1,500})['"][ \t]*\)/g;
+const RE_JS_REQUIRE = /\brequire[ \t]*\([ \t]*['"]([^'"\n]{1,500})['"][ \t]*\)/g;
 // Re-exports — barrel-style `export * from './foo'` and `export { Bar } from './bar'`.
 // Without these, every barrel file's downstream targets undercount their inbound edges.
-const RE_JS_REEXPORT = /(?:^|\n)\s*export\s+(?:\*(?:\s+as\s+\w+)?|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]/g;
+const RE_JS_REEXPORT = /(?:^|\n)[ \t]*export[ \t]+(?:\*(?:[ \t]+as[ \t]+\w+)?|\{[^}]{0,2000}\})[ \t\n]*from[ \t]+['"]([^'"\n]{1,500})['"]/g;
 
 // Python — we extend the documented `from … import …` regex to also capture
 // the imported names, because `from . import foo` cannot be resolved without
 // knowing `foo`.
-const RE_PY_IMPORT = /(?:^|\n)\s*import\s+([\w.]+)/g;
-const RE_PY_FROM   = /(?:^|\n)\s*from\s+(\.+[\w.]*|[\w.]+)\s+import\s+([^\n;#]+)/g;
+const RE_PY_IMPORT = /(?:^|\n)[ \t]*import[ \t]+([\w.]{1,300})/g;
+const RE_PY_FROM   = /(?:^|\n)[ \t]*from[ \t]+(\.{1,20}[\w.]{0,300}|[\w.]{1,300})[ \t]+import[ \t]+([^\n;#]{1,2000})/g;
 
 function isPy(p) {
   return PY_EXT_RE.test(p);

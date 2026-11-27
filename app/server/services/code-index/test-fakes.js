@@ -193,34 +193,60 @@ function memoryStore() {
     repos, files, symbols, specs, edges,
     async getRepo(pid) { const r = repos.get(pid); return r ? { ...r, lease_until: r.lease_until ? new Date(r.lease_until) : null } : null; },
     async now() { return tick(); },
-    async claim(pid, { repo, branch, token, full }) {
+    async claim(pid, { repo, token }) {
       const r = repos.get(pid);
       const lease = Date.now() + 15 * 60 * 1000;
+      const now = tick();
       if (!r) {
-        const row = { project_id: pid, repo: repo.toLowerCase(), branch, indexed_sha: null, status: 'building', lease_until: lease, lease_token: token, error: null };
+        const row = {
+          project_id: pid, repo: repo.toLowerCase(), branch: '', indexed_sha: null, status: 'building',
+          lease_until: lease, lease_token: token, claimed_at: now, dirty_at: null, error: null,
+          full_builds: 0, full_window_start: null, updated_at: new Date(),
+        };
         repos.set(pid, row);
         return { ...row };
       }
       if (r.lease_until && r.lease_until > Date.now()) return null;
-      Object.assign(r, { lease_until: lease, lease_token: token });
-      if (full) Object.assign(r, { repo: repo.toLowerCase(), branch, status: 'building', error: null });
+      Object.assign(r, { lease_until: lease, lease_token: token, claimed_at: now });
       return { ...r };
     },
     async renewLease(pid, token) { hold(pid, token); },
-    async setBuilding(pid, token) { hold(pid, token); repos.get(pid).status = 'building'; },
-    async release(pid, token, { status, indexedSha = null, error = null }) {
+    async setBuilding(pid, token, { repo, branch }) {
+      hold(pid, token);
+      Object.assign(repos.get(pid), { status: 'building', error: null, repo: repo.toLowerCase(), branch });
+    },
+    async release(pid, token, { status, indexedSha = null, error = null, attempt = false }) {
       const r = repos.get(pid);
-      if (!r || r.lease_token !== token) return false;
+      if (!r || r.lease_token !== token) return { ok: false, dirty: false };
       const fm = fmap(pid);
+      const dirty = r.dirty_at != null && r.dirty_at >= r.claimed_at;
+      const day = 24 * 60 * 60 * 1000;
+      if (attempt) {
+        const inWindow = r.full_window_start && Date.now() - r.full_window_start < day;
+        r.full_builds = inWindow ? (r.full_builds || 0) + 1 : 1;
+        if (!inWindow) r.full_window_start = Date.now();
+      }
       Object.assign(r, {
-        lease_until: null, lease_token: null, status, error,
+        lease_until: null, lease_token: null, error,
+        status: status === 'ready' && dirty ? 'behind' : status,
         indexed_sha: indexedSha || r.indexed_sha,
         file_count: fm.size,
         text_bytes: [...fm.values()].reduce((n, f) => n + (f.content ? Buffer.byteLength(f.content) : 0), 0),
+        last_checked_at: tick(),
+        updated_at: new Date(),
       });
-      return true;
+      return { ok: true, dirty };
     },
-    async markBehind(pid) { const r = repos.get(pid); if (r && r.status === 'ready') r.status = 'behind'; },
+    async counts(pid) {
+      const fm = fmap(pid);
+      return { files: fm.size, textBytes: [...fm.values()].reduce((n, f) => n + (f.content ? Buffer.byteLength(f.content) : 0), 0) };
+    },
+    async markBehind(pid) {
+      const r = repos.get(pid);
+      if (!r) return;
+      r.dirty_at = tick();
+      if (r.status === 'ready') r.status = 'behind';
+    },
     async upsertFiles(pid, token, list) {
       hold(pid, token);
       const fm = fmap(pid);

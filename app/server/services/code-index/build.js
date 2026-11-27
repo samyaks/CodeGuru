@@ -18,6 +18,7 @@ const LIMITS = {
   maxTextBytes: 200 * 1024 * 1024,
   maxCompressedBytes: 500 * 1024 * 1024,
   maxUncompressedBytes: 4 * 1024 * 1024 * 1024,
+  maxSymbols: 200000,
   batchFiles: 200,
   batchBytes: 4 * 1024 * 1024,
 };
@@ -34,9 +35,11 @@ function fileRecord(path, { data, size, blobSha = null, neverReadable = false })
     size: data ? Math.max(size || 0, data.length) : Math.max(size || 0, MAX_FILE_BYTES + 1),
   });
   const content = prep.content;
+  // A hash of a secret file's bytes could be checked against guesses, so it isn't kept.
+  const secret = prep.skippedReason === 'never_readable' || prep.skippedReason === 'private_key';
   return {
     path,
-    blobSha: blobSha || (data ? gitBlobSha(data) : null),
+    blobSha: secret ? null : (blobSha || (data ? gitBlobSha(data) : null)),
     sizeBytes: prep.sizeBytes,
     language: prep.language,
     content,
@@ -81,6 +84,7 @@ async function fullBuild(ctx) {
   let batchBytes = 0;
   let files = 0;
   let textBytes = 0;
+  let symbols = 0;
   const flush = async () => {
     if (!batch.length) return;
     const out = batch;
@@ -103,6 +107,8 @@ async function fullBuild(ctx) {
         return tooLarge(sha, `The repository has more than ${limits.maxFiles} files.`);
       }
       const rec = fileRecord(entry.path, { data: entry.data, size: entry.size, neverReadable: !!cls.neverReadable });
+      if (symbols + rec.symbols.length > limits.maxSymbols) rec.symbols = rec.symbols.slice(0, Math.max(0, limits.maxSymbols - symbols));
+      symbols += rec.symbols.length;
       const bytes = rec.content ? Buffer.byteLength(rec.content) : 0;
       textBytes += bytes;
       if (textBytes > limits.maxTextBytes) {

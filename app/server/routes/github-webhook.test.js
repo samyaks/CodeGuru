@@ -404,16 +404,17 @@ test('losing App access deletes the stored code index first (Milestone 8)', asyn
   const withIndex = () => {
     const w = makeWorld();
     w.deps.codeIndex = {
-      deleteForInstallation: async (id) => { w.calls.revoked.push({ indexForInstallation: id }); return 1; },
-      deleteForRepos: async (names) => { w.calls.revoked.push({ indexForRepos: names }); return 1; },
-      deleteForGithubUser: async (id) => { w.calls.revoked.push({ indexForGithubUser: id }); return 1; },
+      deleteForInstallation: async (id) => { w.calls.revoked.push({ indexForInstallation: id }); return ['acme/api']; },
+      deleteForRepos: async (names) => { w.calls.revoked.push({ indexForRepos: names }); return names; },
+      deleteForGithubUser: async (id) => { w.calls.revoked.push({ indexForGithubUser: id }); return ['acme/api']; },
     };
     return w;
   };
   let w = withIndex();
   await send(createWebhookHandler(w.deps),
     delivery({ action: 'deleted', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }));
-  assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { indexForInstallation: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }]);
+  // Dropped again once the grants are gone, in case a build wrote them back in between.
+  assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { indexForInstallation: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }, { indexForRepos: ['acme/api'] }]);
 
   w = withIndex();
   await send(createWebhookHandler(w.deps),
@@ -424,12 +425,14 @@ test('losing App access deletes the stored code index first (Milestone 8)', asyn
   await send(createWebhookHandler(w.deps),
     delivery({ action: 'removed', installation: { id: 42 }, repositories_removed: [{ id: 9, full_name: 'acme/web' }] },
       { secret: APP_SECRET, event: 'installation_repositories' }));
-  assert.deepStrictEqual(w.calls.revoked.slice(0, 2), [{ forget: 42 }, { indexForRepos: ['acme/web'] }]);
+  assert.deepStrictEqual(w.calls.revoked[0], { forget: 42 });
+  assert.deepStrictEqual(w.calls.revoked[1], { indexForRepos: ['acme/web'] });
+  assert.deepStrictEqual(w.calls.revoked[w.calls.revoked.length - 1], { indexForRepos: ['acme/web'] });
 
   w = withIndex();
   await send(createWebhookHandler(w.deps),
     delivery({ action: 'revoked', sender: { id: 555 } }, { secret: APP_SECRET, event: 'github_app_authorization' }));
-  assert.deepStrictEqual(w.calls.revoked, [{ indexForGithubUser: 555 }, { deleteForGithubUser: 555 }]);
+  assert.deepStrictEqual(w.calls.revoked, [{ indexForGithubUser: 555 }, { deleteForGithubUser: 555 }, { indexForRepos: ['acme/api'] }]);
 
   // A failing index delete doesn't stop the grants from being revoked.
   w = withIndex();
@@ -437,4 +440,19 @@ test('losing App access deletes the stored code index first (Milestone 8)', asyn
   await send(createWebhookHandler(w.deps),
     delivery({ action: 'deleted', installation: { id: 42 } }, { secret: APP_SECRET, event: 'installation' }));
   assert.deepStrictEqual(w.calls.revoked, [{ forget: 42 }, { deleteForInstallation: 42 }, { clearInstallation: 42 }]);
+});
+
+test('a repo made private, deleted, moved or renamed loses its stored code (Milestone 8)', async () => {
+  const w = makeWorld();
+  const dropped = [];
+  w.deps.codeIndex = { deleteForRepos: async (names) => { dropped.push(names); return names; } };
+  const handler = createWebhookHandler(w.deps);
+  const repo = { full_name: 'Acme/New', name: 'New', owner: { login: 'Acme' } };
+  await send(handler, delivery({ action: 'privatized', installation: { id: 42 }, repository: repo }, { secret: APP_SECRET, event: 'repository' }));
+  await send(handler, delivery({ action: 'renamed', installation: { id: 42 }, repository: repo, changes: { repository: { name: { from: 'Old' } } } }, { secret: APP_SECRET, event: 'repository' }));
+  await send(handler, delivery({ action: 'transferred', installation: { id: 42 }, repository: repo, changes: { owner: { from: { organization: { login: 'Before' } } } } }, { secret: APP_SECRET, event: 'repository' }));
+  // Not a change that matters, and not signed by the App: nothing happens.
+  await send(handler, delivery({ action: 'edited', installation: { id: 42 }, repository: repo }, { secret: APP_SECRET, event: 'repository' }));
+  await send(handler, delivery({ action: 'deleted', installation: { id: 42 }, repository: repo }, { secret: HOOK_SECRET, event: 'repository' }));
+  assert.deepStrictEqual(dropped, [['acme/new'], ['acme/new', 'acme/old'], ['acme/new', 'before/new']]);
 });

@@ -171,18 +171,33 @@ test('a lease left by a crashed worker is taken over once it runs out', async ()
 });
 
 test('when GitHub says Takeoff can no longer read the repo, the index is deleted', async () => {
+  for (const [where, err] of [
+    ['fetchBranch', new AppError('x', 403, 'GITHUB_APP_REQUIRED')],
+    ['fetchRepoMeta', Object.assign(new Error('GitHub API 404: Not Found'), { status: 404 })],
+    ['fetchBranch', Object.assign(new Error('gone'), { installationGone: true, status: 401 })],
+  ]) {
+    const { index, store, project, gh } = setup();
+    await index.rebuild(project);
+    gh[where] = async () => { throw err; };
+    const r = await index.rebuild(project);
+    assert.strictEqual(r.status, 'deleted');
+    assert.strictEqual(store.repos.has('p1'), false);
+    assert.strictEqual(store.files.has('p1'), false);
+  }
+});
+
+test('a missing branch or an expired token fails and keeps the index', async () => {
   for (const err of [
-    new AppError('x', 403, 'GITHUB_APP_REQUIRED'),
-    Object.assign(new Error('GitHub API 404: Not Found'), { status: 404 }),
-    Object.assign(new Error('gone'), { installationGone: true, status: 401 }),
+    Object.assign(new Error('Branch not found'), { status: 404 }),
+    Object.assign(new Error('Bad credentials'), { status: 401 }),
   ]) {
     const { index, store, project, gh } = setup();
     await index.rebuild(project);
     gh.fetchBranch = async () => { throw err; };
     const r = await index.rebuild(project);
-    assert.strictEqual(r.status, 'deleted');
-    assert.strictEqual(store.repos.has('p1'), false);
-    assert.strictEqual(store.files.has('p1'), false);
+    assert.strictEqual(r.status, 'failed');
+    assert.strictEqual(store.repos.get('p1').indexed_sha, 'c1');
+    assert.strictEqual(store.files.get('p1').size, 6);
   }
 });
 
@@ -248,6 +263,74 @@ test('a repo change on the project replaces the whole index', async () => {
   assert.strictEqual(r.status, 'ready');
   assert.strictEqual(store.repos.get('p1').repo, 'acme/shop2');
   assert.ok(!store.files.get('p1').has('src/gone.js'));
+});
+
+test('the repo default branch is indexed, whatever the project row says', async () => {
+  const { gh, store, project, index } = setup({ branches: { main: 'c1', trunk: 'c2' } });
+  gh.fetchRepoMeta = async () => ({ default_branch: 'trunk', private: true });
+  assert.strictEqual((await index.rebuild(project)).status, 'ready');
+  const row = store.repos.get('p1');
+  assert.strictEqual(row.branch, 'trunk');
+  assert.strictEqual(row.indexed_sha, 'c2');
+  // Pushes to trunk count; pushes to the project's 'main' don't.
+  assert.deepStrictEqual(await index.onPush(project, { ref: 'refs/heads/main', after: 'c1' }), { skipped: 'other_branch' });
+  gh.fetchBranch = async () => ({ commit: { sha: 'c3' } });
+  const r = await index.onPush(project, { ref: 'refs/heads/trunk', after: 'c3' });
+  assert.strictEqual(r.status, 'ready');
+  assert.strictEqual(store.repos.get('p1').indexed_sha, 'c3');
+});
+
+test('a push that lands while another worker holds the lease is applied after it', async () => {
+  const { index, store, project, gh, freshSnapshot } = setup();
+  await index.rebuild(project);
+  // Another process holds the lease; the push is noted, not lost.
+  const row = store.repos.get('p1');
+  Object.assign(row, { lease_token: 'other', lease_until: Date.now() + 60000 });
+  gh.fetchBranch = async () => ({ commit: { sha: 'c2' } });
+  assert.deepStrictEqual(await index.onPush(project, { ref: 'refs/heads/main', after: 'c2' }), { skipped: 'busy' });
+  assert.strictEqual(row.status, 'behind');
+  // That worker finishes at c1, sees the push was noted after it claimed, and leaves the row behind.
+  row.claimed_at = row.dirty_at - 1;
+  const done = await store.release('p1', 'other', { status: 'ready', indexedSha: 'c1' });
+  assert.deepStrictEqual(done, { ok: true, dirty: true });
+  assert.strictEqual(row.status, 'behind');
+  // The next sync (here, the nightly heal) catches up.
+  await index.heal();
+  assert.strictEqual(store.repos.get('p1').indexed_sha, 'c2');
+  assert.strictEqual(store.repos.get('p1').status, 'ready');
+  assert.deepStrictEqual(store.snapshot('p1'), await freshSnapshot('c2'));
+});
+
+test('full builds stop for the day once the budget is used, unless the owner asks', async () => {
+  const { index, store, project, gh } = setup();
+  await index.rebuild(project);
+  const row = store.repos.get('p1');
+  Object.assign(row, { full_builds: 8, full_window_start: Date.now() - 1000 });
+  gh.fetchBranch = async () => ({ commit: { sha: 'f1' } });
+  gh.calls.length = 0;
+  const r = await index.onPush(project, { ref: 'refs/heads/main', after: 'f1', forced: true });
+  assert.deepStrictEqual(r, { skipped: 'build_budget' });
+  assert.strictEqual(row.status, 'behind');
+  assert.strictEqual(row.indexed_sha, 'c1');
+  assert.ok(!gh.calls.some(([k]) => k === 'tarball'));
+  assert.strictEqual((await index.rebuild(project)).status, 'ready');
+  assert.strictEqual(store.repos.get('p1').indexed_sha, 'f1');
+});
+
+test('a failed build is not retried on every question', async () => {
+  const { index, store, project, gh } = setup();
+  gh.fail = (name) => (name === 'tarball' ? Object.assign(new Error('boom'), { status: 502 }) : null);
+  await index.rebuild(project);
+  assert.strictEqual(store.repos.get('p1').status, 'failed');
+  gh.calls.length = 0;
+  await index.ensureBuilt(project);
+  await Promise.all([...index._queues.values()]);
+  assert.strictEqual(gh.calls.length, 0);
+  store.repos.get('p1').updated_at = new Date(Date.now() - 16 * 60 * 1000);
+  gh.fail = null;
+  await index.ensureBuilt(project);
+  await Promise.all([...index._queues.values()]);
+  assert.strictEqual(store.repos.get('p1').status, 'ready');
 });
 
 test('no network and no model were used', () => {

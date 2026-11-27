@@ -10,11 +10,14 @@
  * Left out entirely: vendored and build output, lockfiles, VCS folders.
  * Kept as a path with no text: never-readable files (.env, keys,
  * credentials), files over 512 KB, binaries, minified files, and any file
- * holding a private key block. Everything else is stored with secret-shaped
- * strings replaced by [redacted secret].
+ * holding a private key block, and Kubernetes Secret manifests. Everything
+ * else is stored with secret-shaped strings replaced by [redacted secret].
+ *
+ * Every pattern here is linear: bounded or literal-prefixed, with no
+ * quantifiers that can overlap, because they run over repo files that
+ * anyone can write.
  */
 
-const { PATTERNS } = require('../security/detectors/exposed-secrets');
 const { inferLanguage } = require('../../lib/capture-utils');
 
 const MAX_FILE_BYTES = 512 * 1024;
@@ -42,16 +45,51 @@ const BINARY_EXT = new Set([
 
 // Files whose whole point is a secret. Their text is never stored.
 const NEVER_READABLE_NAMES = [
-  /^\.env(\..*)?$/i, /^.*\.env$/i,
-  /\.(pem|key|p12|pfx|jks|keystore|crt|cer|der|p8|ppk|asc|gpg|kdbx|tfstate|tfvars)$/i,
+  /^\.env([.\-_].*)?$/i, /^.*\.env$/i, /^env\.[a-z0-9_-]+$/i, /^\.envrc$/i,
+  /\.(pem|key|p12|pfx|jks|keystore|crt|cer|der|p8|ppk|asc|gpg|kdbx|tfvars|keytab|kubeconfig|ovpn)$/i,
+  /\.tfstate(\..*)?$/i,
   /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i,
-  /^credentials(\.[a-z]+)?$/i, /^.*[-_.]credentials\.(json|ya?ml|xml|ini)$/i,
+  /^credentials(\..*)?$/i, /^.*[-_.]credentials\.(json|ya?ml|xml|ini)$/i,
   /^service[-_]?account.*\.json$/i, /^client_secret.*\.json$/i,
-  /^\.(npmrc|pypirc|netrc|pgpass|htpasswd|git-credentials|dockercfg)$/i,
+  /^[._]?(npmrc|pypirc|netrc|pgpass|htpasswd|git-credentials|dockercfg|s3cfg|boto|yarnrc\.yml)$/i,
   /^secrets?\.(json|ya?ml|toml|ini|env)$/i,
+  /^kubeconfig$/i,
 ];
+// Whole paths that hold credentials whatever their name looks like.
+const NEVER_READABLE_PATHS = [/(^|\/)\.docker\/config\.json$/i, /(^|\/)\.kube\/config$/i, /(^|\/)\.aws\/(credentials|config)$/i];
 
-const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const PRIVATE_KEY_RE = /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY(?: BLOCK)?-----/;
+const K8S_SECRET_RE = /^[ \t]*["']?kind["']?[ \t]*:[ \t]*["']?Secret["']?[ \t]*,?[ \t]*$/m;
+const CONFIG_EXT = /\.(ya?ml|properties|ini|toml|conf|cfg|env|json|xml|tf|hcl)$/i;
+// A line this long is data, not code; nothing on it is worth the scan.
+const MAX_LINE_CHARS = 50000;
+
+const SECRET_KEY_WORDS = '(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key|client[_-]?secret|auth)';
+
+// [regex, configOnly]. Each is linear on its own.
+const REDACT_PATTERNS = [
+  [/sk-ant-[A-Za-z0-9_-]{20,}/g],
+  [/\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{30,}/g],
+  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g],
+  [/(?:aws_?secret_?access_?key|secret_?access_?key)["']?[ \t]*[:=][ \t]*["']?[A-Za-z0-9\/+=]{40}/gi],
+  [/\bgh[pousr]_[A-Za-z0-9]{30,}/g],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g],
+  [/\bglpat-[A-Za-z0-9_-]{15,}/g],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g],
+  [/hooks\.slack\.com\/(?:services|workflows)\/[A-Za-z0-9_\/-]{20,}/g],
+  [/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}/g],
+  [/\bwhsec_[A-Za-z0-9]{20,}/g],
+  [/\bAIza[0-9A-Za-z_-]{35}/g],
+  [/\bnpm_[A-Za-z0-9]{36}\b/g],
+  [/\bSG\.[A-Za-z0-9_-]{16,32}\.[A-Za-z0-9_-]{30,50}/g],
+  [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
+  // scheme://user:password@host for any scheme
+  [/\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s'"`@\/:]{1,256}:[^\s'"`@\/]{1,256}@/gi],
+  // A secret-looking name given a quoted literal: password = "....", 'token': '...', define('DB_PASSWORD', '...')
+  [new RegExp(`${SECRET_KEY_WORDS}[A-Za-z0-9_]{0,40}["']?[ \\t]*(?:[:=]|=>|,)[ \\t]*["'][^'"\\s]{6,256}["']`, 'gi')],
+  // In config files, unquoted too: password: hunter22, POSTGRES_PASSWORD=...
+  [new RegExp(`${SECRET_KEY_WORDS}[A-Za-z0-9_.-]{0,40}["']?[ \\t]*[:=][ \\t]*[^\\s'"#,;{}]{8,256}`, 'gi'), true],
+];
 
 function baseName(p) {
   const parts = p.split('/');
@@ -70,7 +108,7 @@ function isSafePath(p) {
 
 function isNeverReadable(p) {
   const name = baseName(p);
-  return NEVER_READABLE_NAMES.some((re) => re.test(name));
+  return NEVER_READABLE_NAMES.some((re) => re.test(name)) || NEVER_READABLE_PATHS.some((re) => re.test(p));
 }
 
 function classifyPath(p) {
@@ -100,15 +138,36 @@ function isMinified(p, text) {
   return longest > 5000 && lines.length < text.length / 1000;
 }
 
-/** Replace every secret-shaped string; returns { text, count }. */
-function redactSecrets(text) {
+/**
+ * Replace every secret-shaped string; returns { text, count }.
+ * `path` decides whether the config-file patterns apply.
+ */
+function redactSecrets(text, path = '') {
+  const config = CONFIG_EXT.test(path) || isNeverReadable(path);
   let count = 0;
   let out = text;
-  for (const { re } of PATTERNS) {
-    const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
-    out = out.replace(g, () => { count += 1; return REDACTED; });
+  for (const [re, configOnly] of REDACT_PATTERNS) {
+    if (configOnly && !config) continue;
+    re.lastIndex = 0;
+    out = out.replace(re, (m) => {
+      if (m === REDACTED || m.endsWith(REDACTED)) return m;
+      count += 1;
+      return REDACTED;
+    });
   }
   return { text: out, count };
+}
+
+function longestLine(text) {
+  let longest = 0;
+  let start = 0;
+  for (;;) {
+    const nl = text.indexOf('\n', start);
+    const end = nl === -1 ? text.length : nl;
+    if (end - start > longest) longest = end - start;
+    if (nl === -1) return longest;
+    start = nl + 1;
+  }
 }
 
 /**
@@ -126,9 +185,10 @@ function prepareText(p, data, { neverReadable = false, size = null } = {}) {
   if (sizeBytes > MAX_FILE_BYTES || buf.length > MAX_FILE_BYTES) return { ...base, skippedReason: 'too_large' };
   if (isBinary(p, buf)) return { ...base, skippedReason: 'binary' };
   const text = buf.toString('utf8').replace(/\u0000/g, '');
-  if (isMinified(p, text)) return { ...base, skippedReason: 'minified' };
+  if (isMinified(p, text) || longestLine(text) > MAX_LINE_CHARS) return { ...base, skippedReason: 'minified' };
   if (PRIVATE_KEY_RE.test(text)) return { ...base, skippedReason: 'private_key' };
-  const { text: clean, count } = redactSecrets(text);
+  if (/\.(ya?ml|json)$/i.test(p) && K8S_SECRET_RE.test(text)) return { ...base, skippedReason: 'never_readable' };
+  const { text: clean, count } = redactSecrets(text, p);
   return { ...base, content: clean, skippedReason: null, redactions: count };
 }
 

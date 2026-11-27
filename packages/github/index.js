@@ -45,6 +45,9 @@ async function githubFetch(urlPath, opts = {}) {
     console.warn(`GitHub API rate limit low: ${remaining} requests remaining`);
   }
 
+  // A caller that follows a redirect itself gets the redirect back.
+  if (fetchOpts.redirect === 'manual' && res.status >= 300 && res.status < 400) return res;
+
   if (!res.ok) {
     const body = await res.text();
     let message = `GitHub API ${res.status}: ${body}`;
@@ -385,11 +388,28 @@ function createClient({ token, onUnauthorized } = {}) {
 
   /**
    * The repo at `ref` as a gzipped tarball: the fetch Response, whose body is
-   * the stream. GitHub redirects to a short-lived codeload URL that carries
-   * its own token, so the redirect is followed without our Authorization.
+   * the stream. GitHub answers with a redirect to a short-lived
+   * codeload.github.com URL that carries its own token. The redirect is
+   * followed here, only to that host and without our Authorization header.
    */
   async function fetchTarball(owner, repo, ref) {
-    return request(`/repos/${owner}/${repo}/tarball/${enc(ref)}`, { redirect: 'follow' });
+    const res = await request(`/repos/${owner}/${repo}/tarball/${enc(ref)}`, { redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return res;
+    let target = null;
+    try { target = new URL(res.headers.get('location') || ''); } catch { /* checked below */ }
+    if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
+    if (!target || target.protocol !== 'https:' || target.hostname !== 'codeload.github.com') {
+      const err = new Error('GitHub tarball redirect went somewhere unexpected');
+      err.status = 502;
+      throw err;
+    }
+    const download = await fetch(target.href, { headers: { 'User-Agent': 'CodeGuru-Reviewer' }, redirect: 'error' });
+    if (!download.ok) {
+      const err = new Error(`GitHub tarball download ${download.status}`);
+      err.status = download.status;
+      throw err;
+    }
+    return download;
   }
 
   /**

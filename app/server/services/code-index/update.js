@@ -80,7 +80,8 @@ async function applyPush(ctx) {
   if (!cmp || (cmp.status !== 'ahead' && cmp.status !== 'identical')) {
     return { needFull: true, reason: `compare_${cmp && cmp.status ? cmp.status : 'unknown'}` };
   }
-  const files = Array.isArray(cmp.files) ? cmp.files : [];
+  if (!Array.isArray(cmp.files)) return { needFull: true, reason: 'compare_no_files' };
+  const files = cmp.files;
   if (files.length >= COMPARE_FILE_LIMIT) return { needFull: true, reason: 'compare_too_big' };
 
   const remove = new Set();
@@ -108,26 +109,39 @@ async function applyPush(ctx) {
   const fetchOne = async (f) => {
     // Never-readable files keep their path and nothing else: no need to fetch them.
     if (f.neverReadable) return fileRecord(f.path, { data: Buffer.alloc(0), size: 0, blobSha: f.sha, neverReadable: true });
-    if (!f.sha) return fileRecord(f.path, { data: null, size: 0 });
-    const res = await client.fetchBlobRaw(owner, repo, f.sha);
+    if (!f.sha) return null;
+    let res;
+    try {
+      res = await client.fetchBlobRaw(owner, repo, f.sha);
+    } catch (err) {
+      // A submodule's entry points at a commit, not a blob, and a tarball has
+      // no file for it either: leave the path out, as a full build would.
+      if (err && (err.status === 404 || err.status === 422)) return null;
+      throw err;
+    }
     const data = await readLimited(res, MAX_FILE_BYTES);
     return fileRecord(f.path, { data, size: data ? data.length : MAX_FILE_BYTES + 1, blobSha: f.sha });
   };
-  let records;
-  try {
-    records = await mapLimit(todo, FETCH_CONCURRENCY, fetchOne);
-  } catch (err) {
-    if (err && err.status === 404) return { needFull: true, reason: 'blob_not_found' };
-    throw err;
-  }
-
-  for (let i = 0; i < records.length; i += 200) {
-    await store.upsertFiles(projectId, token, records.slice(i, i + 200));
+  // Fetched and stored a slice at a time, so at most ~20 MB of blobs is held.
+  let changed = 0;
+  let anySpecs = false;
+  for (let start = 0; start < todo.length; start += 40) {
+    const slice = todo.slice(start, start + 40);
+    const fetched = await mapLimit(slice, FETCH_CONCURRENCY, fetchOne);
+    const records = [];
+    fetched.forEach((rec, i) => {
+      if (rec) records.push(rec);
+      else { remove.add(slice[i].path); pathSetChanged = true; }
+    });
+    if (records.length) await store.upsertFiles(projectId, token, records);
+    changed += records.length;
+    if (records.some((r) => r.specs)) anySpecs = true;
   }
   if (remove.size) await store.deletePaths(projectId, token, [...remove]);
-  const specsChanged = records.some((r) => r.specs) || todo.length > 0;
-  if (pathSetChanged || specsChanged) await rebuildEdges({ store, projectId, token });
-  return { status: 'ready', indexedSha: toSha, changed: records.length, removed: remove.size };
+  // A changed file may have gained or lost imports, so edges are recomputed
+  // whenever anything changed (from stored specs: no file is read again).
+  if (pathSetChanged || anySpecs || changed > 0) await rebuildEdges({ store, projectId, token });
+  return { status: 'ready', indexedSha: toSha, changed, removed: remove.size };
 }
 
 module.exports = { applyPush, readLimited, COMPARE_FILE_LIMIT };

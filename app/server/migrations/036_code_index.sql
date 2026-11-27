@@ -29,12 +29,20 @@ CREATE TABLE IF NOT EXISTS code_index_repos (
   skipped_count   INTEGER NOT NULL DEFAULT 0,
   lease_until     TIMESTAMPTZ,
   lease_token     TEXT,                    -- which worker holds the lease
+  claimed_at      TIMESTAMPTZ,             -- when the current lease was taken
+  dirty_at        TIMESTAMPTZ,             -- a push arrived while the row was leased
+  last_checked_at TIMESTAMPTZ,             -- last time a worker compared it with GitHub
+  full_builds     INTEGER NOT NULL DEFAULT 0,  -- full builds since full_window_start
+  full_window_start TIMESTAMPTZ,
   last_full_at    TIMESTAMPTZ,
   last_update_at  TIMESTAMPTZ,
   error           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_code_index_repos_heal
+  ON code_index_repos ((status = 'ready'), last_checked_at NULLS FIRST);
 
 CREATE TABLE IF NOT EXISTS code_index_files (
   project_id      TEXT NOT NULL REFERENCES code_index_repos(project_id) ON DELETE CASCADE,

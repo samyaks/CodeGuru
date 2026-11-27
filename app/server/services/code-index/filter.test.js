@@ -71,3 +71,61 @@ test('redactSecrets counts every match', () => {
   assert.strictEqual(count, 2);
   assert.strictEqual(text, `${REDACTED} and ${REDACTED}`);
 });
+
+test('more secret shapes are redacted (review findings)', () => {
+  const samples = {
+    'src/a.js': [
+      `const k = "sk-proj-${'Ab1_-'.repeat(10)}";`,
+      `const t = "ghs_${'a1'.repeat(20)}";`,
+      `const u = 'ghu_${'b2'.repeat(20)}';`,
+      `const j = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";`,
+      `const hook = "https://hooks.slack.com/services/T000/B000/${'x'.repeat(24)}";`,
+      `const db = "rediss://default:${'p'.repeat(12)}@cache.example.com:6380";`,
+      `define('DB_PASSWORD', 'hunter2hunter2');`,
+      `aws_secret_access_key = "${'A'.repeat(20)}/${'b'.repeat(19)}"`,
+      `const s = "whsec_${'c'.repeat(32)}";`,
+    ],
+    'config/app.yml': [`  password: correcthorsebattery`, `POSTGRES_PASSWORD=supersecretvalue`],
+    'src/main/resources/application.properties': ['spring.datasource.password=letmein-please-123'],
+  };
+  for (const [p, lines] of Object.entries(samples)) {
+    for (const line of lines) {
+      const r = prepareText(p, `${line}\n`);
+      assert.ok(r.redactions >= 1, `${p}: ${line}`);
+      assert.ok(r.content.includes(REDACTED), `${p}: ${line}`);
+    }
+  }
+});
+
+test('ordinary code that only names a secret is left alone', () => {
+  const code = 'const token = req.headers.authorization;\nconst password = form.get("password");\nif (!apiKey) throw new Error("missing");\n';
+  const r = prepareText('src/auth.js', code);
+  assert.strictEqual(r.redactions, 0);
+  assert.strictEqual(r.content, code);
+});
+
+test('more never-readable files, PGP keys and Kubernetes secrets keep no text', () => {
+  for (const p of ['.envrc', '.env-local', 'env.production', 'infra/terraform.tfstate.backup', 'kubeconfig', 'prod.kubeconfig',
+    'home/.docker/config.json', 'credentials.tfrc.json', '.yarnrc.yml', '.s3cfg', '.aws/credentials']) {
+    assert.strictEqual(prepareText(p, 'anything').skippedReason, 'never_readable', p);
+  }
+  assert.strictEqual(prepareText('keys/pub.txt', '-----BEGIN PGP PRIVATE KEY BLOCK-----\nx\n').skippedReason, 'private_key');
+  assert.strictEqual(prepareText('k8s/secret.yaml', 'apiVersion: v1\nkind: Secret\ndata:\n  token: c2VjcmV0\n').skippedReason, 'never_readable');
+  assert.strictEqual(prepareText('k8s/deploy.yaml', 'apiVersion: apps/v1\nkind: Deployment\n').skippedReason, null);
+});
+
+test('hostile input stays fast (no regex backtracking)', () => {
+  const lines = (s, n) => (s + '\n').repeat(n);
+  for (const [p, text] of [
+    ['a.js', ' \n'.repeat(250000)],
+    ['a.py', ' \n'.repeat(250000)],
+    ['b.js', lines("require('".repeat(100), 500)],
+    ['c.txt', lines('postgres://' + 'a:'.repeat(2400), 90)],
+    ['d.yml', lines('password'.repeat(600), 100)],
+  ]) {
+    const t0 = Date.now();
+    prepareText(p, text);
+    require('./extract').extractSpecs(p, text);
+    assert.ok(Date.now() - t0 < 2000, `${p} took ${Date.now() - t0} ms`);
+  }
+});

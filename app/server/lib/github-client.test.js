@@ -69,3 +69,34 @@ test('query values are encoded, so a branch can’t add parameters', async () =>
   await github.fetchCommits('acme', 'a', { branch: 'main&per_page=1' });
   assert.match(seen[0].url, /sha=main%26per_page%3D1&per_page=50$/);
 });
+
+test('the tarball redirect is followed only to codeload, without our token', async () => {
+  const seen = [];
+  const answer = (status, headers = {}) => ({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+    body: { cancel: async () => {} },
+    text: async () => '',
+  });
+  let location = 'https://codeload.github.com/acme/web/legacy.tar.gz/abc?token=t';
+  global.fetch = async (url, opts) => {
+    seen.push({ url, headers: opts.headers || {}, redirect: opts.redirect });
+    if (String(url).startsWith('https://api.github.com/')) return answer(302, { location });
+    return answer(200);
+  };
+  const client = github.createClient({ token: 'install-token' });
+  const res = await client.fetchTarball('acme', 'web', 'abc');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(seen[0].redirect, 'manual');
+  assert.strictEqual(seen[0].headers.Authorization, 'Bearer install-token');
+  assert.strictEqual(seen[1].url, location);
+  assert.strictEqual(seen[1].headers.Authorization, undefined);
+  assert.strictEqual(seen[1].redirect, 'error');
+
+  for (const bad of ['https://evil.example/x.tgz', 'http://codeload.github.com/x', 'not a url']) {
+    seen.length = 0;
+    location = bad;
+    await assert.rejects(() => client.fetchTarball('acme', 'web', 'abc'), /unexpected/);
+    assert.strictEqual(seen.length, 1, 'nothing is fetched from an unexpected host');
+  }
+});

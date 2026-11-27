@@ -17,6 +17,8 @@ const byUser = (req) => req.user?.id || req.ip;
 const readLimit = createRateLimit({ windowMs: 60000, max: 60, keyFn: byUser, message: 'Too many requests. Try again in a minute.' });
 // Per project: a full build downloads the whole repo.
 const rebuildLimit = createRateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyFn: (req) => `project:${req.params.id}`, message: 'The code index can be rebuilt 3 times an hour. Try again later.' });
+// Per owner, across all their projects, so many projects can't add up to a flood.
+const ownerRebuildLimit = createRateLimit({ windowMs: 60 * 60 * 1000, max: 10, keyFn: (req) => `owner:${byUser(req)}`, message: 'You have rebuilt code indexes 10 times this hour. Try again later.' });
 
 function publicStatus(row) {
   if (!row) return { status: 'none' };
@@ -66,10 +68,10 @@ function createCodeIndexRoutes({ deps = {} } = {}) {
     const project = await loadProject(req);
     checkProjectOwner(project, req);
     // Counted only once the owner check passed, so members can't use up the owner's rebuilds.
-    rebuildLimit(req, res, () => {
+    ownerRebuildLimit(req, res, () => rebuildLimit(req, res, () => {
       index().rebuild(project).catch((err) => console.warn('code index rebuild failed:', err.message));
       res.status(202).json({ started: true });
-    });
+    }));
   }));
 
   return router;

@@ -3813,25 +3813,23 @@ const codeIndex = {
   },
 
   /**
-   * Take the lease, creating the row if there is none. Returns the row, or
-   * null when another worker holds a lease that hasn't run out.
-   * `full` marks the index as building (a full build); otherwise the status stays.
+   * Take the lease, creating the row if there is none. Returns the row as it
+   * stands under the lease, or null when another worker holds a lease that
+   * hasn't run out. The caller reads GitHub only after this, so any push
+   * that landed before the claim is seen.
    */
-  async claim(projectId, { repo, branch, token, full }) {
+  async claim(projectId, { repo, token }) {
     const { rows } = await getDb().query(
-      `INSERT INTO code_index_repos (project_id, repo, branch, status, lease_until, lease_token)
-       VALUES ($1, $2, $3, 'building', now() + ${CODE_INDEX_LEASE}, $4)
+      `INSERT INTO code_index_repos (project_id, repo, branch, status, lease_until, lease_token, claimed_at)
+       VALUES ($1, $2, '', 'building', now() + ${CODE_INDEX_LEASE}, $3, now())
        ON CONFLICT (project_id) DO UPDATE SET
          lease_until = EXCLUDED.lease_until,
          lease_token = EXCLUDED.lease_token,
-         repo        = CASE WHEN $5::boolean THEN EXCLUDED.repo ELSE code_index_repos.repo END,
-         branch      = CASE WHEN $5::boolean THEN EXCLUDED.branch ELSE code_index_repos.branch END,
-         status      = CASE WHEN $5::boolean THEN 'building' ELSE code_index_repos.status END,
-         error       = CASE WHEN $5::boolean THEN NULL ELSE code_index_repos.error END,
+         claimed_at  = now(),
          updated_at  = now()
        WHERE code_index_repos.lease_until IS NULL OR code_index_repos.lease_until < now()
        RETURNING *`,
-      [projectId, String(repo).toLowerCase(), branch, token, !!full]);
+      [projectId, String(repo).toLowerCase(), token]);
     return rows[0] || null;
   },
 
@@ -3839,29 +3837,41 @@ const codeIndex = {
     await codeIndexHoldLease(getDb(), projectId, token);
   },
 
-  /** A delta update turned into a full build. */
-  async setBuilding(projectId, token) {
+  /** A full build starts: record what it builds. */
+  async setBuilding(projectId, token, { repo, branch }) {
     await withTransaction(async (client) => {
       await codeIndexHoldLease(client, projectId, token);
       await client.query(
-        "UPDATE code_index_repos SET status = 'building', error = NULL WHERE project_id = $1", [projectId]);
+        `UPDATE code_index_repos SET status = 'building', error = NULL, repo = $2, branch = $3
+          WHERE project_id = $1`,
+        [projectId, String(repo).toLowerCase(), branch]);
     });
   },
 
   /**
    * Give the lease back and record how the work ended. The counts are
-   * recomputed from the stored files. Returns false when the lease was gone.
+   * recomputed from the stored files. Returns { ok, dirty }: ok is false
+   * when the lease was gone; dirty means a push arrived while the lease was
+   * held, so the row is left 'behind' instead of 'ready' and should run again.
    */
-  async release(projectId, token, { status, indexedSha = null, error = null, full = false, update = false }) {
+  async release(projectId, token, { status, indexedSha = null, error = null, full = false, update = false, attempt = false }) {
     const { rows } = await getDb().query(
       `UPDATE code_index_repos r SET
           lease_until    = NULL,
           lease_token    = NULL,
-          status         = $3,
+          status         = CASE WHEN $3 = 'ready' AND r.dirty_at IS NOT NULL AND r.dirty_at >= r.claimed_at
+                                THEN 'behind' ELSE $3 END,
           indexed_sha    = COALESCE($4, r.indexed_sha),
           error          = $5,
           last_full_at   = CASE WHEN $6::boolean THEN now() ELSE r.last_full_at END,
           last_update_at = CASE WHEN $7::boolean THEN now() ELSE r.last_update_at END,
+          last_checked_at = now(),
+          full_builds    = CASE WHEN NOT $8::boolean THEN r.full_builds
+                                WHEN r.full_window_start > now() - interval '1 day' THEN r.full_builds + 1
+                                ELSE 1 END,
+          full_window_start = CASE WHEN NOT $8::boolean THEN r.full_window_start
+                                WHEN r.full_window_start > now() - interval '1 day' THEN r.full_window_start
+                                ELSE now() END,
           file_count     = s.n,
           text_bytes     = s.b,
           skipped_count  = s.k,
@@ -3871,16 +3881,29 @@ const codeIndex = {
                      (count(*) FILTER (WHERE skipped_reason IS NOT NULL))::int AS k
                 FROM code_index_files WHERE project_id = $1) s
         WHERE r.project_id = $1 AND r.lease_token = $2
-        RETURNING r.project_id`,
-      [projectId, token, status, indexedSha, error == null ? null : String(error).slice(0, 500), !!full, !!update]);
-    return rows.length > 0;
+        RETURNING (r.dirty_at IS NOT NULL AND r.dirty_at >= r.claimed_at) AS dirty`,
+      [projectId, token, status, indexedSha, error == null ? null : String(error).slice(0, 500), !!full, !!update, !!attempt]);
+    return { ok: rows.length > 0, dirty: !!(rows[0] && rows[0].dirty) };
   },
 
-  /** A push arrived that isn't applied yet (only when no worker holds the row). */
+  /** Stored file count and text bytes, as they stand now. */
+  async counts(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT count(*)::int AS files, COALESCE(sum(octet_length(content)), 0)::bigint AS text_bytes
+         FROM code_index_files WHERE project_id = $1`,
+      [projectId]);
+    return { files: rows[0].files, textBytes: Number(rows[0].text_bytes) };
+  },
+
+  /**
+   * A push arrived that isn't applied yet. dirty_at tells the worker holding
+   * the lease (if any) to run again when it finishes.
+   */
   async markBehind(projectId) {
     await getDb().query(
-      `UPDATE code_index_repos SET status = 'behind', updated_at = now()
-        WHERE project_id = $1 AND status = 'ready'`,
+      `UPDATE code_index_repos SET dirty_at = now(),
+          status = CASE WHEN status = 'ready' THEN 'behind' ELSE status END, updated_at = now()
+        WHERE project_id = $1`,
       [projectId]);
   },
 
@@ -4036,46 +4059,52 @@ const codeIndex = {
    * projects' installation ids are cleared.
    */
   async deleteForInstallation(installationId) {
-    const { rowCount } = await getDb().query(
+    const { rows } = await getDb().query(
       `DELETE FROM code_index_repos c
         WHERE c.project_id IN (SELECT id FROM deployments WHERE github_installation_id = $1)
-           OR c.repo IN (SELECT LOWER(repo_full_name) FROM github_repo_access WHERE installation_id = $1)`,
+           OR c.repo IN (SELECT LOWER(repo_full_name) FROM github_repo_access WHERE installation_id = $1)
+        RETURNING c.repo`,
       [installationId]);
-    return rowCount;
+    return [...new Set(rows.map((r) => r.repo))];
   },
 
   /** Indexes their owners could read only through a GitHub user's revoked authorization. */
   async deleteForGithubUser(githubUserId) {
-    const { rowCount } = await getDb().query(
+    const { rows } = await getDb().query(
       `DELETE FROM code_index_repos c USING deployments d
         WHERE c.project_id = d.id
           AND EXISTS (SELECT 1 FROM github_repo_access g
                        WHERE g.github_user_id = $1 AND g.user_id = d.user_id
-                         AND LOWER(g.repo_full_name) = c.repo)`,
+                         AND LOWER(g.repo_full_name) = c.repo)
+        RETURNING c.repo`,
       [githubUserId]);
-    return rowCount;
+    return [...new Set(rows.map((r) => r.repo))];
   },
 
   /**
-   * Indexes of repos an installation no longer covers. A repo is covered by
-   * at most one installation of the app, so every index of that repo goes;
-   * a public repo's index is rebuilt the next time it is needed.
+   * Indexes of repos an installation no longer covers (or that were made
+   * private, renamed, moved or deleted). A repo is covered by at most one
+   * installation of the app, so every index of that repo goes; a public
+   * repo's index is rebuilt the next time it is needed. Returns the repos.
    */
   async deleteForRepos(fullNames) {
-    if (!fullNames.length) return 0;
-    const { rowCount } = await getDb().query(
-      'DELETE FROM code_index_repos WHERE repo = ANY($1::text[])',
+    if (!fullNames.length) return [];
+    const { rows } = await getDb().query(
+      'DELETE FROM code_index_repos WHERE repo = ANY($1::text[]) RETURNING repo',
       [fullNames.map((n) => String(n).toLowerCase())]);
-    return rowCount;
+    return [...new Set(rows.map((r) => r.repo))];
   },
 
-  /** Rows the nightly check looks at, with what it needs from the project. */
-  async listForHeal({ limit = 500 } = {}) {
+  /**
+   * Rows the nightly check looks at: anything not ready first, then the
+   * ones checked longest ago, so every index comes round in turn.
+   */
+  async listForHeal({ limit = 2000 } = {}) {
     const { rows } = await getDb().query(
-      `SELECT c.project_id, c.repo, c.branch, c.indexed_sha, c.status, c.lease_until, c.updated_at
+      `SELECT c.project_id, c.repo, c.branch, c.indexed_sha, c.status, c.lease_until, c.last_checked_at
          FROM code_index_repos c
         WHERE c.status <> 'too_large'
-        ORDER BY c.updated_at ASC
+        ORDER BY (c.status = 'ready') ASC, c.last_checked_at ASC NULLS FIRST
         LIMIT $1`,
       [limit]);
     return rows;

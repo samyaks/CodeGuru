@@ -135,7 +135,4 @@ module.exports = {
   severity: 'critical',
   cweId: 'CWE-798',
   run,
-  // Shared with the code index (services/code-index), which redacts these
-  // before storing any file.
-  PATTERNS,
 };

@@ -51,7 +51,7 @@ test('processPush rejects when a commit failed, so the push can be retried', asy
   assert.ok(recorded.some((r) => r.commit_sha === 'bad2'), 'the retry records the commit that failed');
 });
 
-test('with Ask on, a default-branch push also updates the code index, without changing retries', async () => {
+test('with Ask on, every push is handed to the code index, without changing retries', async () => {
   const pushes = [];
   let reject = false;
   stub('../code-index', {
@@ -71,7 +71,7 @@ test('with Ask on, a default-branch push also updates the code index, without ch
     reject = true;
     await processPush({ project, payload: { ref: 'refs/heads/main', after: 'a3', commits: [{ id: 'ok3' }] } });
     await new Promise((r) => setImmediate(r));
-    assert.deepStrictEqual(pushes, [['p1', 'a1'], ['p1', 'a3']]);
+    assert.deepStrictEqual(pushes, [['p1', 'a1'], ['p1', 'a2'], ['p1', 'a3']]);
   } finally {
     if (before === undefined) delete process.env.TAKEOFF_ASK_ENABLED; else process.env.TAKEOFF_ASK_ENABLED = before;
   }

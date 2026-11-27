@@ -152,7 +152,7 @@ async function* readTarGz(source, opts = {}) {
           const type = String.fromCharCode(h[156] || 0x30);
           let name = cString(h, 0, 100);
           const magic = cString(h, 257, 6);
-          if (magic.startsWith('ustar')) {
+          if (magic === 'ustar') { // POSIX only: old GNU headers use those bytes for other fields
             const prefix = cString(h, 345, 155);
             if (prefix) name = `${prefix}/${name}`;
           }
