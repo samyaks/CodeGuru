@@ -178,7 +178,8 @@ async function listFiles(ctx, input = {}) {
     if (refusedPath(r.path)) continue;
     total += 1;
     if (files.length < LIMITS.listPaths) {
-      files.push({ path: r.path, readable: !r.skipped_reason, size: Number(r.size_bytes) || 0 });
+      // Each listed file can back a claim that it exists, so it gets a source id.
+      files.push({ source_id: codeSource(ctx, ix, r.path), path: r.path, readable: !r.skipped_reason, size: Number(r.size_bytes) || 0 });
     }
   }
   return {
@@ -187,7 +188,7 @@ async function listFiles(ctx, input = {}) {
     files,
     total_matching: rows.length >= LIMITS.listRows ? `${total}+` : total,
     more: total > files.length,
-    sources: [],
+    sources: files.map((f) => f.source_id),
   };
 }
 

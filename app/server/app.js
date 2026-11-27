@@ -43,6 +43,7 @@ const { createAgreementRoutes } = require('./routes/agreements');
 const { createDriftRoutes } = require('./routes/drift');
 const { createOverviewRoutes } = require('./routes/overview');
 const { createCodeIndexRoutes } = require('./routes/code-index');
+const { createAskRoutes } = require('./routes/ask');
 const { getCodeIndex } = require('./services/code-index');
 const { isAskEnabled } = require('./services/ask/config');
 const driftService = require('./services/drift');
@@ -194,6 +195,7 @@ if (supabase) {
   app.use('/api/projects/:id/drift', requireAuth(supabase), withMembers, createDriftRoutes());
   app.use('/api/projects/:id/overview', requireAuth(supabase), withMembers, createOverviewRoutes());
   app.use('/api/projects/:id/code-index', requireAuth(supabase), withMembers, createCodeIndexRoutes());
+  app.use('/api/projects/:id/ask', requireAuth(supabase), withMembers, createAskRoutes());
   app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
   app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
@@ -222,7 +224,7 @@ if (supabase) {
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });
-  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/projects/:id/overview', '/api/projects/:id/code-index', '/api/invites'], (req, res) => {
+  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/projects/:id/overview', '/api/projects/:id/code-index', '/api/projects/:id/ask', '/api/invites'], (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured for project members, agreements and invites.' });
   });
   app.use('/api/projects', projectRoutes);
@@ -339,6 +341,12 @@ async function start() {
     );
     setTimeout(healCodeIndex, 10 * 60 * 1000).unref();
     setInterval(healCodeIndex, 24 * 60 * 60 * 1000).unref();
+    // Ask threads untouched for 90 days are deleted, nightly.
+    const pruneAsk = () => require('./lib/db').askThreads.deleteOlderThan(90).catch((err) =>
+      console.error('[ask] retention failed:', err.message)
+    );
+    setTimeout(pruneAsk, 15 * 60 * 1000).unref();
+    setInterval(pruneAsk, 24 * 60 * 60 * 1000).unref();
   }
 
   validateEnv();
