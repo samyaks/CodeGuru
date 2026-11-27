@@ -3774,6 +3774,346 @@ const readClaims = {
   },
 };
 
+// ── Code index (Milestone 8, PR 2) ─────────────────────────────────
+//
+// Takeoff's stored copy of a project's default branch. Writers hold a
+// lease on the repo row (lease_token); every write checks the lease in the
+// same transaction, so a worker whose lease ran out, or whose index was
+// deleted, can't write over another one.
+
+const CODE_INDEX_LEASE = "interval '15 minutes'";
+const CODE_INDEX_FILE_COLUMNS = `path, blob_sha, size_bytes, language, skipped_reason, redactions,
+  octet_length(content) AS text_bytes, updated_at`;
+
+function codeIndexLeaseLost() {
+  const err = new Error('code index lease lost');
+  err.code = 'CODE_INDEX_LEASE_LOST';
+  return err;
+}
+
+async function codeIndexHoldLease(client, projectId, token) {
+  const { rows } = await client.query(
+    `UPDATE code_index_repos SET lease_until = now() + ${CODE_INDEX_LEASE}, updated_at = now()
+      WHERE project_id = $1 AND lease_token = $2 AND lease_until > now()
+      RETURNING project_id`,
+    [projectId, token]);
+  if (!rows.length) throw codeIndexLeaseLost();
+}
+
+const codeIndex = {
+  async getRepo(projectId) {
+    const { rows } = await getDb().query('SELECT * FROM code_index_repos WHERE project_id = $1', [projectId]);
+    return rows[0] || null;
+  },
+
+  /** The database's clock, so sweeps compare like with like. */
+  async now() {
+    const { rows } = await getDb().query('SELECT now() AS now');
+    return rows[0].now;
+  },
+
+  /**
+   * Take the lease, creating the row if there is none. Returns the row as it
+   * stands under the lease, or null when another worker holds a lease that
+   * hasn't run out. The caller reads GitHub only after this, so any push
+   * that landed before the claim is seen.
+   */
+  async claim(projectId, { repo, token }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO code_index_repos (project_id, repo, branch, status, lease_until, lease_token, claimed_at)
+       VALUES ($1, $2, '', 'building', now() + ${CODE_INDEX_LEASE}, $3, now())
+       ON CONFLICT (project_id) DO UPDATE SET
+         lease_until = EXCLUDED.lease_until,
+         lease_token = EXCLUDED.lease_token,
+         claimed_at  = now(),
+         updated_at  = now()
+       WHERE code_index_repos.lease_until IS NULL OR code_index_repos.lease_until < now()
+       RETURNING *`,
+      [projectId, String(repo).toLowerCase(), token]);
+    return rows[0] || null;
+  },
+
+  async renewLease(projectId, token) {
+    await codeIndexHoldLease(getDb(), projectId, token);
+  },
+
+  /** A full build starts: record what it builds. */
+  async setBuilding(projectId, token, { repo, branch }) {
+    await withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      await client.query(
+        `UPDATE code_index_repos SET status = 'building', error = NULL, repo = $2, branch = $3,
+                indexed_sha = NULL
+          WHERE project_id = $1`,
+        [projectId, String(repo).toLowerCase(), branch]);
+    });
+  },
+
+  /**
+   * Give the lease back and record how the work ended. The counts are
+   * recomputed from the stored files. Returns { ok, dirty }: ok is false
+   * when the lease was gone; dirty means a push arrived while the lease was
+   * held, so the row is left 'behind' instead of 'ready' and should run again.
+   */
+  async release(projectId, token, { status, indexedSha = null, error = null, full = false, update = false, attempt = false }) {
+    const { rows } = await getDb().query(
+      `UPDATE code_index_repos r SET
+          lease_until    = NULL,
+          lease_token    = NULL,
+          status         = CASE WHEN $3 = 'ready' AND r.dirty_at IS NOT NULL AND r.dirty_at >= r.claimed_at
+                                THEN 'behind' ELSE $3 END,
+          indexed_sha    = COALESCE($4, r.indexed_sha),
+          error          = $5,
+          last_full_at   = CASE WHEN $6::boolean THEN now() ELSE r.last_full_at END,
+          last_update_at = CASE WHEN $7::boolean THEN now() ELSE r.last_update_at END,
+          last_checked_at = now(),
+          full_builds    = CASE WHEN NOT $8::boolean THEN r.full_builds
+                                WHEN r.full_window_start > now() - interval '1 day' THEN r.full_builds + 1
+                                ELSE 1 END,
+          full_window_start = CASE WHEN NOT $8::boolean THEN r.full_window_start
+                                WHEN r.full_window_start > now() - interval '1 day' THEN r.full_window_start
+                                ELSE now() END,
+          file_count     = s.n,
+          text_bytes     = s.b,
+          skipped_count  = s.k,
+          updated_at     = now()
+        FROM (SELECT count(*)::int AS n,
+                     COALESCE(sum(octet_length(content)), 0)::bigint AS b,
+                     (count(*) FILTER (WHERE skipped_reason IS NOT NULL))::int AS k
+                FROM code_index_files WHERE project_id = $1) s
+        WHERE r.project_id = $1 AND r.lease_token = $2
+        RETURNING (r.dirty_at IS NOT NULL AND r.dirty_at >= r.claimed_at) AS dirty`,
+      [projectId, token, status, indexedSha, error == null ? null : String(error).slice(0, 500), !!full, !!update, !!attempt]);
+    return { ok: rows.length > 0, dirty: !!(rows[0] && rows[0].dirty) };
+  },
+
+  /** Stored file count and text bytes, as they stand now. */
+  async counts(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT count(*)::int AS files, COALESCE(sum(octet_length(content)), 0)::bigint AS text_bytes
+         FROM code_index_files WHERE project_id = $1`,
+      [projectId]);
+    return { files: rows[0].files, textBytes: Number(rows[0].text_bytes) };
+  },
+
+  /**
+   * A push arrived that isn't applied yet. dirty_at tells the worker holding
+   * the lease (if any) to run again when it finishes.
+   */
+  async markBehind(projectId) {
+    const { rows } = await getDb().query(
+      `UPDATE code_index_repos SET dirty_at = now(),
+          status = CASE WHEN status = 'ready' THEN 'behind' ELSE status END, updated_at = now()
+        WHERE project_id = $1
+        RETURNING (lease_until IS NOT NULL AND lease_until > now()) AS leased`,
+      [projectId]);
+    return !!(rows[0] && rows[0].leased);
+  },
+
+  /**
+   * Insert or replace files, with their symbols and import specs, in one
+   * transaction that checks the lease. Each file:
+   *   { path, blobSha, sizeBytes, language, content, skippedReason, redactions,
+   *     symbols: [{ symbol, kind, line }], specs: { lang, specs } | null }
+   */
+  async upsertFiles(projectId, token, files) {
+    if (!files.length) return;
+    await withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      const rows = files.map((f) => ({
+        path: f.path,
+        blob_sha: f.blobSha || null,
+        size_bytes: Math.max(0, Math.min(2147483647, Math.floor(f.sizeBytes || 0))),
+        language: f.language || null,
+        content: f.content == null ? null : f.content,
+        skipped_reason: f.skippedReason || null,
+        redactions: f.redactions || 0,
+      }));
+      const paths = files.map((f) => f.path);
+      // Symbols and specs go with the old text.
+      await client.query('DELETE FROM code_index_symbols WHERE project_id = $1 AND path = ANY($2::text[])', [projectId, paths]);
+      await client.query('DELETE FROM code_index_import_specs WHERE project_id = $1 AND path = ANY($2::text[])', [projectId, paths]);
+      await client.query(
+        `INSERT INTO code_index_files (project_id, path, blob_sha, size_bytes, language, content, skipped_reason, redactions, updated_at)
+         SELECT $1, x.path, x.blob_sha, x.size_bytes, x.language, x.content, x.skipped_reason, x.redactions, now()
+           FROM jsonb_to_recordset($2::jsonb) AS x(path text, blob_sha text, size_bytes int, language text,
+                                                    content text, skipped_reason text, redactions int)
+         ON CONFLICT (project_id, path) DO UPDATE SET
+           blob_sha = EXCLUDED.blob_sha, size_bytes = EXCLUDED.size_bytes, language = EXCLUDED.language,
+           content = EXCLUDED.content, skipped_reason = EXCLUDED.skipped_reason,
+           redactions = EXCLUDED.redactions, updated_at = now()`,
+        [projectId, JSON.stringify(rows)]);
+      const symbols = [];
+      const specs = [];
+      for (const f of files) {
+        for (const s of f.symbols || []) symbols.push({ path: f.path, symbol: s.symbol, kind: s.kind, line: s.line });
+        if (f.specs) specs.push({ path: f.path, specs: f.specs });
+      }
+      if (symbols.length) {
+        await client.query(
+          `INSERT INTO code_index_symbols (project_id, path, symbol, kind, line)
+           SELECT $1, x.path, x.symbol, x.kind, x.line
+             FROM jsonb_to_recordset($2::jsonb) AS x(path text, symbol text, kind text, line int)`,
+          [projectId, JSON.stringify(symbols)]);
+      }
+      if (specs.length) {
+        await client.query(
+          `INSERT INTO code_index_import_specs (project_id, path, specs)
+           SELECT $1, x.path, x.specs
+             FROM jsonb_to_recordset($2::jsonb) AS x(path text, specs jsonb)`,
+          [projectId, JSON.stringify(specs)]);
+      }
+    });
+  },
+
+  /** Remove paths (deleted files, the old side of renames). */
+  async deletePaths(projectId, token, paths) {
+    if (!paths.length) return 0;
+    return withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      const { rowCount } = await client.query(
+        'DELETE FROM code_index_files WHERE project_id = $1 AND path = ANY($2::text[])', [projectId, paths]);
+      return rowCount;
+    });
+  },
+
+  /** After a full build: remove every file the build didn't write. */
+  async sweepOlderThan(projectId, token, before) {
+    return withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      const { rowCount } = await client.query(
+        'DELETE FROM code_index_files WHERE project_id = $1 AND updated_at < $2', [projectId, before]);
+      return rowCount;
+    });
+  },
+
+  /** Remove every file but keep the repo row (too large, or a repo change). */
+  async clearFiles(projectId, token) {
+    return withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      await client.query('DELETE FROM code_index_files WHERE project_id = $1', [projectId]);
+    });
+  },
+
+  async listPaths(projectId) {
+    const { rows } = await getDb().query('SELECT path FROM code_index_files WHERE project_id = $1', [projectId]);
+    return new Set(rows.map((r) => r.path));
+  },
+
+  async blobShas(projectId, paths) {
+    if (!paths.length) return new Map();
+    const { rows } = await getDb().query(
+      'SELECT path, blob_sha FROM code_index_files WHERE project_id = $1 AND path = ANY($2::text[])',
+      [projectId, paths]);
+    return new Map(rows.map((r) => [r.path, r.blob_sha]));
+  },
+
+  async listSpecs(projectId) {
+    const { rows } = await getDb().query(
+      'SELECT path, specs FROM code_index_import_specs WHERE project_id = $1', [projectId]);
+    return new Map(rows.map((r) => [r.path, typeof r.specs === 'string' ? JSON.parse(r.specs) : r.specs]));
+  },
+
+  /** Replace every resolved import edge. Edges to paths not in the index are dropped. */
+  async replaceEdges(projectId, token, edges) {
+    await withTransaction(async (client) => {
+      await codeIndexHoldLease(client, projectId, token);
+      await client.query('DELETE FROM code_index_imports WHERE project_id = $1', [projectId]);
+      for (let i = 0; i < edges.length; i += 5000) {
+        const chunk = edges.slice(i, i + 5000).map(([from, to]) => ({ from_path: from, to_path: to }));
+        await client.query(
+          `INSERT INTO code_index_imports (project_id, from_path, to_path)
+           SELECT $1, x.from_path, x.to_path
+             FROM jsonb_to_recordset($2::jsonb) AS x(from_path text, to_path text)
+            WHERE EXISTS (SELECT 1 FROM code_index_files f WHERE f.project_id = $1 AND f.path = x.from_path)
+              AND EXISTS (SELECT 1 FROM code_index_files f WHERE f.project_id = $1 AND f.path = x.to_path)
+           ON CONFLICT DO NOTHING`,
+          [projectId, JSON.stringify(chunk)]);
+      }
+    });
+  },
+
+  /** What a member may see about the index: no file text. */
+  async status(projectId) {
+    const { rows } = await getDb().query(
+      `SELECT repo, branch, indexed_sha, status, file_count, text_bytes, skipped_count,
+              last_full_at, last_update_at, error, updated_at,
+              (lease_until IS NOT NULL AND lease_until > now()) AS working
+         FROM code_index_repos WHERE project_id = $1`,
+      [projectId]);
+    return rows[0] || null;
+  },
+
+  async listFiles(projectId, { limit = 1000 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT ${CODE_INDEX_FILE_COLUMNS} FROM code_index_files WHERE project_id = $1 ORDER BY path LIMIT $2`,
+      [projectId, limit]);
+    return rows;
+  },
+
+  async deleteForProject(projectId) {
+    const { rowCount } = await getDb().query('DELETE FROM code_index_repos WHERE project_id = $1', [projectId]);
+    return rowCount;
+  },
+
+  /**
+   * Every index read through an installation that is gone: projects pointing
+   * at it, and repos granted through it. Run before the grants and the
+   * projects' installation ids are cleared.
+   */
+  async deleteForInstallation(installationId) {
+    const { rows } = await getDb().query(
+      `DELETE FROM code_index_repos c
+        WHERE c.project_id IN (SELECT id FROM deployments WHERE github_installation_id = $1)
+           OR c.repo IN (SELECT LOWER(repo_full_name) FROM github_repo_access WHERE installation_id = $1)
+        RETURNING c.repo`,
+      [installationId]);
+    return [...new Set(rows.map((r) => r.repo))];
+  },
+
+  /** Indexes their owners could read only through a GitHub user's revoked authorization. */
+  async deleteForGithubUser(githubUserId) {
+    const { rows } = await getDb().query(
+      `DELETE FROM code_index_repos c USING deployments d
+        WHERE c.project_id = d.id
+          AND EXISTS (SELECT 1 FROM github_repo_access g
+                       WHERE g.github_user_id = $1 AND g.user_id = d.user_id
+                         AND LOWER(g.repo_full_name) = c.repo)
+        RETURNING c.repo`,
+      [githubUserId]);
+    return [...new Set(rows.map((r) => r.repo))];
+  },
+
+  /**
+   * Indexes of repos an installation no longer covers (or that were made
+   * private, renamed, moved or deleted). A repo is covered by at most one
+   * installation of the app, so every index of that repo goes; a public
+   * repo's index is rebuilt the next time it is needed. Returns the repos.
+   */
+  async deleteForRepos(fullNames) {
+    if (!fullNames.length) return [];
+    const { rows } = await getDb().query(
+      'DELETE FROM code_index_repos WHERE repo = ANY($1::text[]) RETURNING repo',
+      [fullNames.map((n) => String(n).toLowerCase())]);
+    return [...new Set(rows.map((r) => r.repo))];
+  },
+
+  /**
+   * Rows the nightly check looks at: anything not ready first, then the
+   * ones checked longest ago, so every index comes round in turn.
+   */
+  async listForHeal({ limit = 2000 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT c.project_id, c.repo, c.branch, c.indexed_sha, c.status, c.lease_until, c.last_checked_at
+         FROM code_index_repos c
+        WHERE c.status <> 'too_large'
+        ORDER BY (c.status = 'ready') ASC, c.last_checked_at ASC NULLS FIRST
+        LIMIT $1`,
+      [limit]);
+    return rows;
+  },
+};
+
 module.exports = {
   getDb, closeDb, withTransaction, toJsonb,
   reviews, reviewFiles, fixPrompts, fixPromptEvents,
@@ -3787,6 +4127,7 @@ module.exports = {
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
   askThreads, askMessages,
+  codeIndex,
   // Pure query builders exported for unit tests only.
   buildBulkTierUpdateChunk, buildEventsInsertChunk,
 };

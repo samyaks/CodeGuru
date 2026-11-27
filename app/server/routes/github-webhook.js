@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks, prChecks } = require('../lib/db');
+const { deployments, commitReviews, webhookEvents, githubRepoAccess, processedPushes, userGithubLinks, prChecks, codeIndex } = require('../lib/db');
 const { runCommitReviewJobSafe } = require('../services/commit-review-runner');
 const { processPush: processPushV2 } = require('../services/v2/shipped-runner');
 const { runPrCheck, prCheckJobs } = require('../services/verdict/runner');
@@ -32,6 +32,8 @@ function defaultDeps() {
     processPushV2,
     runPrCheck,
     prCheckJobs,
+    // Takeoff's stored code goes when its read access does (Milestone 8).
+    codeIndex,
     // Closed PRs leave the drift review list (Milestone 5).
     setPrClosed: (q) => prChecks.setPrClosed(q),
     appId: process.env.GITHUB_APP_ID || null,
@@ -292,12 +294,30 @@ async function handlePush({ payload, deliveryId, source, installationId }, deps)
 // cached tokens. Everything is archived too.
 async function revokeAccess({ event, payload }, deps) {
   const forget = (id) => { try { if (deps.forgetInstallation) deps.forgetInstallation(id); } catch { /* best effort */ } };
+  // Stored code is deleted before the grants and installation ids it is found by.
+  // Each returns the repos it dropped; once the grants are gone, those repos
+  // are dropped again, in case a build that started in between wrote them back.
+  const dropIndexes = async (fn) => {
+    if (!deps.codeIndex) return [];
+    try {
+      const repos = await fn(deps.codeIndex);
+      return Array.isArray(repos) ? repos : [];
+    } catch (err) {
+      console.error('code index delete on revoke failed:', err.message);
+      return [];
+    }
+  };
+  const dropAgain = async (repos) => {
+    if (repos.length) await dropIndexes((ci) => ci.deleteForRepos(repos));
+  };
   if (event === 'github_app_authorization') {
     const githubUserId = Number(payload.sender?.id);
     if (payload.action !== 'revoked' || !githubUserId) return;
+    const dropped = await dropIndexes((ci) => ci.deleteForGithubUser(githubUserId));
     const grants = await deps.githubRepoAccess.deleteForGithubUser(githubUserId);
     // The link to that GitHub account goes too: committing actions ask again.
     if (deps.userGithubLinks) await deps.userGithubLinks.deleteForGithubUser(githubUserId);
+    await dropAgain(dropped);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'authorization_revoked', githubUserId, grants }));
     return;
   }
@@ -305,13 +325,16 @@ async function revokeAccess({ event, payload }, deps) {
   if (!installationId) return;
   if (event === 'installation' && payload.action === 'suspend') {
     forget(installationId);
+    await dropIndexes((ci) => ci.deleteForInstallation(installationId));
     console.log(JSON.stringify({ event: 'github_app_suspended', installationId }));
     return;
   }
   if (event === 'installation' && payload.action === 'deleted') {
     forget(installationId);
+    const dropped = await dropIndexes((ci) => ci.deleteForInstallation(installationId));
     const grants = await deps.githubRepoAccess.deleteForInstallation(installationId);
     const projects = await deps.deployments.clearInstallation(installationId);
+    await dropAgain(dropped);
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: payload.action, installationId, grants, projects }));
     return;
   }
@@ -320,10 +343,42 @@ async function revokeAccess({ event, payload }, deps) {
     const removed = Array.isArray(payload.repositories_removed) ? payload.repositories_removed : [];
     const ids = removed.map((r) => Number(r.id)).filter(Number.isFinite);
     const fullNames = removed.map((r) => r.full_name).filter(Boolean);
+    await dropIndexes((ci) => ci.deleteForRepos(fullNames));
     const grants = await deps.githubRepoAccess.deleteForRepos(installationId, ids);
     const projects = await deps.deployments.clearInstallationForRepos(installationId, fullNames);
+    await dropAgain(fullNames.map((n) => n.toLowerCase()));
     console.log(JSON.stringify({ event: 'github_app_access_revoked', reason: 'repositories_removed', installationId, grants, projects }));
   }
+}
+
+const REPO_GONE_ACTIONS = new Set(['privatized', 'deleted', 'transferred', 'renamed']);
+
+/**
+ * A repo the App can see was made private, deleted, moved or renamed.
+ * Stored code for it, under the old name and the new one, is deleted; it
+ * is rebuilt, if Takeoff can still read it, the next time it is needed.
+ * Only deliveries the App signed are trusted.
+ */
+async function handleRepositoryEvent({ payload }, deps) {
+  if (!deps.codeIndex || !REPO_GONE_ACTIONS.has(payload.action)) return [];
+  const repo = payload.repository || {};
+  const names = new Set();
+  if (repo.full_name) names.add(String(repo.full_name).toLowerCase());
+  const owner = repo.owner && repo.owner.login;
+  const repoName = repo.name;
+  const oldName = payload.changes?.repository?.name?.from;
+  const oldOwner = payload.changes?.owner?.from?.user?.login || payload.changes?.owner?.from?.organization?.login;
+  if (owner && oldName) names.add(`${owner}/${oldName}`.toLowerCase());
+  if (oldOwner && repoName) names.add(`${oldOwner}/${repoName}`.toLowerCase());
+  const list = [...names];
+  if (!list.length) return [];
+  try {
+    const dropped = await deps.codeIndex.deleteForRepos(list);
+    console.log(JSON.stringify({ event: 'code_index_repo_changed', action: payload.action, repos: list, dropped }));
+  } catch (err) {
+    console.error('code index delete on repository event failed:', err.message);
+  }
+  return list;
 }
 
 async function handleInstallationEvent({ event, payload, deliveryId, source, signedByApp }, deps) {
@@ -394,6 +449,14 @@ function createWebhookHandler(deps = defaultDeps()) {
         await handleInstallationEvent({ event, payload, deliveryId, source, signedByApp: sender === 'app' || sender === 'unsigned' }, deps);
       } catch (err) {
         console.error(`github webhook ${event} handling:`, err.message);
+      }
+      return;
+    }
+
+    if (event === 'repository') {
+      res.status(200).json({ ok: true, logged: event });
+      if ((sender === 'app' || sender === 'unsigned') && source === 'app') {
+        await handleRepositoryEvent({ payload }, deps);
       }
       return;
     }

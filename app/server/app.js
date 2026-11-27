@@ -42,6 +42,9 @@ const { createTeamRoutes } = require('./routes/team');
 const { createAgreementRoutes } = require('./routes/agreements');
 const { createDriftRoutes } = require('./routes/drift');
 const { createOverviewRoutes } = require('./routes/overview');
+const { createCodeIndexRoutes } = require('./routes/code-index');
+const { getCodeIndex } = require('./services/code-index');
+const { isAskEnabled } = require('./services/ask/config');
 const driftService = require('./services/drift');
 const agreementService = require('./services/agreements');
 const agreementNotify = require('./services/agreements/notify');
@@ -190,6 +193,7 @@ if (supabase) {
   app.use('/api/projects/:id/agreements', requireAuth(supabase), withMembers, createAgreementRoutes());
   app.use('/api/projects/:id/drift', requireAuth(supabase), withMembers, createDriftRoutes());
   app.use('/api/projects/:id/overview', requireAuth(supabase), withMembers, createOverviewRoutes());
+  app.use('/api/projects/:id/code-index', requireAuth(supabase), withMembers, createCodeIndexRoutes());
   app.use('/api/invites', optionalAuth(supabase), createInviteRoutes({ sendSignInLink }));
   app.use('/api/projects/:projectId/story', requireAuth(supabase), withMembers, buildStoryRoutes);
   app.use('/api/projects/:projectId/analytics', optionalAuth(supabase), withMembers, projectAnalyticsRoutes);
@@ -218,7 +222,7 @@ if (supabase) {
   app.use('/api/deploy', (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured to use deploy. Set SUPABASE_URL and SUPABASE_ANON_KEY.' });
   });
-  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/projects/:id/overview', '/api/invites'], (req, res) => {
+  app.use(['/api/projects/:id/team', '/api/projects/:id/agreements', '/api/projects/:id/drift', '/api/projects/:id/overview', '/api/projects/:id/code-index', '/api/invites'], (req, res) => {
     res.status(503).json({ error: 'Authentication must be configured for project members, agreements and invites.' });
   });
   app.use('/api/projects', projectRoutes);
@@ -326,6 +330,16 @@ async function start() {
   );
   sweepPrChecks();
   setInterval(sweepPrChecks, 15 * 60 * 1000).unref();
+
+  // Ask's stored code index (Milestone 8): a nightly catch-up for missed or
+  // failed pushes, first run 10 minutes after boot. Off unless Ask is on.
+  if (isAskEnabled(process.env)) {
+    const healCodeIndex = () => getCodeIndex().heal().catch((err) =>
+      console.error('[code-index] heal failed:', err.message)
+    );
+    setTimeout(healCodeIndex, 10 * 60 * 1000).unref();
+    setInterval(healCodeIndex, 24 * 60 * 60 * 1000).unref();
+  }
 
   validateEnv();
 

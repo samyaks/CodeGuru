@@ -154,6 +154,22 @@ async function processPush({ project, payload }) {
     );
   }
 
+  // Keep Ask's stored code index current (Milestone 8, behind ASK_ENABLED).
+  // Every branch goes in: the index knows which branch it holds (the
+  // repo's default branch, which project.branch may not match) and drops
+  // the rest. Fire and forget: the index records its own failures and the
+  // nightly check retries them, so it never changes this push's retries.
+  if (branch && require('../ask/config').isAskEnabled()) {
+    try {
+      const { getCodeIndex } = require('../code-index');
+      Promise.resolve(getCodeIndex().onPush(project, payload)).catch((err) => {
+        console.warn(`[v2/shipped-runner] code index update failed for ${project.id}:`, err.message);
+      });
+    } catch (err) {
+      console.warn(`[v2/shipped-runner] code index unavailable for ${project.id}:`, err.message);
+    }
+  }
+
   // Reject so the webhook releases its claim on this push and a redelivery
   // retries; commits already recorded are skipped on the retry.
   if (failed.length) {
