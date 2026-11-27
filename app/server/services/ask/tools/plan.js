@@ -166,6 +166,8 @@ async function rulesForPath(ctx, input = {}) {
   return {
     available: true,
     sha: plan.sha,
+    stale: !!plan.stale,
+    note: plan.redacted ? 'Some text in the plan looked like a secret and is hidden here.' : undefined,
     path,
     covered: areas.length > 0,
     message: areas.length ? undefined : 'No area in the plan covers this path; only product-wide agreements apply.',

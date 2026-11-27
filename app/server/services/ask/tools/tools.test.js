@@ -59,7 +59,7 @@ function fakeIndex({ status = 'ready', sha = 'c'.repeat(40), raw = RAW, rows = [
     calls,
     async getRepo() { calls.push('getRepo'); return status ? { status, indexed_sha: status === 'building' ? null : sha } : null; },
     async readFile(_pid, p) { calls.push(['readFile', p]); return files.get(p) || null; },
-    async search(_pid, { terms, likePrefix, likeSuffix }) {
+    async search(_pid, { terms, likePrefix, likeSuffix, limit = 500 }) {
       calls.push(['search', terms, likePrefix, likeSuffix]);
       const tokens = (t) => t.toLowerCase().split(/[^a-z0-9_]+/);
       const hit = (f, all) => {
@@ -69,8 +69,8 @@ function fakeIndex({ status = 'ready', sha = 'c'.repeat(40), raw = RAW, rows = [
       };
       const pool = [...files.values()].filter((f) => f.content != null && likeOk(likePrefix, f.path, 'start') && likeOk(likeSuffix, f.path, 'end'));
       const all = pool.filter((f) => hit(f, true));
-      if (all.length || terms.length === 1) return all.map((f) => ({ path: f.path, matchedAll: true }));
-      return pool.filter((f) => hit(f, false)).map((f) => ({ path: f.path, matchedAll: false }));
+      if (all.length || terms.length === 1) return all.slice(0, limit).map((f) => ({ path: f.path, matchedAll: true }));
+      return pool.filter((f) => hit(f, false)).slice(0, limit).map((f) => ({ path: f.path, matchedAll: false }));
     },
     async contents(_pid, paths) {
       calls.push(['contents', paths]);
@@ -80,10 +80,10 @@ function fakeIndex({ status = 'ready', sha = 'c'.repeat(40), raw = RAW, rows = [
       return symbols.filter((s) => s.symbol.toLowerCase().includes(name.toLowerCase()))
         .map((s) => ({ ...s, exact: s.symbol.toLowerCase() === name.toLowerCase() }));
     },
-    async listPathsUnder(_pid, { likePrefix, likeSuffix }) {
+    async listPathsUnder(_pid, { likePrefix, likeSuffix, limit = 20000 }) {
       calls.push(['list', likePrefix, likeSuffix]);
       return [...files.values()].filter((f) => likeOk(likePrefix, f.path, 'start') && likeOk(likeSuffix, f.path, 'end'))
-        .sort((a, b) => a.path.localeCompare(b.path));
+        .sort((a, b) => a.path.localeCompare(b.path)).slice(0, limit);
     },
     async importersOf(_pid, p) { return imports.filter(([, to]) => to === p).map(([from]) => from); },
   };
@@ -274,6 +274,7 @@ test('paths are normalized, and ../, absolute paths and odd characters are refus
     assert.match(r.error, /outside the repo/);
   }
   assert.strictEqual((await tools.call('list_files', { path_glob: '../**' })).ok, false);
+  assert.deepStrictEqual((await tools.call('list_files', { path_glob: 'src//billing/*.js' })).result.files.map((f) => f.path), ['src/billing/charge.js', 'src/billing/stripe.js']);
   assert.strictEqual(likePrefixOf('src/a_b%/**'), 'src/a\\_b\\%/%');
   assert.deepStrictEqual(searchTerms('Charge card, chargeCard!'), ['charge', 'card', 'chargecard']);
 });
@@ -313,6 +314,7 @@ test('text an older index kept is still refused: a key block, a Kubernetes Secre
   assert.match(slice.reason, /private key/);
   assert.strictEqual((await tools.call('read_file', { path: 'deploy/secret.yaml' })).result.readable, false);
   assert.strictEqual((await tools.call('read_file', { path: 'config/.env.production' })).result.readable, false);
+  assert.strictEqual((await tools.call('find_usages', { path: 'config/.env.production' })).result.readable, false);
   const s = (await tools.call('search_code', { query: 'chargeCard' })).result;
   assert.deepStrictEqual(s.hits.map((h) => h.path).sort(), ['src/billing/charge.js', 'src/pages/checkout.jsx']);
   assert.ok(!JSON.stringify(s).includes('BEGIN'));
@@ -334,6 +336,32 @@ test('a glob with no fixed start still finds files ranked past the first rows', 
   const all = (await tools.call('search_code', { query: 'widget' })).result;
   assert.strictEqual(all.hits.length, 15);
   assert.strictEqual(all.more, true);
+  // A pattern SQL can't narrow says the search wasn't complete.
+  const braced = (await tools.call('search_code', { query: 'widget', path_glob: '{db,x}/**' })).result;
+  assert.deepStrictEqual(braced.hits, []);
+  assert.strictEqual(braced.more, true);
+  assert.match(braced.note, /not all of them were checked/);
+});
+
+test('the SQL hints from a glob never leave out a path the glob matches', () => {
+  const { likeSuffixOf } = require('./safety');
+  const { globMatches } = require('../../verdict/globs');
+  const pats = ['{src,lib}/billing', '{a/*,b}.js', 'a]b/c', 'a}/c', '**/*.sql', 'src/**/index.js', '**/*.{js,ts}',
+    '*.{test,spec}.js', 'src/', 'src/*', 'a[bc]d/*x', 'a/[x', 'src/**', '**/a_b%.js', 'x/*/y/z.md', '{a,b/*}/c.js', '[ab]', '**'];
+  const paths = ['src/billing/x.js', 'b.js/x', 'a]b/c/d.js', 'a}/c/d.js', 'x.sql', 'db/m/1.sql', 'src/index.js', 'src/a/index.js',
+    'a/b.ts', 'a.js', 'a.spec.js', 'src/a/b', 'src/a', 'abd/zx', 'a/[x', 'q/a_b%.js', 'x/k/y/z.md', 'a/c.js', 'b/q/c.js', 'a', 'b'];
+  const unlike = (pat) => pat.replace(/^%|%$/g, '').replace(/\\(.)/g, '$1');
+  for (const g of pats) {
+    const pre = likePrefixOf(g);
+    const suf = likeSuffixOf(g);
+    for (const p of paths) {
+      if (!globMatches(g, p)) continue;
+      assert.ok(!pre || p.startsWith(unlike(pre)), `${g} prefix drops ${p}`);
+      assert.ok(!suf || p.endsWith(unlike(suf)), `${g} suffix drops ${p}`);
+    }
+  }
+  assert.strictEqual(likeSuffixOf('**/*.sql'), '%.sql');
+  assert.strictEqual(likeSuffixOf('{src,lib}/billing'), null, 'a pattern with no wildcard covers everything under it');
 });
 
 test('read_file returns numbered lines within the caps, and at most six files a question', async () => {
@@ -456,10 +484,18 @@ test('people: members by name, Creators who aren’t members only counted', asyn
   assert.ok(!JSON.stringify(r).includes('@example.com'), 'no emails');
   assert.deepStrictEqual(r.areas.find((a) => a.area === 'trips'), { area: 'trips', name: 'Trips', creators: [], creators_not_on_project: 1 });
   assert.deepStrictEqual(r.areas.find((a) => a.area === 'billing').creators, ['Samyak']);
-  const noName = setup({ rows: { members: [{ user_id: 'u-owner', email: 'samyak.private@example.com', labels: [] }] } });
+  const noName = setup({ rows: {
+    members: [
+      { user_id: 'u-owner', email: 'samyak.private@example.com', labels: [] },
+      { user_id: 'u2', display_name: 'dev.private@example.com', email: 'dev.private@example.com', labels: [] },
+    ],
+    agreements: [{ id: 'agr_e', text: 'X.', status: 'proposed', proposed_by: 'u-gone', proposed_by_name: 'gone.private@example.com' }],
+  } });
   const m = (await noName.tools.call('get_people', {})).result.members;
-  assert.deepStrictEqual(m.map((x) => x.name), ['A member']);
-  assert.ok(!JSON.stringify(m).includes('samyak.private'), 'no part of an email stands in for a name');
+  assert.deepStrictEqual(m.map((x) => x.name), ['A member', 'A member']);
+  const ag = (await noName.tools.call('get_agreements', {})).result.agreements;
+  assert.strictEqual(ag[0].proposed_by, 'Someone no longer on the project');
+  assert.ok(!JSON.stringify([m, ag]).includes('.private'), 'no email, or part of one, stands in for a name');
 });
 
 test('capabilities and recent changes', async () => {

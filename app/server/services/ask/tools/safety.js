@@ -6,6 +6,7 @@
  */
 
 const { isNeverReadable, redactSecrets, secretFileReason, REDACTED } = require('../../code-index/filter');
+const { expandBraces } = require('@takeoff/cli/lib/braces');
 
 class AskToolError extends Error {
   constructor(message, code = 'invalid_request') {
@@ -45,7 +46,8 @@ function normalizePath(raw) {
 function normalizeGlob(raw) {
   if (raw == null || raw === '') return null;
   if (typeof raw !== 'string') throw new AskToolError('`path_glob` must be text');
-  const g = raw.trim().replace(/^\.\//, '');
+  // Repeated slashes are collapsed, as the matcher skips empty segments.
+  const g = raw.trim().replace(/^\.\//, '').replace(/\/{2,}/g, '/');
   if (!g) return null;
   if (g.length > 200) throw new AskToolError('That pattern is too long.');
   // eslint-disable-next-line no-control-regex
@@ -66,16 +68,52 @@ function likePrefixOf(glob) {
 
 /**
  * The literal end of a glob's last segment, as an escaped LIKE suffix (or
- * null). The glob for every .sql file gives `%.sql`. Paths that match it always end
- * with it, so it only narrows the rows SQL returns; the glob still decides.
+ * null). The glob for every .sql file gives `%.sql`. It is only a hint that
+ * narrows the rows SQL returns, so it must never leave out a path the glob
+ * matches: it is null unless every brace alternative ends in a segment with
+ * a wildcard, because a pattern with no wildcard also matches everything
+ * under it. The glob itself still decides.
  */
 function likeSuffixOf(glob) {
   if (!glob) return null;
-  const m = glob.match(/[*?\]}]([^*?[\]{}]*)$/);
-  if (!m) return null;
-  const lit = m[1].slice(m[1].lastIndexOf('/') + 1);
-  if (!lit) return null;
-  return `%${lit.replace(/[\\%_]/g, (c) => `\\${c}`)}`;
+  const alts = expandBraces(glob);
+  if (!alts || !alts.length) return null;
+  let common = null;
+  for (const alt of alts) {
+    let g = alt.replace(/^\.\//, '').replace(/^\/+/, '');
+    if (g.endsWith('/')) g += '**';
+    if (!/[*?[]/.test(g)) return null;
+    const segs = g.split('/').filter(Boolean);
+    // With a wildcard anywhere, the last segment must match the path's last one.
+    const tail = literalTail(segs[segs.length - 1] || '');
+    common = common == null ? tail : commonEnd(common, tail);
+    if (!common) return null;
+  }
+  return `%${common.replace(/[\\%_]/g, (c) => `\\${c}`)}`;
+}
+
+/**
+ * The literal characters after a segment's last wildcard, read as the
+ * matcher reads them; a segment with no wildcard is all literal.
+ */
+function literalTail(seg) {
+  let tail = '';
+  for (let i = 0; i < seg.length; i += 1) {
+    const c = seg[i];
+    if (c === '*' || c === '?') { tail = ''; continue; }
+    if (c === '[') {
+      const close = seg.indexOf(']', i + 2);
+      if (close !== -1) { tail = ''; i = close; continue; }
+    }
+    tail += c;
+  }
+  return tail;
+}
+
+function commonEnd(a, b) {
+  let n = 0;
+  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n += 1;
+  return a.slice(a.length - n);
 }
 
 /** Words a full-text query can use: letters, digits and _, lower case, at most 8. */

@@ -137,6 +137,9 @@ async function searchCode(ctx, input = {}) {
     match: matchedAll ? 'all words' : 'some words (no file has all of them)',
     hits,
     more: passing.length - dropped > hits.length || rows.length >= LIMITS.searchRows,
+    note: glob && rows.length >= LIMITS.searchRows && hits.length < LIMITS.searchHits
+      ? 'Many files match these words, so not all of them were checked against the pattern. A pattern that starts with a folder, or ends with a file type, narrows it.'
+      : undefined,
     sources: hits.map((h) => h.source_id),
   };
 }
@@ -244,6 +247,7 @@ async function readFile(ctx, input = {}) {
 /** find_usages(path): files that import it. */
 async function findUsages(ctx, input = {}) {
   const path = normalizePath(input.path);
+  if (refusedPath(path)) return { available: true, path, readable: false, reason: SKIP_REASONS.never_readable, sources: [] };
   const ix = await index(ctx);
   if (!ix.ok) return notReady(ix);
   const from = (await ctx.deps.codeIndex.importersOf(ctx.project.id, path, { limit: LIMITS.usages + 1 }))

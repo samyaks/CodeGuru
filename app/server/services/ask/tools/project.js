@@ -24,8 +24,8 @@ async function readMembers(ctx) {
   const rows = await ctx.deps.projectMembers.list(ctx.project.id).catch(() => []);
   const members = rows.map((m) => ({
     userId: m.user_id,
-    // No part of an email is shown in place of a name.
-    name: m.display_name || 'A member',
+    // No email, or part of one, is shown in place of a name.
+    name: nameOrNull(m.display_name, m.email) || 'A member',
     email: m.email ? String(m.email).toLowerCase() : null,
     labels: Array.isArray(m.labels) ? m.labels : [],
   }));
@@ -36,9 +36,18 @@ async function readMembers(ctx) {
   return members;
 }
 
+/** A stored name, unless it is an email (stored names fall back to one). */
+function nameOrNull(name, email = null) {
+  if (typeof name !== 'string' || !name.trim()) return null;
+  const n = name.trim();
+  if (n.includes('@')) return null;
+  if (email && n.toLowerCase() === String(email).toLowerCase()) return null;
+  return n;
+}
+
 function nameFor(members, userId, fallback = null) {
   const m = members.find((x) => x.userId === userId);
-  return (m && m.name) || fallback || 'Someone no longer on the project';
+  return (m && m.name) || nameOrNull(fallback) || 'Someone no longer on the project';
 }
 
 function prNumberOf(raw) {
