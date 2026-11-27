@@ -101,11 +101,11 @@ function createCodeIndex(deps = {}) {
       const existing = await store.getRepo(projectId);
       if (existing && existing.status === 'too_large' && !force) return { skipped: 'too_large' };
 
-      const row = await store.claim(projectId, { repo: repoName, token });
-      if (!row) {
-        await store.markBehind(projectId);
-        return { skipped: 'busy' };
-      }
+      let row = await store.claim(projectId, { repo: repoName, token });
+      // Busy: note the push for the worker holding the lease. If that lease
+      // ended in between, nobody would see the note, so try once more.
+      if (!row && !(await store.markBehind(projectId))) row = await store.claim(projectId, { repo: repoName, token });
+      if (!row) return { skipped: 'busy' };
       claimed = true;
       const client = clientFor(project);
 
@@ -119,7 +119,10 @@ function createCodeIndex(deps = {}) {
       }
       if (!meta) throw Object.assign(new Error('repository not found'), { repoGone: true });
       const branch = meta.default_branch || 'main';
-      const head = await client.fetchBranch(project.owner, project.repo, branch);
+      // A renamed or moved repo is read under its current name.
+      const [owner, repo] = /^[^/\s]+\/[^/\s]+$/.test(String(meta.full_name || ''))
+        ? meta.full_name.split('/') : [project.owner, project.repo];
+      const head = await client.fetchBranch(owner, repo, branch);
       const sha = head && head.commit && head.commit.sha;
       if (!sha) throw Object.assign(new Error('branch has no head commit'), { status: 404 });
 
@@ -133,25 +136,32 @@ function createCodeIndex(deps = {}) {
         return { status: 'ready', indexedSha: sha, unchanged: true };
       }
 
-      if (full && !force && overBudget(row)) {
-        // Too many full builds today: keep what is there and try tomorrow.
-        await store.release(projectId, token, {
-          status: row.indexed_sha ? 'behind' : 'failed',
-          error: row.indexed_sha ? null : 'Too many rebuilds today; it will be retried.',
-        });
+      // Too many full builds today: keep what is there and try tomorrow. Only
+      // a complete index of this branch may still be served, marked behind.
+      const skipForBudget = async () => {
+        const usable = same && row.indexed_sha && ['ready', 'behind'].includes(row.status);
+        await store.release(projectId, token, usable
+          ? { status: 'behind' }
+          : { status: 'failed', error: 'Too many rebuilds today; it will be retried.' });
         claimed = false;
         log({ projectId, action: 'skipped', reason: 'build_budget' });
         return { skipped: 'build_budget' };
-      }
+      };
+      if (full && !force && overBudget(row)) return await skipForBudget();
 
       let result = null;
       if (!full) {
         result = await applyPush({
-          projectId, owner: project.owner, repo: project.repo,
+          projectId, owner, repo,
           fromSha: row.indexed_sha, toSha: sha, client, store, token,
         });
         if (result.needFull) {
           log({ projectId, action: 'full_build_needed', reason: result.reason });
+          // The delta may have written part of the change; nothing of it is served.
+          if (!force && overBudget(row)) {
+            row.status = 'failed';
+            return await skipForBudget();
+          }
           full = true;
           result = null;
         } else if (overLimits(await store.counts(projectId))) {
@@ -163,7 +173,7 @@ function createCodeIndex(deps = {}) {
         await store.setBuilding(projectId, token, { repo: repoName, branch });
         if (!same) await store.clearFiles(projectId, token);
         result = await fullBuild({
-          projectId, owner: project.owner, repo: project.repo, sha, client, store, token, limits,
+          projectId, owner, repo, sha, client, store, token, limits,
         });
       }
       const done = await store.release(projectId, token, {

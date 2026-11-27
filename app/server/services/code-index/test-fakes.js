@@ -213,7 +213,7 @@ function memoryStore() {
     async renewLease(pid, token) { hold(pid, token); },
     async setBuilding(pid, token, { repo, branch }) {
       hold(pid, token);
-      Object.assign(repos.get(pid), { status: 'building', error: null, repo: repo.toLowerCase(), branch });
+      Object.assign(repos.get(pid), { status: 'building', error: null, repo: repo.toLowerCase(), branch, indexed_sha: null });
     },
     async release(pid, token, { status, indexedSha = null, error = null, attempt = false }) {
       const r = repos.get(pid);
@@ -243,9 +243,10 @@ function memoryStore() {
     },
     async markBehind(pid) {
       const r = repos.get(pid);
-      if (!r) return;
+      if (!r) return false;
       r.dirty_at = tick();
       if (r.status === 'ready') r.status = 'behind';
+      return !!(r.lease_until && r.lease_until > Date.now());
     },
     async upsertFiles(pid, token, list) {
       hold(pid, token);

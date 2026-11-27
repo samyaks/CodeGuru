@@ -68,7 +68,7 @@ function createCodeIndexRoutes({ deps = {} } = {}) {
     const project = await loadProject(req);
     checkProjectOwner(project, req);
     // Counted only once the owner check passed, so members can't use up the owner's rebuilds.
-    ownerRebuildLimit(req, res, () => rebuildLimit(req, res, () => {
+    rebuildLimit(req, res, () => ownerRebuildLimit(req, res, () => {
       index().rebuild(project).catch((err) => console.warn('code index rebuild failed:', err.message));
       res.status(202).json({ started: true });
     }));

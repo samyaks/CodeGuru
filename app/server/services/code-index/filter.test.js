@@ -81,6 +81,7 @@ test('more secret shapes are redacted (review findings)', () => {
       `const j = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";`,
       `const hook = "https://hooks.slack.com/services/T000/B000/${'x'.repeat(24)}";`,
       `const db = "rediss://default:${'p'.repeat(12)}@cache.example.com:6380";`,
+      `const pg = "postgres://app:ab/cd+${'e'.repeat(10)}@db.internal:5432/app";`,
       `define('DB_PASSWORD', 'hunter2hunter2');`,
       `aws_secret_access_key = "${'A'.repeat(20)}/${'b'.repeat(19)}"`,
       `const s = "whsec_${'c'.repeat(32)}";`,

@@ -317,6 +317,41 @@ test('full builds stop for the day once the budget is used, unless the owner ask
   assert.strictEqual(store.repos.get('p1').indexed_sha, 'f1');
 });
 
+test('a delta that needs a full build also respects the budget, and a half-done index is not served', async () => {
+  const { index, store, project, gh } = setup();
+  await index.rebuild(project);
+  const row = store.repos.get('p1');
+  Object.assign(row, { full_builds: 8, full_window_start: Date.now() - 1000 });
+  gh.fetchBranch = async () => ({ commit: { sha: 'f1' } }); // not a descendant: the delta asks for a full build
+  gh.calls.length = 0;
+  assert.deepStrictEqual(await index.onPush(project, { ref: 'refs/heads/main', after: 'f1' }), { skipped: 'build_budget' });
+  assert.ok(!gh.calls.some(([k]) => k === 'tarball'));
+  assert.strictEqual(row.status, 'failed');
+  assert.strictEqual(await index.ensureBuilt(project) && store.repos.get('p1').status, 'failed');
+});
+
+test('a full build that fails leaves no indexed sha, so a half-built index is never treated as current', async () => {
+  const { index, store, project, gh } = setup();
+  await index.rebuild(project);
+  gh.fetchBranch = async () => ({ commit: { sha: 'c2' } });
+  gh.fail = (name) => (name === 'tarball' ? Object.assign(new Error('boom'), { status: 502 }) : null);
+  assert.strictEqual((await index.rebuild(project)).status, 'failed');
+  const row = store.repos.get('p1');
+  assert.strictEqual(row.status, 'failed');
+  assert.strictEqual(row.indexed_sha, null);
+});
+
+test('a renamed repo is read under the name GitHub gives', async () => {
+  const { index, store, project, gh } = setup();
+  gh.fetchRepoMeta = async () => ({ default_branch: 'main', full_name: 'acme/storefront', private: true });
+  const seen = [];
+  const realBranch = gh.fetchBranch;
+  gh.fetchBranch = async (o, r, b) => { seen.push(`${o}/${r}`); return realBranch(o, r, b); };
+  assert.strictEqual((await index.rebuild(project)).status, 'ready');
+  assert.deepStrictEqual(seen, ['acme/storefront']);
+  assert.strictEqual(store.repos.get('p1').repo, 'acme/shop', 'stored under the project, so revokes by that name find it');
+});
+
 test('a failed build is not retried on every question', async () => {
   const { index, store, project, gh } = setup();
   gh.fail = (name) => (name === 'tarball' ? Object.assign(new Error('boom'), { status: 502 }) : null);

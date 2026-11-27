@@ -3842,7 +3842,8 @@ const codeIndex = {
     await withTransaction(async (client) => {
       await codeIndexHoldLease(client, projectId, token);
       await client.query(
-        `UPDATE code_index_repos SET status = 'building', error = NULL, repo = $2, branch = $3
+        `UPDATE code_index_repos SET status = 'building', error = NULL, repo = $2, branch = $3,
+                indexed_sha = NULL
           WHERE project_id = $1`,
         [projectId, String(repo).toLowerCase(), branch]);
     });
@@ -3900,11 +3901,13 @@ const codeIndex = {
    * the lease (if any) to run again when it finishes.
    */
   async markBehind(projectId) {
-    await getDb().query(
+    const { rows } = await getDb().query(
       `UPDATE code_index_repos SET dirty_at = now(),
           status = CASE WHEN status = 'ready' THEN 'behind' ELSE status END, updated_at = now()
-        WHERE project_id = $1`,
+        WHERE project_id = $1
+        RETURNING (lease_until IS NOT NULL AND lease_until > now()) AS leased`,
       [projectId]);
+    return !!(rows[0] && rows[0].leased);
   },
 
   /**

@@ -84,7 +84,7 @@ const REDACT_PATTERNS = [
   [/\bSG\.[A-Za-z0-9_-]{16,32}\.[A-Za-z0-9_-]{30,50}/g],
   [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
   // scheme://user:password@host for any scheme
-  [/\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s'"`@\/:]{1,256}:[^\s'"`@\/]{1,256}@/gi],
+  [/\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s'"`@\/:]{1,256}:[^\s'"`@]{1,256}@/gi],
   // A secret-looking name given a quoted literal: password = "....", 'token': '...', define('DB_PASSWORD', '...')
   [new RegExp(`${SECRET_KEY_WORDS}[A-Za-z0-9_]{0,40}["']?[ \\t]*(?:[:=]|=>|,)[ \\t]*["'][^'"\\s]{6,256}["']`, 'gi')],
   // In config files, unquoted too: password: hunter22, POSTGRES_PASSWORD=...
