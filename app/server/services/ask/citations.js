@@ -32,18 +32,22 @@ function cleanParagraph(text, max = MAX_PARAGRAPH_CHARS) {
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
     .replace(/\r\n?/g, '\n')
     .replace(/\n{2,}/g, '\n')
-    .replace(/^[ \t]{0,3}\[[^\]\n]*\]:.*$/gm, '')
-    .replace(/!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])/g, '')
-    .replace(/\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])/g, '$1')
-    .replace(/<[^>]{0,500}>/g, '')
-    .replace(/<[a-z!/?][^\n]*/gi, '')
-    .replace(/\b[a-z][a-z0-9+.-]{1,20}:\/\/\S+/gi, '')
-    .replace(/\b(?:data|javascript|vbscript|file|mailto):\S+/gi, '')
-    .replace(/(^|[^:])\/\/\S+/g, '$1')
+    // Plain links and images that are easy to spot: keep a link's words, drop an image.
+    .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, '')
+    .replace(/\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
+    // URLs a renderer would link by themselves.
+    .replace(/\b[a-z][a-z0-9+.-]{1,20}:[\\/]{2}\S*/gi, '')
+    .replace(/\b(?:data|javascript|vbscript|file|mailto):\S*/gi, '')
     .replace(/\bwww\.\S+/gi, '')
-    .replace(/[<>]/g, '')
+    .replace(/(^|[\s(<"'=])\/[\\/][\w-]+\.[\w.-]+\S*/g, '$1')
+    .replace(/([\w.+-])@(?=[\w-]+\.[\w.-]*\w)/g, '$1 @')
+    // Then break every sequence that can still form one, however it is
+    // nested or escaped: no image opener, no "](", "][" or "]:" (CommonMark
+    // allows no space there), and no "<" that could open a tag or autolink.
+    .replace(/!\[/g, '[')
+    .replace(/\](?=[([:])/g, '] ')
+    .replace(/<(?=[a-z!/?])/gi, '< ')
     .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{2,}/g, '\n')
     .trim()
     .slice(0, max);
 }
@@ -99,10 +103,10 @@ function describe(id, meta, project) {
     case 'commit':
       return { ...base, label: `Commit ${sha12(meta.sha)}`, sha: hexOrNull(meta.sha) };
     case 'file':
-      return { ...base, label: `File in the repo @ ${sha12(meta.sha)}`, path: meta.path, sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
+      return { ...base, label: `File in the repo @ ${sha12(meta.sha)}`, path: plain(meta.path, 500), sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
     case 'code': {
       const lines = meta.start ? `${meta.start}-${meta.end}` : null;
-      return { ...base, label: `Code @ ${sha12(meta.sha)}, not checked against the plan`, path: meta.path, lines, sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
+      return { ...base, label: `Code @ ${sha12(meta.sha)}, not checked against the plan`, path: plain(meta.path, 500), lines, sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
     }
     default:
       return { ...base, label: 'Source' };

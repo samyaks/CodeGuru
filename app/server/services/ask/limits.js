@@ -12,6 +12,8 @@
  *   monthly_budget the project's spend this month, plus what is still held
  *                  back for running answers and for this one, would pass
  *                  monthlyUsd
+ *   user_budget    the same for the person across all their projects, against userMonthlyUsd
+ *   global_budget  the deployment's spend this month would pass globalMonthlyUsd
  *
  * Spend counts in the month its answer started. After a limit is lowered,
  * resetsAt for daily_limit can be early: it is 24h after the oldest

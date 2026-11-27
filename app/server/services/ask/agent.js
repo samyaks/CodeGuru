@@ -36,6 +36,9 @@ const MESSAGES = {
   failed: 'Takeoff couldn’t answer this. Try asking again.',
   refused: 'Takeoff can’t answer this question.',
   budget: 'This project reached its Ask Takeoff budget for the month while answering, so the answer stopped. It resets on the first of next month (UTC).',
+  user_budget: 'You reached your Ask Takeoff budget for the month across your projects while this was being answered, so the answer stopped. It resets on the first of next month (UTC).',
+  global_budget: 'Ask Takeoff reached its budget for the month while answering, so the answer stopped. It resets on the first of next month (UTC).',
+  usage_unavailable: 'Takeoff couldn’t check its budget while answering, so the answer stopped. Try asking again.',
 };
 
 let sharedClient = null;
@@ -172,12 +175,13 @@ async function runQuestion({ project, answer, question, history = [], config, de
     // reads them from the prompt cache.
     const context = { type: 'text', text: contextBlock(project, plan.ok ? plan.result : null) };
     const past = historyMessages(history);
-    const messages = past.length
-      ? [{ role: 'user', content: [context, { type: 'text', text: past[0].content }] }, ...past.slice(1), { role: 'user', content: String(question) }]
-      : [{ role: 'user', content: [context, { type: 'text', text: String(question) }] }];
     let lastPrompt = 0;
     // The last round answers without lookups.
     const isLast = (round) => round >= config.maxRounds || usage.tool_calls >= LIMITS.toolCalls || lastPrompt >= LIMITS.promptTokens;
+    const asked = [{ type: 'text', text: String(question) }, ...(isLast(1) ? [{ type: 'text', text: FINAL_ROUND_NOTE }] : [])];
+    const messages = past.length
+      ? [{ role: 'user', content: [context, { type: 'text', text: past[0].content }] }, ...past.slice(1), { role: 'user', content: asked }]
+      : [{ role: 'user', content: [context, ...asked] }];
     // tools render first, then system: the marker caches both, the same for every project.
     const system = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
 
@@ -225,10 +229,12 @@ async function runQuestion({ project, answer, question, history = [], config, de
         // spend can't be read, stop too, rather than run on unchecked.
         const u = await deps.askMessages.usage({ projectId: project.id, userId: answer.user_id })
           .catch((err) => { console.error(`[ask] usage read failed for ${answer.id}:`, err && err.message); return null; });
-        const over = !u || u.spentThisMonth >= config.monthlyUsd
-          || (config.userMonthlyUsd && u.spentByUserThisMonth >= config.userMonthlyUsd)
-          || (config.globalMonthlyUsd && u.spentAllThisMonth >= config.globalMonthlyUsd);
-        if (over) return finish({ status: 'failed', content: MESSAGES.budget, error: u ? 'monthly_budget' : 'usage_unavailable' });
+        const over = !u ? 'usage_unavailable'
+          : u.spentThisMonth >= config.monthlyUsd ? 'monthly_budget'
+            : config.userMonthlyUsd && u.spentByUserThisMonth >= config.userMonthlyUsd ? 'user_budget'
+              : config.globalMonthlyUsd && u.spentAllThisMonth >= config.globalMonthlyUsd ? 'global_budget'
+                : null;
+        if (over) return finish({ status: 'failed', content: over === 'monthly_budget' ? MESSAGES.budget : MESSAGES[over], error: over });
 
         messages.push({ role: 'assistant', content: echoed });
         const results = [];
