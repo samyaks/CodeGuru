@@ -11,4 +11,6 @@ module.exports = {
   ...require('./agreements'),
   ...require('./intent-edit'),
   ...require('./notes'),
+  ...require('./globs'),
+  hookCommand: require('./hook').hookCommand,
 };

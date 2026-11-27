@@ -190,4 +190,4 @@ async function notesCommand({ dir, args, out, err, env = process.env, exec = def
   }
 }
 
-module.exports = { sendBackMarker, parseSendBack, repoFromRemote, fetchSendBackNotes, notesCommand, NotesError, MAX_SEND_BACK_NOTE: MAX_NOTE };
+module.exports = { sendBackMarker, parseSendBack, repoFromRemote, fetchSendBackNotes, notesCommand, tokenFrom, NotesError, MAX_SEND_BACK_NOTE: MAX_NOTE };

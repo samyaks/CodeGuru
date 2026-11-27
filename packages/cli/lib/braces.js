@@ -1,7 +1,7 @@
 'use strict';
 
 // Brace expansion for takeoff.yaml path patterns, shared by `takeoff validate`
-// and the PR check's glob matcher (app/server/services/verdict/globs.js), so a
+// and the glob matcher (lib/globs.js) the PR check and the hook use, so a
 // pattern the validator accepts is always one the PR check can match.
 
 const MAX_PATH_PATTERN = 300;
