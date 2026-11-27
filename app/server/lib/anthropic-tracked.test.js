@@ -46,3 +46,27 @@ test('estimateCost prefers longer haiku-4-5 prefix over haiku-4', () => {
   assert.strictEqual(h45, 1);
   assert.strictEqual(h4, 0.8);
 });
+
+test('estimateCost prices claude-opus-5-5 at $4/$20 with $0.20 cache reads', () => {
+  assert.strictEqual(estimateCost('claude-opus-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 24);
+  assert.strictEqual(estimateCost('claude-opus-5-5', { cacheReadTokens: 1_000_000 }), 0.2);
+  assert.strictEqual(estimateCost('claude-opus-5-5', { cacheCreationTokens: 1_000_000 }), 5);
+});
+
+test('estimateCost keeps claude-opus-5 apart from claude-opus-5-5', () => {
+  assert.strictEqual(estimateCost('claude-opus-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 30);
+  assert.strictEqual(estimateCost('claude-opus-5', { cacheReadTokens: 1_000_000 }), 0.5);
+});
+
+test('estimateCost prices Opus 4.6 to 4.8 at $5/$25, older Opus 4 at $15/$75', () => {
+  for (const m of ['claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8']) {
+    assert.strictEqual(estimateCost(m, { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 30, m);
+  }
+  assert.strictEqual(estimateCost('claude-opus-4-1-20250805', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 90);
+});
+
+test('estimateCost prices claude-sonnet-5-5 and claude-haiku-5-5', () => {
+  assert.strictEqual(estimateCost('claude-sonnet-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 12);
+  assert.strictEqual(estimateCost('claude-sonnet-5-5', { cacheReadTokens: 1_000_000 }), 0.1);
+  assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 0.6);
+});

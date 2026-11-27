@@ -3436,6 +3436,174 @@ const READ_SLOT_ORDER = `CASE slot
   WHEN 'core_job'  THEN 2
   ELSE 3 END`;
 
+// ── Ask Takeoff (Milestone 8) ──────────────────────────────────────
+//
+// Threads are private to the member who asked: every read and delete is
+// scoped by project id AND user id. Spend lives on the assistant rows.
+
+const ASK_RUNNING_STALE = "interval '10 minutes'";
+const ASK_MONTH_START = "(date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')";
+
+const askThreads = {
+  async create({ projectId, userId, title = '' }) {
+    const { rows } = await getDb().query(
+      `INSERT INTO ask_threads (id, project_id, user_id, title)
+        VALUES ($1, $2, $3, $4) RETURNING *`,
+      [`askt_${crypto.randomUUID()}`, String(projectId), String(userId), String(title).slice(0, 200)]
+    );
+    return rows[0];
+  },
+  async get(projectId, userId, id) {
+    const { rows } = await getDb().query(
+      'SELECT * FROM ask_threads WHERE project_id = $1 AND user_id = $2 AND id = $3',
+      [String(projectId), String(userId), String(id)]
+    );
+    return rows[0] || null;
+  },
+  async listForUser(projectId, userId, { limit = 30 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM ask_threads WHERE project_id = $1 AND user_id = $2
+        ORDER BY updated_at DESC LIMIT $3`,
+      [String(projectId), String(userId), Math.min(Math.max(Number(limit) || 30, 1), 100)]
+    );
+    return rows;
+  },
+  async delete(projectId, userId, id) {
+    const { rowCount } = await getDb().query(
+      'DELETE FROM ask_threads WHERE project_id = $1 AND user_id = $2 AND id = $3',
+      [String(projectId), String(userId), String(id)]
+    );
+    return rowCount > 0;
+  },
+  /** Retention: threads untouched for `days` are deleted with their messages. */
+  async deleteOlderThan(days = 90) {
+    const { rowCount } = await getDb().query(
+      "DELETE FROM ask_threads WHERE updated_at < now() - ($1 || ' days')::interval",
+      [String(Math.max(1, Math.floor(Number(days) || 90)))]
+    );
+    return rowCount;
+  },
+};
+
+const askMessages = {
+  async listByThread(threadId, { limit = 200 } = {}) {
+    const { rows } = await getDb().query(
+      `SELECT * FROM ask_messages WHERE thread_id = $1
+        ORDER BY created_at ASC, role DESC LIMIT $2`,
+      [String(threadId), Math.min(Math.max(Number(limit) || 200, 1), 500)]
+    );
+    return rows;
+  },
+
+  /**
+   * Usage the caps are decided on. `client` lets startQuestion read inside
+   * its transaction; outside it, the pool is used.
+   */
+  async usage({ projectId, userId }, client = null) {
+    const q = client || getDb();
+    const { rows } = await q.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM ask_messages
+           WHERE project_id = $1 AND user_id = $2 AND role = 'user'
+             AND created_at > now() - interval '24 hours') AS questions_today,
+         (SELECT MIN(created_at) FROM ask_messages
+           WHERE project_id = $1 AND user_id = $2 AND role = 'user'
+             AND created_at > now() - interval '24 hours') AS oldest_today,
+         (SELECT COALESCE(SUM(cost_usd), 0)::double precision FROM ask_messages
+           WHERE project_id = $1 AND role = 'assistant'
+             AND created_at >= ${ASK_MONTH_START}) AS spent_this_month,
+         (SELECT COUNT(*)::int FROM ask_messages
+           WHERE project_id = $1 AND role = 'assistant' AND status = 'running'
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running`,
+      [String(projectId), String(userId)]
+    );
+    const r = rows[0] || {};
+    return {
+      questionsToday: r.questions_today || 0,
+      oldestToday: r.oldest_today || null,
+      spentThisMonth: Number(r.spent_this_month) || 0,
+      running: r.running || 0,
+    };
+  },
+
+  /**
+   * Record a question and a 'running' answer row, if the caps allow it.
+   * The check and the insert share one transaction under a per-project
+   * lock, so questions sent at the same moment can't all slip under a cap.
+   * `decide(usage)` returns { allowed, ... } (services/ask/limits.js).
+   * @returns {Promise<{ ok: boolean, verdict: object, question?: object, answer?: object }>}
+   */
+  async startQuestion({ threadId, projectId, userId, content }, decide) {
+    return withTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ask:${projectId}`]);
+      await client.query(
+        `UPDATE ask_messages SET status = 'failed', error = 'interrupted', updated_at = now()
+          WHERE project_id = $1 AND role = 'assistant' AND status = 'running'
+            AND updated_at < now() - ${ASK_RUNNING_STALE}`,
+        [String(projectId)]
+      );
+      const owned = await client.query(
+        'SELECT 1 FROM ask_threads WHERE id = $1 AND project_id = $2 AND user_id = $3',
+        [String(threadId), String(projectId), String(userId)]
+      );
+      if (!owned.rows.length) return { ok: false, verdict: { allowed: false, reason: 'thread_not_found' } };
+      const verdict = decide(await askMessages.usage({ projectId, userId }, client));
+      if (!verdict || !verdict.allowed) return { ok: false, verdict };
+      const ins = `INSERT INTO ask_messages (id, thread_id, project_id, user_id, role, content, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`;
+      const q = await client.query(ins,
+        [`askm_${crypto.randomUUID()}`, String(threadId), String(projectId), String(userId), 'user', String(content), 'done']);
+      const a = await client.query(ins,
+        [`askm_${crypto.randomUUID()}`, String(threadId), String(projectId), String(userId), 'assistant', '', 'running']);
+      await client.query('UPDATE ask_threads SET updated_at = now() WHERE id = $1', [String(threadId)]);
+      return { ok: true, verdict, question: q.rows[0], answer: a.rows[0] };
+    });
+  },
+
+  /** Keep a running answer alive (it counts as running for 10 minutes after this). */
+  async heartbeat(id) {
+    await getDb().query(
+      "UPDATE ask_messages SET updated_at = now() WHERE id = $1 AND status = 'running'",
+      [String(id)]
+    );
+  },
+
+  /**
+   * Finish a running answer. Only a 'running' row changes, so a late finish
+   * can't overwrite an answer that was already settled. `costUsd` is the
+   * answer's total; spend already added with addCost is never lowered.
+   * Returns the row or null.
+   */
+  async finishAnswer(id, { content = '', sources = null, claims = null, status = 'done', model = null, usage = null, costUsd = 0, error = null } = {}) {
+    const finalStatus = ['done', 'failed', 'refused'].includes(status) ? status : 'failed';
+    const { rows } = await getDb().query(
+      `UPDATE ask_messages SET
+          content = $2, sources = $3, claims = $4, status = $5, model = $6,
+          usage = $7, cost_usd = GREATEST(cost_usd, $8), error = $9, updated_at = now()
+        WHERE id = $1 AND role = 'assistant' AND status = 'running'
+        RETURNING *`,
+      [String(id), String(content), sources == null ? null : toJsonb(sources), claims == null ? null : toJsonb(claims),
+        finalStatus, model, usage == null ? null : toJsonb(usage),
+        Math.max(0, Number(costUsd) || 0), error == null ? null : String(error).slice(0, 500)]
+    );
+    return rows[0] || null;
+  },
+
+  /**
+   * Add spend to an answer as each model call returns, so a crash mid-answer
+   * still counts what was spent.
+   */
+  async addCost(id, costUsd) {
+    const add = Math.max(0, Number(costUsd) || 0);
+    if (!add) return;
+    await getDb().query(
+      `UPDATE ask_messages SET cost_usd = cost_usd + $2, updated_at = now()
+        WHERE id = $1 AND role = 'assistant'`,
+      [String(id), add]
+    );
+  },
+};
+
 const readClaims = {
   async findByProjectId(projectId) {
     const { rows } = await getDb().query(
@@ -3527,6 +3695,7 @@ module.exports = {
   agreements, agreementVotes, notificationOutbox, driftDecisions,
   intentStatements, claims, statementJobs,
   projectReads, readClaims,
+  askThreads, askMessages,
   // Pure query builders exported for unit tests only.
   buildBulkTierUpdateChunk, buildEventsInsertChunk,
 };
