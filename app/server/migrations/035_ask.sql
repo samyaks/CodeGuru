@@ -7,6 +7,11 @@
 -- analysis_llm_calls, which is keyed to an analysis row and rolls up into
 -- the scan totals; Ask's caps read from this table alone.
 --
+-- Deleting a thread must not hand back spend or questions, so messages
+-- outlive their thread: the thread link is set to NULL and the helpers
+-- blank the text (lib/db.js askThreads.delete). The rows go when the
+-- project goes, or when retention removes them after the cap windows.
+--
 -- status on an answer: 'running' while the agent works, then 'done',
 -- 'failed' or 'refused'. A 'running' row left by a crash counts as running
 -- for 10 minutes (see lib/db.js askMessages), then stops reserving budget.
@@ -27,9 +32,9 @@ CREATE INDEX IF NOT EXISTS idx_ask_threads_updated
 
 CREATE TABLE IF NOT EXISTS ask_messages (
   id          TEXT PRIMARY KEY,
-  thread_id   TEXT NOT NULL REFERENCES ask_threads(id) ON DELETE CASCADE,
+  thread_id   TEXT REFERENCES ask_threads(id) ON DELETE SET NULL,
   -- Denormalised from the thread so the caps are one indexed query.
-  project_id  TEXT NOT NULL,
+  project_id  TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
   user_id     TEXT NOT NULL,
   role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
   content     TEXT NOT NULL DEFAULT '',
@@ -51,3 +56,5 @@ CREATE INDEX IF NOT EXISTS idx_ask_messages_user_questions
   ON ask_messages (project_id, user_id, created_at) WHERE role = 'user';
 CREATE INDEX IF NOT EXISTS idx_ask_messages_project_answers
   ON ask_messages (project_id, created_at) WHERE role = 'assistant';
+CREATE INDEX IF NOT EXISTS idx_ask_messages_orphans
+  ON ask_messages (created_at) WHERE thread_id IS NULL;

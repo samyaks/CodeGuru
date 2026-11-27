@@ -7,15 +7,26 @@
  *   TAKEOFF_ASK_DAILY_PER_MEMBER  questions per member per project per rolling 24h (30)
  *   TAKEOFF_ASK_MONTHLY_USD    spend per project per calendar month, UTC (20)
  *   TAKEOFF_ASK_MAX_ROUNDS     tool rounds per question (8)
- *   TAKEOFF_ASK_RESERVE_USD    spend held back for each answer still running (0.50)
+ *   TAKEOFF_ASK_RESERVE_USD    spend held back for each answer still running (1.50, at least 0.05)
+ *   TAKEOFF_ASK_MAX_RUNNING_PER_MEMBER   answers one member may have running at once (2)
+ *   TAKEOFF_ASK_MAX_RUNNING_PER_PROJECT  answers a project may have running at once (5)
+ *
+ * The reserve keeps a burst of questions from overspending the month before
+ * their costs are known. It is not a ceiling on one answer: the agent loop
+ * also stops an answer once recorded spend reaches the monthly budget.
  */
+
+const { hasPrice } = require('../../lib/model-pricing');
 
 const DEFAULTS = Object.freeze({
   model: 'claude-opus-5-5',
   dailyPerMember: 30,
   monthlyUsd: 20,
   maxRounds: 8,
-  reserveUsd: 0.5,
+  reserveUsd: 1.5,
+  minReserveUsd: 0.05,
+  maxRunningPerMember: 2,
+  maxRunningPerProject: 5,
 });
 
 function positive(raw, fallback, { integer = false } = {}) {
@@ -25,11 +36,6 @@ function positive(raw, fallback, { integer = false } = {}) {
   return integer ? Math.floor(n) || fallback : n;
 }
 
-function nonNegative(raw, fallback) {
-  if (raw == null || String(raw).trim() === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
 
 function isAskEnabled(env = process.env) {
   const v = String(env.TAKEOFF_ASK_ENABLED || '').trim().toLowerCase();
@@ -44,7 +50,12 @@ function askConfig(env = process.env) {
     dailyPerMember: positive(env.TAKEOFF_ASK_DAILY_PER_MEMBER, DEFAULTS.dailyPerMember, { integer: true }),
     monthlyUsd: positive(env.TAKEOFF_ASK_MONTHLY_USD, DEFAULTS.monthlyUsd),
     maxRounds: Math.min(positive(env.TAKEOFF_ASK_MAX_ROUNDS, DEFAULTS.maxRounds, { integer: true }), 20),
-    reserveUsd: nonNegative(env.TAKEOFF_ASK_RESERVE_USD, DEFAULTS.reserveUsd),
+    reserveUsd: Math.max(DEFAULTS.minReserveUsd, positive(env.TAKEOFF_ASK_RESERVE_USD, DEFAULTS.reserveUsd)),
+    maxRunningPerMember: positive(env.TAKEOFF_ASK_MAX_RUNNING_PER_MEMBER, DEFAULTS.maxRunningPerMember, { integer: true }),
+    maxRunningPerProject: positive(env.TAKEOFF_ASK_MAX_RUNNING_PER_PROJECT, DEFAULTS.maxRunningPerProject, { integer: true }),
+    // A model with no price would be costed at the $3/$15 fallback and could
+    // overspend the budget, so Ask refuses to run on one.
+    modelPriced: hasPrice(model),
   };
 }
 

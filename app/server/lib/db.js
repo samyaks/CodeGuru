@@ -3443,13 +3443,34 @@ const READ_SLOT_ORDER = `CASE slot
 
 const ASK_RUNNING_STALE = "interval '10 minutes'";
 const ASK_MONTH_START = "(date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')";
+// Message rows are kept past their thread for the cap windows (24h, the
+// calendar month), so retention never removes one younger than this.
+const ASK_LEDGER_KEEP_DAYS = 62;
+const ASK_MAX = Object.freeze({ title: 200, question: 4000, answer: 20000, error: 500, items: 100, jsonChars: 200000 });
+
+/** Bound a JSONB value: arrays keep their first ASK_MAX.items entries; anything too large is dropped. */
+function askJson(v) {
+  if (v == null) return null;
+  const val = Array.isArray(v) ? v.slice(0, ASK_MAX.items) : v;
+  const text = toJsonb(val);
+  return text && text.length > ASK_MAX.jsonChars ? toJsonb({ dropped: 'too_large' }) : text;
+}
+
+/** Blank the text of messages whose threads are going, in the caller's transaction. */
+async function askBlankThreads(client, where, params) {
+  await client.query(
+    `UPDATE ask_messages SET content = '', sources = NULL, claims = NULL, error = NULL, updated_at = now()
+      WHERE thread_id IN (SELECT id FROM ask_threads WHERE ${where})`,
+    params
+  );
+}
 
 const askThreads = {
   async create({ projectId, userId, title = '' }) {
     const { rows } = await getDb().query(
       `INSERT INTO ask_threads (id, project_id, user_id, title)
         VALUES ($1, $2, $3, $4) RETURNING *`,
-      [`askt_${crypto.randomUUID()}`, String(projectId), String(userId), String(title).slice(0, 200)]
+      [`askt_${crypto.randomUUID()}`, String(projectId), String(userId), String(title).slice(0, ASK_MAX.title)]
     );
     return rows[0];
   },
@@ -3468,38 +3489,67 @@ const askThreads = {
     );
     return rows;
   },
+  /**
+   * Delete a member's thread. Its messages lose their text and thread link
+   * but stay as ledger rows, so deleting can't hand back spend or questions.
+   */
   async delete(projectId, userId, id) {
-    const { rowCount } = await getDb().query(
-      'DELETE FROM ask_threads WHERE project_id = $1 AND user_id = $2 AND id = $3',
-      [String(projectId), String(userId), String(id)]
-    );
-    return rowCount > 0;
+    return withTransaction(async (client) => {
+      const params = [String(projectId), String(userId), String(id)];
+      await askBlankThreads(client, 'project_id = $1 AND user_id = $2 AND id = $3', params);
+      const { rowCount } = await client.query(
+        'DELETE FROM ask_threads WHERE project_id = $1 AND user_id = $2 AND id = $3', params);
+      return rowCount > 0;
+    });
   },
-  /** Retention: threads untouched for `days` are deleted with their messages. */
+  /** Delete every thread a member has on a project (e.g. when they leave it). */
+  async deleteForUser(projectId, userId) {
+    return withTransaction(async (client) => {
+      const params = [String(projectId), String(userId)];
+      await askBlankThreads(client, 'project_id = $1 AND user_id = $2', params);
+      const { rowCount } = await client.query(
+        'DELETE FROM ask_threads WHERE project_id = $1 AND user_id = $2', params);
+      return rowCount;
+    });
+  },
+  /**
+   * Retention: threads untouched for `days` are deleted as above, and ledger
+   * rows with no thread are removed once they are past the cap windows.
+   */
   async deleteOlderThan(days = 90) {
-    const { rowCount } = await getDb().query(
-      "DELETE FROM ask_threads WHERE updated_at < now() - ($1 || ' days')::interval",
-      [String(Math.max(1, Math.floor(Number(days) || 90)))]
-    );
-    return rowCount;
+    const d = Math.max(1, Math.floor(Number(days) || 90));
+    return withTransaction(async (client) => {
+      await askBlankThreads(client, 'updated_at < now() - make_interval(days => $1::int)', [d]);
+      const { rowCount } = await client.query(
+        'DELETE FROM ask_threads WHERE updated_at < now() - make_interval(days => $1::int)', [d]);
+      await client.query(
+        `DELETE FROM ask_messages WHERE thread_id IS NULL
+          AND created_at < now() - make_interval(days => $1::int)`,
+        [Math.max(d, ASK_LEDGER_KEEP_DAYS)]
+      );
+      return rowCount;
+    });
   },
 };
 
 const askMessages = {
-  async listByThread(threadId, { limit = 200 } = {}) {
+  /** A member's thread, oldest first. Scoped to the member, so a stray id reads nothing. */
+  async listByThread({ projectId, userId, threadId }, { limit = 200 } = {}) {
     const { rows } = await getDb().query(
-      `SELECT * FROM ask_messages WHERE thread_id = $1
-        ORDER BY created_at ASC, role DESC LIMIT $2`,
-      [String(threadId), Math.min(Math.max(Number(limit) || 200, 1), 500)]
+      `SELECT * FROM ask_messages
+        WHERE thread_id = $1 AND project_id = $2 AND user_id = $3
+        ORDER BY created_at ASC, role DESC LIMIT $4`,
+      [String(threadId), String(projectId), String(userId), Math.min(Math.max(Number(limit) || 200, 1), 500)]
     );
     return rows;
   },
 
   /**
-   * Usage the caps are decided on. `client` lets startQuestion read inside
-   * its transaction; outside it, the pool is used.
+   * Usage the caps are decided on. `reserveUsd` is held back for each running
+   * answer, less what that answer has already spent. `client` lets
+   * startQuestion read inside its transaction; outside it, the pool is used.
    */
-  async usage({ projectId, userId }, client = null) {
+  async usage({ projectId, userId, reserveUsd = 0 }, client = null) {
     const q = client || getDb();
     const { rows } = await q.query(
       `SELECT
@@ -3514,8 +3564,15 @@ const askMessages = {
              AND created_at >= ${ASK_MONTH_START}) AS spent_this_month,
          (SELECT COUNT(*)::int FROM ask_messages
            WHERE project_id = $1 AND role = 'assistant' AND status = 'running'
-             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running`,
-      [String(projectId), String(userId)]
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running,
+         (SELECT COUNT(*)::int FROM ask_messages
+           WHERE project_id = $1 AND user_id = $2 AND role = 'assistant' AND status = 'running'
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running_mine,
+         (SELECT COALESCE(SUM(GREATEST(0, $3::double precision - cost_usd)), 0)::double precision
+            FROM ask_messages
+           WHERE project_id = $1 AND role = 'assistant' AND status = 'running'
+             AND updated_at >= now() - ${ASK_RUNNING_STALE}) AS running_reserve`,
+      [String(projectId), String(userId), Math.max(0, Number(reserveUsd) || 0)]
     );
     const r = rows[0] || {};
     return {
@@ -3523,6 +3580,8 @@ const askMessages = {
       oldestToday: r.oldest_today || null,
       spentThisMonth: Number(r.spent_this_month) || 0,
       running: r.running || 0,
+      runningMine: r.running_mine || 0,
+      runningReserve: Number(r.running_reserve) || 0,
     };
   },
 
@@ -3533,7 +3592,7 @@ const askMessages = {
    * `decide(usage)` returns { allowed, ... } (services/ask/limits.js).
    * @returns {Promise<{ ok: boolean, verdict: object, question?: object, answer?: object }>}
    */
-  async startQuestion({ threadId, projectId, userId, content }, decide) {
+  async startQuestion({ threadId, projectId, userId, content, reserveUsd = 0 }, decide) {
     return withTransaction(async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`ask:${projectId}`]);
       await client.query(
@@ -3547,12 +3606,13 @@ const askMessages = {
         [String(threadId), String(projectId), String(userId)]
       );
       if (!owned.rows.length) return { ok: false, verdict: { allowed: false, reason: 'thread_not_found' } };
-      const verdict = decide(await askMessages.usage({ projectId, userId }, client));
+      const verdict = decide(await askMessages.usage({ projectId, userId, reserveUsd }, client));
       if (!verdict || !verdict.allowed) return { ok: false, verdict };
       const ins = `INSERT INTO ask_messages (id, thread_id, project_id, user_id, role, content, status)
         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`;
       const q = await client.query(ins,
-        [`askm_${crypto.randomUUID()}`, String(threadId), String(projectId), String(userId), 'user', String(content), 'done']);
+        [`askm_${crypto.randomUUID()}`, String(threadId), String(projectId), String(userId), 'user',
+          String(content).slice(0, ASK_MAX.question), 'done']);
       const a = await client.query(ins,
         [`askm_${crypto.randomUUID()}`, String(threadId), String(projectId), String(userId), 'assistant', '', 'running']);
       await client.query('UPDATE ask_threads SET updated_at = now() WHERE id = $1', [String(threadId)]);
@@ -3563,30 +3623,39 @@ const askMessages = {
   /** Keep a running answer alive (it counts as running for 10 minutes after this). */
   async heartbeat(id) {
     await getDb().query(
-      "UPDATE ask_messages SET updated_at = now() WHERE id = $1 AND status = 'running'",
+      "UPDATE ask_messages SET updated_at = now() WHERE id = $1 AND role = 'assistant' AND status = 'running'",
       [String(id)]
     );
   },
 
   /**
-   * Finish a running answer. Only a 'running' row changes, so a late finish
-   * can't overwrite an answer that was already settled. `costUsd` is the
-   * answer's total; spend already added with addCost is never lowered.
-   * Returns the row or null.
+   * Finish a running answer. `costUsd` is the answer's total and is always
+   * recorded, even if the answer was already settled (say, marked
+   * interrupted), and it never lowers spend added with addCost. The rest
+   * changes only on a 'running' row, and the text only while the thread
+   * still exists. Returns the finished row, or null if it wasn't running.
    */
   async finishAnswer(id, { content = '', sources = null, claims = null, status = 'done', model = null, usage = null, costUsd = 0, error = null } = {}) {
     const finalStatus = ['done', 'failed', 'refused'].includes(status) ? status : 'failed';
-    const { rows } = await getDb().query(
-      `UPDATE ask_messages SET
-          content = $2, sources = $3, claims = $4, status = $5, model = $6,
-          usage = $7, cost_usd = GREATEST(cost_usd, $8), error = $9, updated_at = now()
-        WHERE id = $1 AND role = 'assistant' AND status = 'running'
-        RETURNING *`,
-      [String(id), String(content), sources == null ? null : toJsonb(sources), claims == null ? null : toJsonb(claims),
-        finalStatus, model, usage == null ? null : toJsonb(usage),
-        Math.max(0, Number(costUsd) || 0), error == null ? null : String(error).slice(0, 500)]
-    );
-    return rows[0] || null;
+    return withTransaction(async (client) => {
+      await client.query(
+        `UPDATE ask_messages SET cost_usd = GREATEST(cost_usd, $2)
+          WHERE id = $1 AND role = 'assistant'`,
+        [String(id), Number.isFinite(Number(costUsd)) ? Math.max(0, Number(costUsd)) : 0]
+      );
+      const { rows } = await client.query(
+        `UPDATE ask_messages SET
+            content = CASE WHEN thread_id IS NULL THEN '' ELSE $2 END,
+            sources = CASE WHEN thread_id IS NULL THEN NULL ELSE $3::jsonb END,
+            claims = CASE WHEN thread_id IS NULL THEN NULL ELSE $4::jsonb END,
+            status = $5, model = $6, usage = $7, error = $8, updated_at = now()
+          WHERE id = $1 AND role = 'assistant' AND status = 'running'
+          RETURNING *`,
+        [String(id), String(content).slice(0, ASK_MAX.answer), askJson(sources), askJson(claims),
+          finalStatus, model, askJson(usage), error == null ? null : String(error).slice(0, ASK_MAX.error)]
+      );
+      return rows[0] || null;
+    });
   },
 
   /**
@@ -3595,7 +3664,7 @@ const askMessages = {
    */
   async addCost(id, costUsd) {
     const add = Math.max(0, Number(costUsd) || 0);
-    if (!add) return;
+    if (!add || !Number.isFinite(add)) return;
     await getDb().query(
       `UPDATE ask_messages SET cost_usd = cost_usd + $2, updated_at = now()
         WHERE id = $1 AND role = 'assistant'`,

@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const { extractText, estimateCost } = require('./anthropic-tracked');
+const { hasPrice } = require('./model-pricing');
 
 test('extractText returns the first text block', () => {
   const resp = { content: [{ type: 'text', text: 'hello' }] };
@@ -69,4 +70,17 @@ test('estimateCost prices claude-sonnet-5-5 and claude-haiku-5-5', () => {
   assert.strictEqual(estimateCost('claude-sonnet-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 12);
   assert.strictEqual(estimateCost('claude-sonnet-5-5', { cacheReadTokens: 1_000_000 }), 0.1);
   assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 0.6);
+});
+
+test('estimateCost prices Fable and Mythos 5.x', () => {
+  assert.strictEqual(estimateCost('claude-fable-5-2', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 48);
+  assert.strictEqual(estimateCost('claude-fable-5-2', { cacheReadTokens: 1_000_000 }), 0.2);
+  assert.strictEqual(estimateCost('claude-fable-5-1', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 60);
+  assert.strictEqual(estimateCost('claude-mythos-5-2', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 48);
+});
+
+test('hasPrice is false for models that fall back to the default rate', () => {
+  assert.strictEqual(hasPrice('claude-opus-5-5'), true);
+  assert.strictEqual(hasPrice('gpt-unknown'), false);
+  assert.strictEqual(hasPrice(''), false);
 });
