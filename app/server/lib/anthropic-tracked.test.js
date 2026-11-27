@@ -69,7 +69,7 @@ test('estimateCost prices Opus 4.6 to 4.8 at $5/$25, older Opus 4 at $15/$75', (
 test('estimateCost prices claude-sonnet-5-5 and claude-haiku-5-5', () => {
   assert.strictEqual(estimateCost('claude-sonnet-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 12);
   assert.strictEqual(estimateCost('claude-sonnet-5-5', { cacheReadTokens: 1_000_000 }), 0.1);
-  assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 0.6);
+  assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 100_000, outputTokens: 1_000_000 }), 0.51);
 });
 
 test('estimateCost prices Fable and Mythos 5.x', () => {
@@ -83,4 +83,9 @@ test('hasPrice is false for models that fall back to the default rate', () => {
   assert.strictEqual(hasPrice('claude-opus-5-5'), true);
   assert.strictEqual(hasPrice('gpt-unknown'), false);
   assert.strictEqual(hasPrice(''), false);
+});
+
+test('estimateCost prices Haiku 5.5 prompts over 100K tokens at $0.50/$2.50', () => {
+  assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 100_000, outputTokens: 0 }), 0.01);
+  assert.strictEqual(estimateCost('claude-haiku-5-5', { inputTokens: 200_000, outputTokens: 1_000_000 }), 2.6);
 });

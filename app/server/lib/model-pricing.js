@@ -12,7 +12,7 @@
 // Haiku 4.5: $1/$5 (not the retired Haiku 3.5 $0.80/$4 rates).
 // Opus 5.5 / Sonnet 5.5 bill cache reads at 0.05x input, so they carry an
 // explicit cacheRead rate. Haiku 5.5 is $0.10/$0.50 up to 100K prompt
-// tokens; longer prompts cost more and are estimated low here.
+// tokens and $0.50/$2.50 above that (longContext).
 const PRICING = {
   'claude-fable-5-2': { input: 8, output: 40, cacheRead: 0.20 },
   'claude-fable-5-1': { input: 10, output: 50 },
@@ -27,7 +27,7 @@ const PRICING = {
   'claude-opus-4-6': { input: 5, output: 25 },
   'claude-opus-4': { input: 15, output: 75 },
   'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.10 },
-  'claude-haiku-5-5': { input: 0.10, output: 0.50 },
+  'claude-haiku-5-5': { input: 0.10, output: 0.50, longContext: { over: 100000, input: 0.50, output: 2.50 } },
   'claude-sonnet-5': { input: 3, output: 15 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-sonnet-4': { input: 3, output: 15 },
@@ -70,7 +70,9 @@ function hasPrice(model) {
 
 function estimateCost(model, { inputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0, outputTokens = 0 } = {}) {
   const matched = pricingKey(model);
-  const rate = matched ? resolveRate(matched) : PRICING.default;
+  let rate = matched ? resolveRate(matched) : PRICING.default;
+  const prompt = (inputTokens || 0) + (cacheCreationTokens || 0) + (cacheReadTokens || 0);
+  if (rate.longContext && prompt > rate.longContext.over) rate = rate.longContext;
   // Anthropic billing multipliers for prompt-caching buckets:
   //   cache writes  = 1.25x base input rate
   //   cache reads   = 0.10x base input rate, unless the model sets cacheRead
