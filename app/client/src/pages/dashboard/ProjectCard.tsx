@@ -53,6 +53,11 @@ function timeAgo(iso: string | null | undefined): string {
   return new Date(then).toLocaleDateString();
 }
 
+function openPullsLabel({ count, capped }: { count: number; capped: boolean }): string {
+  if (count === 0) return 'No open pull requests';
+  return `${count}${capped ? '+' : ''} open pull ${count === 1 && !capped ? 'request' : 'requests'}`;
+}
+
 function analyzingStatus(status: string): boolean {
   return status === 'analyzing' || status === 'pending';
 }
@@ -187,6 +192,18 @@ export function ProjectCard({ project }: ProjectCardProps) {
             </p>
           ) : (
             <p>No changes recorded yet</p>
+          )}
+          {project.open_pull_requests && (
+            <p>
+              <a
+                className={styles.link}
+                href={`https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/pulls`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {openPullsLabel(project.open_pull_requests)}
+              </a>
+            </p>
           )}
         </div>
 

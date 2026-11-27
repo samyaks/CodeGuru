@@ -12,6 +12,7 @@ const {
   toCommitSnapshot,
   shapePersonas,
   buildDashboardCard,
+  fetchOpenPullCount,
 } = require('./dashboard-cards');
 
 const FEATURES = `## In a nutshell
@@ -164,4 +165,65 @@ test('buildDashboardCard emits the lean card shape', () => {
   assert.equal(card.last_commit.shortSha, 'abc1234');
   assert.equal(card.features_summary, undefined);
   assert.equal(card.analysis_data, undefined);
+});
+
+const PROJECT = { owner: 'Acme', repo: 'Widgets', repo_url: 'https://github.com/Acme/Widgets' };
+const pullsClient = (impl) => {
+  const calls = [];
+  return { calls, client: { fetchRepoPulls: async (...args) => { calls.push(args); return impl(); } } };
+};
+
+test('fetchOpenPullCount counts open pulls and flags a full page as capped', async () => {
+  const two = pullsClient(() => [{}, {}]);
+  assert.deepEqual(await fetchOpenPullCount(PROJECT, { client: two.client, cache: new Map() }), { count: 2, capped: false });
+  assert.deepEqual(two.calls[0], ['Acme', 'Widgets', { state: 'open', perPage: 100 }]);
+
+  const none = pullsClient(() => []);
+  assert.deepEqual(await fetchOpenPullCount(PROJECT, { client: none.client, cache: new Map() }), { count: 0, capped: false });
+
+  const full = pullsClient(() => Array(100).fill({}));
+  assert.deepEqual(await fetchOpenPullCount(PROJECT, { client: full.client, cache: new Map() }), { count: 100, capped: true });
+});
+
+test('fetchOpenPullCount is unknown, not zero, when GitHub fails or the project is an upload', async () => {
+  const broken = pullsClient(() => { throw new Error('rate limited'); });
+  assert.equal(await fetchOpenPullCount(PROJECT, { client: broken.client, cache: new Map() }), null);
+
+  const upload = pullsClient(() => []);
+  assert.equal(await fetchOpenPullCount({ ...PROJECT, repo_url: 'local://x' }, { client: upload.client }), null);
+  assert.equal(upload.calls.length, 0);
+});
+
+test('fetchOpenPullCount reuses a count until it expires, per repo regardless of case', async () => {
+  let clock = 0;
+  const cache = new Map();
+  const gh = pullsClient(() => [{}]);
+  const opts = { client: gh.client, cache, now: () => clock };
+  await fetchOpenPullCount(PROJECT, opts);
+  await fetchOpenPullCount({ ...PROJECT, owner: 'acme', repo: 'widgets' }, opts);
+  assert.equal(gh.calls.length, 1);
+  clock = 5 * 60 * 1000 + 1;
+  await fetchOpenPullCount(PROJECT, opts);
+  assert.equal(gh.calls.length, 2);
+});
+
+test('fetchOpenPullCount reads through the project’s own GitHub client by default', async (t) => {
+  const urls = [];
+  const realFetch = global.fetch;
+  t.after(() => { global.fetch = realFetch; });
+  global.fetch = async (url) => {
+    urls.push(String(url));
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => [{}] };
+  };
+  assert.deepEqual(await fetchOpenPullCount(PROJECT, { cache: new Map() }), { count: 1, capped: false });
+  // The project client may check the repo's visibility first.
+  assert.ok(urls.some((u) => /\/repos\/Acme\/Widgets\/pulls\?state=open/.test(u)), urls.join(' '));
+});
+
+test('fetchOpenPullCount does not share a cached count across GitHub identities', async () => {
+  const cache = new Map();
+  const gh = pullsClient(() => [{}]);
+  await fetchOpenPullCount({ ...PROJECT, github_installation_id: 7 }, { client: gh.client, cache });
+  await fetchOpenPullCount(PROJECT, { client: gh.client, cache });
+  assert.equal(gh.calls.length, 2);
 });

@@ -13,6 +13,14 @@ const SUMMARY_MAX = 320;
 const MISSING_PER_CARD = 3;
 const PERSONAS_PER_CARD = 3;
 const COMMIT_FETCH_TIMEOUT_MS = 1500;
+const PULLS_FETCH_TIMEOUT_MS = 1500;
+const PULLS_PAGE_SIZE = 100;
+// The dashboard asks about every project on each load, so counts are reused
+// for a while. A failed lookup is remembered more briefly.
+const PULLS_CACHE_MS = 5 * 60 * 1000;
+const PULLS_FAILURE_CACHE_MS = 60 * 1000;
+const PULLS_CACHE_MAX = 1000;
+const pullsCache = new Map(); // "identity:owner/repo" → { value, expiresAt }
 
 const SUMMARY_FIELDS = [
   'id', 'repo_url', 'owner', 'repo', 'branch', 'status', 'readiness_score',
@@ -216,6 +224,40 @@ async function resolveLastCommits(projects, shippedById) {
   return result;
 }
 
+/**
+ * Open pull requests on a project's repo: `{ count, capped }`, where `capped`
+ * means there are at least `count`. null means unknown (not a GitHub project,
+ * or GitHub didn't answer), which is never shown as zero.
+ */
+async function fetchOpenPullCount(project, {
+  client = null, cache = pullsCache, now = Date.now,
+} = {}) {
+  if (!isGithubProject(project)) return null;
+  // A count read through one GitHub App installation is never served to a
+  // project that reads the same repo some other way.
+  const identity = project.github_installation_id || 'public';
+  const key = `${identity}:${project.owner}/${project.repo}`.toLowerCase();
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > now()) return hit.value;
+
+  let value = null;
+  try {
+    const pulls = await withTimeout(
+      (client || clientForProject(project))
+        .fetchRepoPulls(project.owner, project.repo, { state: 'open', perPage: PULLS_PAGE_SIZE }),
+      PULLS_FETCH_TIMEOUT_MS
+    );
+    if (Array.isArray(pulls)) {
+      value = { count: pulls.length, capped: pulls.length >= PULLS_PAGE_SIZE };
+    }
+  } catch {
+    // Leave the count off the card rather than failing the list.
+  }
+  if (cache.size >= PULLS_CACHE_MAX) cache.clear();
+  cache.set(key, { value, expiresAt: now() + (value ? PULLS_CACHE_MS : PULLS_FAILURE_CACHE_MS) });
+  return value;
+}
+
 function buildDashboardCard(project, extras = {}) {
   const claims = extras.claims || [];
   const personas = extras.personas || [];
@@ -243,6 +285,7 @@ function buildDashboardCard(project, extras = {}) {
       : missingItems.length,
   };
   card.last_commit = extras.lastCommit || null;
+  card.open_pull_requests = extras.openPulls || null;
   return card;
 }
 
@@ -266,7 +309,11 @@ async function enrichProjectsForDashboard(projects) {
   }
   const readsByProject = new Map(readRows.map((row) => [row.project_id, row]));
 
-  const lastCommits = await resolveLastCommits(projects, shippedById);
+  const [lastCommits, openPulls] = await Promise.all([
+    resolveLastCommits(projects, shippedById),
+    Promise.all(projects.map(async (p) => [p.id, await fetchOpenPullCount(p)]))
+      .then((entries) => new Map(entries)),
+  ]);
 
   return projects.map((project) => {
     const claims = claimsByProject.get(project.id) || [];
@@ -288,6 +335,7 @@ async function enrichProjectsForDashboard(projects) {
         ? { title: read.next_title, why: read.next_why || null }
         : null,
       lastCommit: lastCommits.get(project.id) || null,
+      openPulls: openPulls.get(project.id) || null,
     });
   });
 }
@@ -309,6 +357,7 @@ module.exports = {
   pickLastCommit,
   toCommitSnapshot,
   shapePersonas,
+  fetchOpenPullCount,
   buildDashboardCard,
   enrichProjectsForDashboard,
   listDashboardCards,
