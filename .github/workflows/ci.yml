@@ -58,6 +58,8 @@ jobs:
           server/services/code-index/index.test.js
           server/routes/code-index.test.js
           server/services/ask/tools/tools.test.js
+          server/services/ask/agent.test.js
+          server/routes/ask.test.js
 
       - name: TypeScript check (client)
         run: npm run typecheck
@@ -67,7 +69,7 @@ jobs:
 
       - name: Verify server loads
         working-directory: app
-        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); require('./server/routes/agreements'); require('./server/services/agreements/notify'); require('./server/routes/drift'); require('./server/services/drift'); require('./server/routes/overview'); require('./server/services/overview'); require('./server/services/ask/limits'); require('./server/services/ask/config'); require('./server/lib/model-pricing'); require('./server/services/code-index'); require('./server/routes/code-index'); require('./server/services/ask/tools'); console.log('Server modules OK')"
+        run: node -e "require('./server/routes/analyze'); require('./server/routes/reviews'); require('./server/routes/takeoff'); require('./server/routes/deploy'); require('./server/routes/projects'); require('./server/routes/build-story'); require('./server/routes/public-story'); require('./server/routes/product-map'); require('./server/routes/github-app'); require('./server/routes/github-webhook'); require('./server/routes/team'); require('./server/routes/invites'); require('./server/lib/memberships'); require('./server/routes/railway'); require('./server/lib/analysis-access'); require('./server/routes/agreements'); require('./server/services/agreements/notify'); require('./server/routes/drift'); require('./server/services/drift'); require('./server/routes/overview'); require('./server/services/overview'); require('./server/services/ask/limits'); require('./server/services/ask/config'); require('./server/lib/model-pricing'); require('./server/services/code-index'); require('./server/routes/code-index'); require('./server/services/ask/tools'); require('./server/services/ask/prompt'); require('./server/services/ask/citations'); require('./server/services/ask/agent'); require('./server/services/ask/eval-questions'); require('./server/routes/ask'); console.log('Server modules OK')"
 
   docker:
     name: Docker Build

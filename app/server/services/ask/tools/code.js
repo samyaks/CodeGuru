@@ -85,6 +85,13 @@ function codeSource(ctx, ix, path, start, end, text = null) {
   return id;
 }
 
+/** A listed file: it exists at this commit. Its own kind, so it never reads as code that was read. */
+function fileSource(ctx, ix, path) {
+  const id = `file:${path}@${sha12(ix.sha)}`;
+  ctx.addSource(id, { kind: 'file', path, sha: ix.sha, text: null });
+  return id;
+}
+
 /** Lines around the first lines that contain a term. */
 function snippetFor(text, terms, max) {
   const lines = text.split('\n');
@@ -178,7 +185,8 @@ async function listFiles(ctx, input = {}) {
     if (refusedPath(r.path)) continue;
     total += 1;
     if (files.length < LIMITS.listPaths) {
-      files.push({ path: r.path, readable: !r.skipped_reason, size: Number(r.size_bytes) || 0 });
+      // Each listed file can back a claim that it exists (and no more), so it gets a source id.
+      files.push({ source_id: fileSource(ctx, ix, r.path), path: r.path, readable: !r.skipped_reason, size: Number(r.size_bytes) || 0 });
     }
   }
   return {
@@ -187,7 +195,7 @@ async function listFiles(ctx, input = {}) {
     files,
     total_matching: rows.length >= LIMITS.listRows ? `${total}+` : total,
     more: total > files.length,
-    sources: [],
+    sources: files.map((f) => f.source_id),
   };
 }
 

@@ -12,6 +12,8 @@
  *   monthly_budget the project's spend this month, plus what is still held
  *                  back for running answers and for this one, would pass
  *                  monthlyUsd
+ *   user_budget    the same for the person across all their projects, against userMonthlyUsd
+ *   global_budget  the deployment's spend this month would pass globalMonthlyUsd
  *
  * Spend counts in the month its answer started. After a limit is lowered,
  * resetsAt for daily_limit can be early: it is 24h after the oldest
@@ -78,6 +80,19 @@ function decide(usage = {}, { config = askConfig(), now = Date.now() } = {}) {
   if (committed + config.reserveUsd > config.monthlyUsd || spent >= config.monthlyUsd) {
     return { allowed: false, reason: 'monthly_budget', resetsAt: nextMonthStartUtc(nowMs).toISOString(), ...base };
   }
+  // The same, for the person across all their projects and for the deployment.
+  const ceilings = [
+    ['user_budget', config.userMonthlyUsd, usage.spentByUserThisMonth, usage.runningReserveByUser],
+    ['global_budget', config.globalMonthlyUsd, usage.spentAllThisMonth, null],
+  ];
+  for (const [reason, cap, spentRaw, heldRaw] of ceilings) {
+    if (!cap || spentRaw == null) continue;
+    const s = Math.max(0, Number(spentRaw) || 0);
+    const h = Math.max(0, Number(heldRaw) || 0);
+    if (s + h + config.reserveUsd > cap) {
+      return { allowed: false, reason, resetsAt: nextMonthStartUtc(nowMs).toISOString(), ...base };
+    }
+  }
   return { allowed: true, reason: null, resetsAt: null, ...base };
 }
 
@@ -90,6 +105,10 @@ function limitMessage(verdict) {
       return 'You have reached today’s question limit for this project. You can ask again once the oldest question is a day old.';
     case 'monthly_budget':
       return 'This project has used its Ask Takeoff budget for the month. It resets on the first of next month (UTC).';
+    case 'user_budget':
+      return 'You have used your Ask Takeoff budget for the month across your projects. It resets on the first of next month (UTC).';
+    case 'global_budget':
+      return 'Ask Takeoff has reached its budget for the month. It resets on the first of next month (UTC).';
     case 'unpriced_model':
       return 'Ask Takeoff is set up with a model it has no price for, so it is paused.';
     case 'busy':

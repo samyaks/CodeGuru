@@ -175,6 +175,15 @@ test('the owner removes members, members can leave, nobody removes the owner', a
   assert.deepStrictEqual(await members.removeMember({ project, user: owner, memberId: 'kim' }, deps), { removed: true });
 });
 
+test('a member who leaves or is removed loses their Ask threads on that project', async () => {
+  const { deps, project, state } = fakeDb();
+  state.members.push({ project_id: 'p1', user_id: 'sam', labels: ['builder'] });
+  const deleted = [];
+  deps.askThreads = { async deleteForUser(pid, uid) { deleted.push([pid, uid]); return 1; } };
+  await members.removeMember({ project, user: owner, memberId: 'sam' }, deps);
+  assert.deepStrictEqual(deleted, [['p1', 'sam']]);
+});
+
 test('accepting as the owner sets labels without using the invite', async () => {
   const { deps, project, state } = fakeDb();
   const out = await members.createInvite({ project, user: owner, body: { email: 'sam@acme.test' } }, deps);

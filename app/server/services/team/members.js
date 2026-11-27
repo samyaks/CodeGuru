@@ -27,6 +27,7 @@ function defaultDeps() {
   return {
     projectMembers: db.projectMembers,
     projectInvites: db.projectInvites,
+    askThreads: db.askThreads,
     userGithubLinks: db.userGithubLinks,
     deployments: db.deployments,
     memberLabels: db.MEMBER_LABELS,
@@ -427,6 +428,13 @@ async function removeMember({ project, user, memberId }, deps = defaultDeps()) {
   if (!removed) throw AppError.notFound('Member not found');
   // Invites they sent stop working too.
   await deps.projectInvites.revokeByInviter(project.id, memberId);
+  // Their Ask threads hold what they read of the code, so they go too.
+  // Tried twice; nightly retention removes anything left after 90 days.
+  if (deps.askThreads) {
+    await deps.askThreads.deleteForUser(project.id, memberId)
+      .catch(() => deps.askThreads.deleteForUser(project.id, memberId))
+      .catch((err) => console.error(`[team] deleting Ask threads for a removed member failed: ${err.message}`));
+  }
   return { removed: true };
 }
 
