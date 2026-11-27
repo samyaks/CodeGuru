@@ -14,6 +14,8 @@
  *   carry data off to another site when it's shown.
  */
 
+const { FILENAME: PLAN_FILE } = require('@takeoff/cli');
+
 const MAX_PARAGRAPHS = 12;
 const MAX_PARAGRAPH_CHARS = 2000;
 const MAX_IDS_PER_PARAGRAPH = 8;
@@ -77,10 +79,16 @@ function quotesIn(text) {
 const hexOrNull = (sha) => (/^[0-9a-f]{7,40}$/i.test(String(sha || '')) ? String(sha) : null);
 
 /** A link to the file (and lines) at that commit on GitHub; the stored text is never served. */
+function commitUrl(project, rawSha) {
+  const sha = hexOrNull(rawSha);
+  if (!project || !project.owner || !project.repo || !sha) return null;
+  return `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/commit/${sha}`;
+}
+
 function blobUrl(project, meta) {
   const sha = hexOrNull(meta.sha);
   if (!project || !project.owner || !project.repo || !sha || !meta.path) return null;
-  const enc = String(meta.path).split('/').map(encodeURIComponent).join('/');
+  const enc = String(meta.path).split('/').map((s) => encodeURIComponent(s).replace(/'/g, '%27')).join('/');
   const start = Number.isInteger(meta.start) ? meta.start : null;
   const end = Number.isInteger(meta.end) ? meta.end : start;
   return `https://github.com/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.repo)}/blob/${sha}/${enc}${start ? `#L${start}-L${end}` : ''}`;
@@ -91,17 +99,17 @@ function describe(id, meta, project) {
   const base = { id, kind: meta.kind };
   switch (meta.kind) {
     case 'plan':
-      return { ...base, label: `Plan (takeoff.yaml @ ${sha12(meta.sha)})`, area: plain(meta.area, 100), text: plain(meta.text), sha: hexOrNull(meta.sha) };
+      return { ...base, label: `Plan (takeoff.yaml @ ${sha12(meta.sha)})`, area: plain(meta.area, 100), text: plain(meta.text), sha: hexOrNull(meta.sha), url: blobUrl(project, { path: PLAN_FILE, sha: meta.sha }) };
     case 'agreement':
       return { ...base, label: 'Agreement', text: plain(meta.text), status: plain(meta.status, 40) };
     case 'decision':
       return { ...base, label: `Decision on PR #${meta.pr}`, pr: meta.pr };
     case 'pr_check':
-      return { ...base, label: `PR check on #${meta.pr}`, pr: meta.pr, sha: meta.sha || null };
+      return { ...base, label: `PR check on #${meta.pr}`, pr: meta.pr, sha: hexOrNull(meta.sha) };
     case 'capability':
       return { ...base, label: 'Confirmed capability', text: plain(meta.text) };
     case 'commit':
-      return { ...base, label: `Commit ${sha12(meta.sha)}`, sha: hexOrNull(meta.sha) };
+      return { ...base, label: `Commit ${sha12(meta.sha)}`, sha: hexOrNull(meta.sha), url: commitUrl(project, meta.sha) };
     case 'file':
       return { ...base, label: `File in the repo @ ${sha12(meta.sha)}`, path: plain(meta.path, 500), sha: hexOrNull(meta.sha), url: blobUrl(project, meta) };
     case 'code': {

@@ -56,6 +56,12 @@ async function withServer(fn, { config = {}, project = { id: 'p1', user_id: 'u-o
     deployments: { async findById(pid) { return pid === 'p1' ? project : null; } },
     askThreads: s.askThreads,
     askMessages: s.askMessages,
+    projectMembers: {
+      async get(_pid, uid) {
+        if (uid === 'u-bo') throw new Error('db down');
+        return uid === 'u-mia' ? { labels: ['builder'] } : uid === 'u-ann' ? { labels: ['builder', 'creator'] } : null;
+      },
+    },
     config: () => ({ enabled: true, model: 'claude-opus-5-5', dailyPerMember: 30, monthlyUsd: 20, maxRounds: 8, reserveUsd: 1.5, maxRunningPerMember: 2, maxRunningPerProject: 5, modelPriced: true, ...config }),
     createTools: () => ({}),
     async runQuestion(args) {
@@ -129,6 +135,8 @@ test('a member asks, follows up, lists, reads and deletes their own threads', { 
     const list = await call('GET', `${ASK}/threads`, { as: 'mia' });
     assert.strictEqual(list.status, 200);
     assert.deepStrictEqual(list.json.threads.map((t) => t.title), ['How is billing handled?']);
+    assert.strictEqual(list.json.view, 'builder');
+    assert.strictEqual(list.headers.get('cache-control'), 'private, no-store');
 
     const one = await call('GET', `${ASK}/threads/${threadId}`, { as: 'mia' });
     assert.strictEqual(one.status, 200);
@@ -217,4 +225,25 @@ test('history skips unfinished answers and the question being asked; public mess
   const pub = publicMessage({ id: 'm2', role: 'assistant', status: 'done', content: 'a1', usage: { secret: 1 }, cost_usd: 3, error: 'x', claims: null, sources: null });
   assert.deepStrictEqual(Object.keys(pub).sort(), ['content', 'createdAt', 'didntGetTo', 'dropped', 'id', 'notBuilt', 'paragraphs', 'planSilent', 'role', 'sources', 'status', 'suggestedAgreement']);
   assert.deepStrictEqual(pub.sources, []);
+});
+
+test('suggested questions follow the person’s labels, and Creator is the default', { skip }, async () => {
+  await withServer(async ({ call }) => {
+    assert.strictEqual((await call('GET', `${ASK}/threads`, { as: 'ann' })).json.view, 'creator');
+    assert.strictEqual((await call('GET', `${ASK}/threads`, { as: 'owner' })).json.view, 'creator');
+    // A labels read that fails still lists the threads.
+    const bo = await call('GET', `${ASK}/threads`, { as: 'bo' });
+    assert.strictEqual(bo.status, 200);
+    assert.strictEqual(bo.json.view, 'creator');
+  });
+});
+
+test('with TAKEOFF_ASK_PROJECTS set, a project not on the list answers 404', { skip }, async () => {
+  await withServer(async ({ call }) => {
+    assert.strictEqual((await call('GET', `${ASK}/threads`, { as: 'owner' })).status, 404);
+    assert.strictEqual((await call('POST', ASK, { as: 'owner', body: { question: 'Hi?' } })).status, 404);
+  }, { config: { projects: ['p2'] } });
+  await withServer(async ({ call }) => {
+    assert.strictEqual((await call('GET', `${ASK}/threads`, { as: 'owner' })).status, 200);
+  }, { config: { projects: ['p2', 'p1'] } });
 });

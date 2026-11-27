@@ -8,12 +8,13 @@
 //
 //   POST   /                 { question, threadId? } -> an event stream:
 //                            started, progress…, answer (or error)
-//   GET    /threads          the caller's threads on this project
+//   GET    /threads          the caller's threads on this project, and which
+//                            suggested questions to show them (view)
 //   GET    /threads/:tid     one thread with its messages
 //   DELETE /threads/:tid
 
 const express = require('express');
-const { deployments, askThreads, askMessages } = require('../lib/db');
+const { deployments, askThreads, askMessages, projectMembers } = require('../lib/db');
 const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { createRateLimit } = require('../lib/rate-limit');
@@ -70,7 +71,7 @@ function historyFrom(rows, excludeIds) {
 
 /**
  * @param {object} [opts]
- * @param {object} [opts.deps] { deployments, askThreads, askMessages, config, runQuestion, createTools, client } overrides (tests)
+ * @param {object} [opts.deps] { deployments, askThreads, askMessages, projectMembers, config, runQuestion, createTools, client } overrides (tests)
  */
 function createAskRoutes({ deps = {} } = {}) {
   const router = express.Router({ mergeParams: true });
@@ -79,6 +80,7 @@ function createAskRoutes({ deps = {} } = {}) {
   const messages = () => deps.askMessages || askMessages;
   const config = () => (deps.config ? deps.config() : askConfig(process.env));
   const runQuestion = (...a) => (deps.runQuestion || require('../services/ask/agent').runQuestion)(...a);
+  const members = () => deps.projectMembers || projectMembers;
   const createTools = deps.createTools || ((project) => require('../services/ask/tools').createAskTools({ project }));
 
   async function loadProject(req) {
@@ -89,13 +91,32 @@ function createAskRoutes({ deps = {} } = {}) {
     // A project with no owner is open to anyone signed in, so Ask never reads its code.
     if (!project.user_id) throw AppError.notFound('Project not found');
     try { checkProjectAccess(project, req); } catch { throw AppError.notFound('Project not found'); }
+    // While Ask is tried out, it may be on for a few projects only. Checked
+    // after access, with the same answer, so it says nothing to outsiders.
+    const only = config().projects;
+    if (Array.isArray(only) && !only.includes(String(project.id))) throw AppError.notFound('Project not found');
     return project;
+  }
+
+  /** Which suggested questions to show: Creator first, as the overview does. Unknown means creator. */
+  async function viewOf(project, userId) {
+    try {
+      const row = await members().get(project.id, userId);
+      const labels = Array.isArray(row && row.labels) ? row.labels : [];
+      return !labels.includes('creator') && labels.includes('builder') ? 'builder' : 'creator';
+    } catch {
+      return 'creator';
+    }
   }
 
   router.get('/threads', readLimit, asyncHandler(async (req, res) => {
     const project = await loadProject(req);
-    const rows = await threads().listForUser(project.id, req.user.id, { limit: 50 });
-    res.json({ threads: rows.map(publicThread) });
+    const [rows, view] = await Promise.all([
+      threads().listForUser(project.id, req.user.id, { limit: 50 }),
+      viewOf(project, req.user.id),
+    ]);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ threads: rows.map(publicThread), view });
   }));
 
   router.get('/threads/:tid', readLimit, asyncHandler(async (req, res) => {
@@ -103,6 +124,7 @@ function createAskRoutes({ deps = {} } = {}) {
     const thread = await threads().get(project.id, req.user.id, req.params.tid);
     if (!thread) throw AppError.notFound('That conversation was not found.');
     const rows = await messages().listByThread({ projectId: project.id, userId: req.user.id, threadId: thread.id });
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({ thread: publicThread(thread), messages: rows.map(publicMessage) });
   }));
 

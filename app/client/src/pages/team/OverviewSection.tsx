@@ -7,6 +7,8 @@ import { fetchOverview, type Overview, type OverviewPr, type PendingAgreement, t
 import { AGREEMENTS_CHANGED_EVENT } from './AgreementsSection';
 import { decisionLine } from './DriftSection';
 import { LogLinks, logSentence } from './logLine';
+import { AskAbout } from '../ask/AskSection';
+import { aboutArea } from '../ask/questions';
 import styles from './Team.module.css';
 import { TEAM_CHANGED_EVENT } from './TeamSection';
 
@@ -191,6 +193,9 @@ export function OverviewSection({ projectId }: { projectId: string }) {
                           ? `${a.creators.length === 1 ? 'Creator' : 'Creators'}: ${a.creators.map((c) => c.name || c.email).join(', ')}`
                           : 'No Creator yet, so drift here goes to everyone with write access.'}
                       </span>
+                    </div>
+                    <div className={styles.actions}>
+                      <AskAbout projectId={projectId} question={aboutArea(a.name)} className="type-small" />
                     </div>
                   </li>
                 ))}

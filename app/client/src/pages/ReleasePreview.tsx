@@ -11,6 +11,7 @@ import { TeamSection } from './team/TeamSection';
 import { AgreementsSection } from './team/AgreementsSection';
 import { DriftSection } from './team/DriftSection';
 import { OverviewSection } from './team/OverviewSection';
+import { AskSection } from './ask/AskSection';
 import styles from './ReleasePreview.module.css';
 
 // Release 11.15.26: the new project page reads real data (launch checks,
@@ -73,6 +74,7 @@ export function ReleaseProject() {
         team={user && id ? (
           <>
             <OverviewSection projectId={id} />
+            <AskSection projectId={id} />
             <DriftSection projectId={id} />
             <AgreementsSection projectId={id} />
             <TeamSection projectId={id} />

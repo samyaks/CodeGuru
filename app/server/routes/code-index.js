@@ -11,7 +11,7 @@ const { AppError } = require('../lib/app-error');
 const { asyncHandler } = require('../lib/async-handler');
 const { createRateLimit } = require('../lib/rate-limit');
 const { checkProjectAccess, checkProjectOwner } = require('../lib/helpers');
-const { isAskEnabled } = require('../services/ask/config');
+const { isAskEnabled, isAskEnabledFor } = require('../services/ask/config');
 
 const byUser = (req) => req.user?.id || req.ip;
 const readLimit = createRateLimit({ windowMs: 60000, max: 60, keyFn: byUser, message: 'Too many requests. Try again in a minute.' });
@@ -45,7 +45,8 @@ function createCodeIndexRoutes({ deps = {} } = {}) {
   const projects = () => deps.deployments || deployments;
   const store = () => deps.store || codeIndex;
   const index = () => deps.index || require('../services/code-index').getCodeIndex();
-  const enabled = () => (deps.enabled ? deps.enabled() : isAskEnabled(process.env));
+  // Without a project: Ask is on at all. With one: Ask is on for it (TAKEOFF_ASK_PROJECTS may limit it).
+  const enabled = (project) => (deps.enabled ? deps.enabled(project) : project ? isAskEnabledFor(project, process.env) : isAskEnabled(process.env));
 
   async function loadProject(req) {
     if (!req.user) throw AppError.unauthorized('Sign in to see this project.');
@@ -55,12 +56,13 @@ function createCodeIndexRoutes({ deps = {} } = {}) {
     // A project with no owner is public to read, but has no code index.
     if (!project.user_id) throw AppError.notFound('This project has no code index.');
     checkProjectAccess(project, req);
+    if (!enabled(project)) throw AppError.notFound('This project has no code index.');
     return project;
   }
 
   router.get('/', readLimit, asyncHandler(async (req, res) => {
     const project = await loadProject(req);
-    res.set('Cache-Control', 'private, no-store');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json(publicStatus(await store().status(project.id)));
   }));
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Button } from '../../components/takeoff';
 import { cx } from '../../components/takeoff/status';
 import { ApiError } from '../../lib/api-error';
@@ -13,6 +13,7 @@ import {
   type AgreementList,
   type Person,
 } from '../../services/agreementsApi';
+import { takeProposal } from '../ask/handoff';
 import styles from './Team.module.css';
 import { TEAM_CHANGED_EVENT } from './TeamSection';
 
@@ -112,6 +113,23 @@ export function AgreementsSection({ projectId }: { projectId: string }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  // "Propose as agreement" in an Ask answer leaves its text here. It only
+  // fills the form: the person reads it and presses Propose themselves.
+  const textBox = useRef<HTMLTextAreaElement>(null);
+  const arrivedFor = useRef<string | null>(null);
+  const loaded = !!data;
+  useEffect(() => {
+    if (!loaded || arrivedFor.current === projectId) return;
+    arrivedFor.current = projectId;
+    const left = takeProposal(projectId);
+    if (left) setText((cur) => cur || left);
+    if (!left && window.location.hash !== '#agreements-title') return;
+    window.requestAnimationFrame(() => {
+      document.getElementById('agreements-title')?.scrollIntoView({ block: 'start' });
+      if (left) textBox.current?.focus({ preventScroll: true });
+    });
+  }, [loaded, projectId]);
+
   // Confirming a recommendation under the team list commits an agreement.
   useEffect(() => {
     // Removing someone can complete a proposal; that settles just after, so look twice.
@@ -190,6 +208,7 @@ export function AgreementsSection({ projectId }: { projectId: string }) {
           <form className={styles.invite} onSubmit={onPropose}>
             <label htmlFor={textId} className="type-heading">Propose an agreement</label>
             <textarea
+              ref={textBox}
               id={textId}
               className={cx('type-body', styles.input)}
               value={text}

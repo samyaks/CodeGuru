@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const { decide, limitMessage, nextMonthStartUtc } = require('./limits');
-const { askConfig, isAskEnabled, DEFAULTS } = require('./config');
+const { askConfig, isAskEnabled, isAskEnabledFor, DEFAULTS } = require('./config');
 
 const ON = { ...askConfig({}), enabled: true };
 const NOW = Date.UTC(2026, 10, 27, 12, 0, 0); // 2026-11-27T12:00Z
@@ -131,4 +131,18 @@ test('a person and the deployment have monthly ceilings across projects', () => 
   assert.strictEqual(v.reason, 'global_budget');
   assert.match(limitMessage({ reason: 'user_budget' }), /across your projects/);
   assert.match(limitMessage({ reason: 'global_budget' }), /reached its budget/);
+});
+
+test('TAKEOFF_ASK_PROJECTS limits Ask to the listed projects', () => {
+  const on = { TAKEOFF_ASK_ENABLED: '1' };
+  assert.strictEqual(isAskEnabledFor({ id: 'p1' }, on), true);
+  assert.strictEqual(askConfig(on).projects, null);
+  const listed = { ...on, TAKEOFF_ASK_PROJECTS: ' p2 , p1 ,' };
+  assert.deepStrictEqual(askConfig(listed).projects, ['p2', 'p1']);
+  assert.strictEqual(isAskEnabledFor({ id: 'p1' }, listed), true);
+  assert.strictEqual(isAskEnabledFor({ id: 'p3' }, listed), false);
+  assert.strictEqual(isAskEnabledFor({ id: 'p1' }, { TAKEOFF_ASK_PROJECTS: 'p1' }), false);
+  assert.strictEqual(isAskEnabledFor(null, listed), false);
+  // Set but holding no ids: no project.
+  assert.strictEqual(isAskEnabledFor({ id: 'p1' }, { ...on, TAKEOFF_ASK_PROJECTS: ' , ' }), false);
 });

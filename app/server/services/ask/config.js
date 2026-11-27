@@ -3,6 +3,8 @@
  * so tests and a restart pick up changes without a code edit.
  *
  *   TAKEOFF_ASK_ENABLED        '1' or 'true' turns Ask on. Off by default.
+ *   TAKEOFF_ASK_PROJECTS       optional comma-separated project ids; when set, Ask
+ *                              (and its code index) runs for those projects only
  *   TAKEOFF_ASK_MODEL          model id, default claude-opus-5-5
  *   TAKEOFF_ASK_DAILY_PER_MEMBER  questions per member per project per rolling 24h (30)
  *   TAKEOFF_ASK_MONTHLY_USD    spend per project per calendar month, UTC (20)
@@ -46,10 +48,25 @@ function isAskEnabled(env = process.env) {
   return v === '1' || v === 'true';
 }
 
+/** The project ids Ask is limited to, or null when it isn't limited. */
+function askProjects(env = process.env) {
+  const raw = String(env.TAKEOFF_ASK_PROJECTS || '').trim();
+  if (!raw) return null;
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Ask is on and, when TAKEOFF_ASK_PROJECTS is set, this project is on the list. */
+function isAskEnabledFor(project, env = process.env) {
+  if (!isAskEnabled(env) || !project || project.id == null) return false;
+  const list = askProjects(env);
+  return !list || list.includes(String(project.id));
+}
+
 function askConfig(env = process.env) {
   const model = String(env.TAKEOFF_ASK_MODEL || '').trim() || DEFAULTS.model;
   return {
     enabled: isAskEnabled(env),
+    projects: askProjects(env),
     model,
     dailyPerMember: positive(env.TAKEOFF_ASK_DAILY_PER_MEMBER, DEFAULTS.dailyPerMember, { integer: true }),
     monthlyUsd: positive(env.TAKEOFF_ASK_MONTHLY_USD, DEFAULTS.monthlyUsd),
@@ -67,4 +84,4 @@ function askConfig(env = process.env) {
   };
 }
 
-module.exports = { DEFAULTS, isAskEnabled, askConfig };
+module.exports = { DEFAULTS, isAskEnabled, isAskEnabledFor, askProjects, askConfig };
